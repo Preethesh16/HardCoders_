@@ -43,6 +43,9 @@ export interface ApiConfig {
     readonly model: string;
     readonly apiKey?: string;
   };
+  readonly regulations: {
+    readonly refreshMode: 'fixture' | 'live';
+  };
   readonly algorand: {
     readonly mode: 'executor' | 'simulated';
     readonly executorUrl?: string;
@@ -229,6 +232,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       baseUrl: text(env, 'OPENAI_BASE_URL') ?? 'https://api.openai.com/v1',
       model: text(env, 'OPENAI_MODEL') ?? 'gpt-4.1-mini',
       ...(openAiKey === undefined ? {} : { apiKey: openAiKey }),
+    },
+    regulations: {
+      refreshMode: choice(env, 'REGULATION_REFRESH_MODE', ['fixture', 'live'] as const, 'live'),
     },
     algorand: {
       mode: algorandMode,

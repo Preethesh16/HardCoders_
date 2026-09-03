@@ -33,12 +33,28 @@ export const CreateJobBody = Type.Object({
   title: Type.String({ minLength: 4, maxLength: 200 }),
   description: Type.String({ minLength: 20, maxLength: 8_000 }),
   skills: Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { minItems: 1, maxItems: 24 }),
+  acceptanceCriteria: Type.Optional(Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
+    minItems: 1,
+    maxItems: 32,
+    uniqueItems: true,
+  })),
+  targetDeliveryDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
   destinationCountry: CountryCodeSchema,
   budget: MoneyInput,
 }, { additionalProperties: false });
 
 export const CreateApplicationBody = Type.Object({
   coverLetter: Type.String({ minLength: 20, maxLength: 8_000 }),
+  approach: Type.Optional(Type.String({ minLength: 20, maxLength: 8_000 })),
+  proposedSkills: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 64 }), {
+    minItems: 1,
+    maxItems: 24,
+    uniqueItems: true,
+  })),
+  proposedPrice: Type.Optional(MoneyInput),
+  deliveryDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 730 })),
+  deliveryDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+  availability: Type.Optional(Type.String({ minLength: 3, maxLength: 500 })),
   resumeObjectId: Type.Optional(IdentifierSchema),
 }, { additionalProperties: false });
 
@@ -54,6 +70,26 @@ export const SelectApplicationBody = Type.Object({
 export const ApproveContractBody = Type.Object({
   party: Type.Union([Type.Literal('BUYER'), Type.Literal('PROVIDER')]),
   acceptedTermsHash: Sha256Schema,
+}, { additionalProperties: false });
+
+const AgreementTermList = Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
+  maxItems: 32,
+  uniqueItems: true,
+});
+
+export const PrepareAgreementBody = Type.Object({
+  policies: AgreementTermList,
+  legalClauses: Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
+    minItems: 1,
+    maxItems: 32,
+    uniqueItems: true,
+  }),
+  acceptanceCriteria: Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
+    minItems: 1,
+    maxItems: 32,
+    uniqueItems: true,
+  }),
+  commercialTerms: AgreementTermList,
 }, { additionalProperties: false });
 
 export const VerifyCredentialBody = Type.Object({
@@ -143,6 +179,7 @@ export const HealthSchema = Type.Object({
   adapters: Type.Object({
     storage: Type.String(),
     ai: Type.String(),
+    regulations: Type.String(),
     fx: Type.String(),
     algorand: Type.String(),
     fabric: Type.String(),

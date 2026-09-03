@@ -58,7 +58,9 @@ export class MemoryObjectStore implements ObjectStore {
   async signedDownloadUrl(objectKey: string, ttlSeconds: number, now: Date): Promise<SignedUrl> {
     if (!this.#objects.has(objectKey)) throw notFound(`No stored object for key ${objectKey}.`);
     const expiresAt = new Date(now.getTime() + ttlSeconds * 1_000);
-    const token = Buffer.from(`${objectKey} ${expiresAt.toISOString()}`, 'utf8').toString('base64url');
+    // The memory profile URL is only a demonstration handle. Hash the scoped
+    // input so even a curious client cannot decode the internal object key.
+    const token = sha256Bytes(Buffer.from(`${objectKey} ${expiresAt.toISOString()}`, 'utf8')).slice(7);
     return {
       url: `/v1/objects/${encodeURIComponent(token)}`,
       expiresAt: expiresAt.toISOString(),

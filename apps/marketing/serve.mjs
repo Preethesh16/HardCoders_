@@ -10,7 +10,15 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { stepList, resetRun, runStep, currentRun } from "./workflow.mjs";
+import {
+  stepList,
+  resetRun,
+  runStep,
+  runAction,
+  currentRun,
+  agreementAccess,
+  submissionAccess,
+} from "./workflow.mjs";
 
 function sendJson(res, status, payload) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -76,6 +84,27 @@ async function proxyToApi(req, res, path, init = {}) {
   }
 }
 
+function safeDownloadName(value, fallback) {
+  const cleaned = String(value ?? fallback).replace(/[^a-zA-Z0-9._-]/gu, "_").slice(0, 120);
+  return cleaned || fallback;
+}
+
+async function streamPrivateObject(access, res, fallbackName) {
+  const signedUrl = access?.url ?? access?.access?.url;
+  if (typeof signedUrl !== "string") throw new Error("The storage service returned no download URL.");
+  const upstream = await fetch(new URL(signedUrl, API_BASE_URL));
+  if (!upstream.ok) throw new Error(`Private object download failed (HTTP ${upstream.status}).`);
+  const contentType = access?.contentType ?? upstream.headers.get("content-type") ?? "application/octet-stream";
+  const fileName = safeDownloadName(access?.fileName, fallbackName);
+  res.writeHead(200, {
+    "Content-Type": contentType,
+    "Content-Disposition": `attachment; filename="${fileName}"`,
+    "Cache-Control": "private, no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  res.end(Buffer.from(await upstream.arrayBuffer()));
+}
+
 const server = createServer(async (req, res) => {
   const requestPath = new URL(req.url, `http://${HOST}`).pathname;
 
@@ -112,6 +141,33 @@ const server = createServer(async (req, res) => {
       sendJson(res, result.ok ? 200 : 422, result);
     } catch (error) {
       sendJson(res, 400, { ok: false, error: String(error.message ?? error) });
+    }
+    return;
+  }
+  const actionMatch = /^\/api\/workflow\/action\/([a-z-]+)$/.exec(requestPath);
+  if (actionMatch && req.method === "POST") {
+    try {
+      const result = await runAction(actionMatch[1], await readJson(req));
+      sendJson(res, result.ok ? 200 : 422, result);
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: String(error.message ?? error) });
+    }
+    return;
+  }
+  if (requestPath === "/api/workflow/agreement/download" && req.method === "GET") {
+    try {
+      const role = new URL(req.url, `http://${HOST}`).searchParams.get("role") === "freelancer" ? "freelancer" : "company";
+      await streamPrivateObject(await agreementAccess(role), res, "anchor-agreement.txt");
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  if (requestPath === "/api/workflow/submission/download" && req.method === "GET") {
+    try {
+      await streamPrivateObject(await submissionAccess(), res, "anchor-deliverable.bin");
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
     }
     return;
   }

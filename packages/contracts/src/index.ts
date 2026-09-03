@@ -13,6 +13,49 @@ export const MoneySchema = Type.Object({
   scale: Type.Integer({ minimum: 0, maximum: 8 }),
 }, { additionalProperties: false });
 
+export const WorkProposalSchema = Type.Object({
+  coverLetter: Type.String({ minLength: 20, maxLength: 8_000 }),
+  approach: Type.String({ minLength: 20, maxLength: 8_000 }),
+  proposedSkills: Type.Array(Type.String({ minLength: 1, maxLength: 64 }), {
+    minItems: 1,
+    maxItems: 24,
+    uniqueItems: true,
+  }),
+  proposedPrice: MoneySchema,
+  deliveryDays: Type.Integer({ minimum: 1, maximum: 730 }),
+  deliveryDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+  availability: Type.String({ minLength: 3, maxLength: 500 }),
+}, { additionalProperties: false });
+
+const AgreementTermListSchema = Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
+  maxItems: 32,
+  uniqueItems: true,
+});
+
+export const AgreementTermsSchema = Type.Object({
+  policies: AgreementTermListSchema,
+  legalClauses: Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
+    minItems: 1,
+    maxItems: 32,
+    uniqueItems: true,
+  }),
+  acceptanceCriteria: Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
+    minItems: 1,
+    maxItems: 32,
+    uniqueItems: true,
+  }),
+  commercialTerms: AgreementTermListSchema,
+}, { additionalProperties: false });
+
+export const AgreementMetadataSchema = Type.Object({
+  available: Type.Boolean(),
+  version: Type.Integer({ minimum: 0 }),
+  artifactHash: Type.Union([Sha256Schema, Type.Null()]),
+  contractHash: Sha256Schema,
+  contentType: Type.Literal('text/markdown'),
+  fileName: Type.String({ minLength: 1, maxLength: 200 }),
+}, { additionalProperties: false });
+
 export const CorridorDirectionSchema = Type.Union([Type.Literal('INWARD'), Type.Literal('OUTWARD')]);
 export const CorridorStatusSchema = Type.Union([Type.Literal('ACTIVE'), Type.Literal('MANUAL_REVIEW'), Type.Literal('BLOCKED')]);
 
@@ -200,6 +243,9 @@ export const ErrorResponseSchema = Type.Object({
 }, { additionalProperties: false });
 
 export type MoneyDto = Static<typeof MoneySchema>;
+export type WorkProposal = Static<typeof WorkProposalSchema>;
+export type AgreementTerms = Static<typeof AgreementTermsSchema>;
+export type AgreementMetadata = Static<typeof AgreementMetadataSchema>;
 export type CorridorDirection = Static<typeof CorridorDirectionSchema>;
 export type CorridorStatus = Static<typeof CorridorStatusSchema>;
 export type DueDiligenceRule = Static<typeof DueDiligenceRuleSchema>;

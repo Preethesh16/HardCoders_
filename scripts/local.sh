@@ -123,7 +123,7 @@ e2e() {
   "${COMPOSE[@]}" --profile local down --volumes --remove-orphans >/dev/null 2>&1 || true
   deploy_algorand
   render_runtime
-  FX_MODE=fixture AI_MODE=fixture wait_stack
+  FX_MODE=fixture AI_MODE=fixture REGULATION_REFRESH_MODE=fixture wait_stack
   node "${ROOT}/scripts/verify-local-e2e.mjs"
   node "${ROOT}/scripts/verify-fabric-authorization.mjs"
   verify_private_boundaries

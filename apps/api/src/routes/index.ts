@@ -18,6 +18,13 @@ import { listCorridors, resolve } from '../corridor/service.js';
 import { buildQuote } from '../fx/quote.js';
 import { money } from '../money.js';
 import { requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
+import {
+  APPROVED_REGULATION_SOURCES,
+  approvedCorpusHash,
+  explainRegulationRefresh,
+  refreshOfficialRegulations,
+  retrieveRegulations,
+} from '../regulations/index.js';
 import { mutate } from './mutation.js';
 import { demoState, runWalkthrough } from '../demo/walkthrough.js';
 import {
@@ -32,6 +39,7 @@ import {
   EvaluateApplicationBody,
   HealthSchema,
   IdParams,
+  PrepareAgreementBody,
   RecordDocumentBody,
   RefundPaymentBody,
   ResolveCorridorBody,
@@ -67,6 +75,7 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
     adapters: {
       storage: context.objects.mode,
       ai: context.ai.mode,
+      regulations: context.config.regulations.refreshMode,
       fx: context.config.fx.mode,
       algorand: context.escrow.mode,
       fabric: context.fabric.mode,
@@ -89,6 +98,8 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
         title: body.title,
         description: body.description,
         skills: body.skills,
+        ...(body.acceptanceCriteria === undefined ? {} : { acceptanceCriteria: body.acceptanceCriteria }),
+        ...(body.targetDeliveryDate === undefined ? {} : { targetDeliveryDate: body.targetDeliveryDate }),
         destinationCountry: body.destinationCountry,
         budget: money(body.budget.amountMinor, body.budget.currency, body.budget.scale),
       }),
@@ -100,7 +111,11 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
   app.get<{ Params: { id: string } }>('/v1/jobs/:id/applications', {
     schema: { params: IdParams },
   }, async (request) => ({
-    applications: await marketplace.listApplications(principalOf(request), request.params.id),
+    applications: await marketplace.applicationViews(principalOf(request), request.params.id),
+  }));
+
+  app.get('/v1/applications', async (request) => ({
+    applications: await marketplace.myApplications(principalOf(request)),
   }));
 
   app.post<{ Params: { id: string } }>('/v1/jobs/:id/applications', {
@@ -113,8 +128,30 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
       statusCode: 201,
       run: async () => marketplace.apply(principal, request.params.id, {
         coverLetter: body.coverLetter,
+        ...(body.approach === undefined ? {} : { approach: body.approach }),
+        ...(body.proposedSkills === undefined ? {} : { proposedSkills: body.proposedSkills }),
+        ...(body.proposedPrice === undefined ? {} : {
+          proposedPrice: money(
+            body.proposedPrice.amountMinor,
+            body.proposedPrice.currency,
+            body.proposedPrice.scale,
+          ),
+        }),
+        ...(body.deliveryDays === undefined ? {} : { deliveryDays: body.deliveryDays }),
+        ...(body.deliveryDate === undefined ? {} : { deliveryDate: body.deliveryDate }),
+        ...(body.availability === undefined ? {} : { availability: body.availability }),
         ...(body.resumeObjectId === undefined ? {} : { resumeObjectId: body.resumeObjectId }),
       }),
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/v1/jobs/:id/applications/rank', {
+    schema: { params: IdParams, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    return mutate(context, request, reply, principal, {
+      scope: 'applications.rank',
+      run: async () => ({ ranking: await marketplace.rankApplications(principal, request.params.id) }),
     });
   });
 
@@ -170,14 +207,32 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
     });
   });
 
+  app.post<{ Params: { id: string } }>('/v1/contracts/:id/agreement', {
+    schema: { params: IdParams, body: PrepareAgreementBody, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    const body = request.body as Static<typeof PrepareAgreementBody>;
+    return mutate(context, request, reply, principal, {
+      scope: 'contracts.agreement.prepare',
+      run: async () => marketplace.prepareAgreement(principal, request.params.id, body),
+    });
+  });
+
+  app.get<{ Params: { id: string } }>('/v1/contracts/:id/agreement/access', {
+    schema: { params: IdParams, response: errorResponses },
+  }, async (request) => marketplace.agreementAccess(principalOf(request), request.params.id));
+
   app.get<{ Params: { id: string } }>('/v1/contracts/:id', {
     schema: { params: IdParams },
   }, async (request) => {
     const principal = principalOf(request);
     const contract = await marketplace.requireContract(request.params.id);
     requireReadAccess(principal, contract.buyerOrganizationId, contract.providerOrganizationId);
+    const isParty = [contract.buyerOrganizationId, contract.providerOrganizationId]
+      .includes(principal.organizationId);
     return {
-      contract,
+      contract: isParty ? contract : { ...contract, terms: '[PRIVATE AGREEMENT]', agreementTerms: null },
+      agreement: marketplace.agreementMetadata(contract),
       approvals: await marketplace.approvals(contract.id),
       submissions: await submissions.list(contract.id),
       timeline: await context.timeline.forContract(contract.id),
@@ -241,6 +296,82 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
           quotedAt: now,
           ttlSeconds: context.config.fx.quoteTtlSeconds,
         });
+      },
+    });
+  });
+
+  /**
+   * Compare the reviewed regulation corpus with its official publishers.
+   *
+   * A refresh can raise a human-review flag, but it can never rewrite the
+   * executable corridor rules. The optional AI step explains the observation
+   * only; payment compliance remains deterministic and source-versioned.
+   */
+  app.post<{ Params: { id: string } }>('/v1/contracts/:id/regulations/refresh', {
+    schema: { params: IdParams, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    const contract = await marketplace.requireContract(request.params.id);
+    requireReadAccess(principal, contract.buyerOrganizationId, contract.providerOrganizationId);
+    return mutate(context, request, reply, principal, {
+      scope: 'regulations.refresh',
+      run: async () => {
+        const report = context.config.regulations.refreshMode === 'live'
+          ? await refreshOfficialRegulations()
+          : {
+              schemaVersion: '1.0' as const,
+              checkedAt: context.clock.now().toISOString(),
+              approvedCorpusHash: approvedCorpusHash(APPROVED_REGULATION_SOURCES),
+              observations: APPROVED_REGULATION_SOURCES.map((source) => ({
+                sourceId: source.id,
+                approvedVersion: source.approvedVersion,
+                sourceUri: source.sourceUri,
+                checkedAt: context.clock.now().toISOString(),
+                status: 'UNCHANGED' as const,
+                missingMarkers: [],
+                note: 'Deterministic offline acceptance used the reviewed local source record.',
+                advisoryOnly: true as const,
+              })),
+              requiresHumanReview: false,
+              rulesChanged: false as const,
+            };
+        const retrieval = retrieveRegulations({
+          query: 'Poland India cross-border freelancer payment export receipt due diligence value cap separate inward account',
+          bookId: 'PL-IN-INWARD',
+          limit: 5,
+        });
+        const explanation = await explainRegulationRefresh(report, async () => {
+          const unchanged = report.observations.filter((item) => item.status === 'UNCHANGED').length;
+          const review = report.observations.filter((item) => item.status === 'REVIEW_REQUIRED').length;
+          const unavailable = report.observations.filter((item) => item.status === 'UNAVAILABLE').length;
+          const result = await context.ai.evaluate({
+            purpose: 'REGULATORY_EXPLANATION',
+            instruction:
+              'Explain this official-source refresh concisely. Do not invent rules, legal advice, or change the deterministic compliance outcome.',
+            facts: {
+              bookId: 'PL-IN-INWARD',
+              outcome: report.requiresHumanReview ? 'HUMAN_REVIEW_REQUIRED' : 'APPROVED_CORPUS_ACTIVE',
+              unchangedSources: unchanged,
+              reviewRequiredSources: review,
+              unavailableSources: unavailable,
+              approvedCorpusHash: report.approvedCorpusHash,
+            },
+          });
+          return result.summary;
+        });
+        await context.timeline.append({
+          kind: 'REGULATIONS_REFRESHED',
+          actor: { subject: principal.subject, role: principal.roles[0] ?? 'unknown' },
+          contractId: contract.id,
+          detail: {
+            approvedCorpusHash: report.approvedCorpusHash,
+            reportHash: explanation.reportHash,
+            requiresHumanReview: report.requiresHumanReview,
+            rulesChanged: report.rulesChanged,
+            checkedAt: report.checkedAt,
+          },
+        });
+        return { refreshMode: context.config.regulations.refreshMode, report, explanation, retrieval };
       },
     });
   });
@@ -447,7 +578,10 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
       return {
         parties: [
           { key: 'polishCompany', ...seed.polishCompany },
-          { key: 'indianFreelancer', ...seed.indianFreelancer },
+          ...seed.indianFreelancers.map((party, index) => ({
+            key: index === 0 ? 'indianFreelancer' : `indianFreelancer${index + 1}`,
+            ...party,
+          })),
           { key: 'indianCompany', ...seed.indianCompany },
           { key: 'ukSupplier', ...seed.ukSupplier },
           { key: 'providerOperator', ...seed.providerOperator },

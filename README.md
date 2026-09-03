@@ -110,8 +110,13 @@ corepack pnpm demo
 
 Open the integrated experience at [http://127.0.0.1:4175](http://127.0.0.1:4175).
 Choose a role and enter the single-tab **Deal Room** to execute the real
-14-stage journey one authorized decision at a time. The five evaluator dashboards
-remain available at [http://127.0.0.1:3000](http://127.0.0.1:3000).
+role-specific journey. The company publishes a blank brief, compares three
+independent proposals and selects one freelancer; the selected freelancer
+accepts the private agreement and uploads the real deliverable. Only seven
+human decisions are exposed. Screening, official-source review, compliance,
+FX, escrow funding, work validation and release advance automatically and stay
+visible as non-clickable progress. The five evaluator dashboards remain
+available at [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
 ### Full cryptographic proof run
 
@@ -132,7 +137,8 @@ The command starts isolated resources, deploys `OptiUSD-DEMO` and the escrow,
 executes both HTTP journeys, verifies both ledgers, checks cross-organization
 authorization and privacy boundaries, smoke-tests all five dashboards, then
 opens the integrated portal in a real headless browser and completes its
-14-stage role-aware workflow. It leaves the product experience running at
+seven-action role-aware workflow—including private agreement hash verification
+for both parties and an arbitrary binary deliverable round-trip. It leaves the product experience running at
 [http://127.0.0.1:4175](http://127.0.0.1:4175) and the evaluator dashboards at
 [http://127.0.0.1:3000](http://127.0.0.1:3000).
 See the [LocalNet runbook](docs/LOCALNET_RUNBOOK.md) for ports, lifecycle
@@ -203,13 +209,18 @@ The API exposes real workflow commands rather than a single scripted endpoint. R
 ```text
 POST /v1/jobs
 POST /v1/jobs/:id/applications
+GET  /v1/jobs/:id/applications
+POST /v1/jobs/:id/applications/rank
 POST /v1/applications/:id/evaluate
 POST /v1/applications/:id/select
+POST /v1/contracts/:id/agreement
+GET  /v1/contracts/:id/agreement/access
 POST /v1/contracts/:id/approve
 
 POST /v1/credentials/verify
 POST /v1/corridors/resolve
 POST /v1/fx/quotes
+POST /v1/contracts/:id/regulations/refresh
 
 POST /v1/contracts/:id/submissions
 POST /v1/submissions/:id/evaluate
@@ -271,8 +282,9 @@ Test ALGO and TestNet USDC have no monetary value.
 
 | Capability | Status |
 |---|---|
-| Integrated company/freelancer deal room and live 14-stage workflow | ✅ Role-owned actions run against PostgreSQL, MinIO, Fabric and Algorand |
-| Live decision support | ✅ OpenAI advisory agents, Frankfurter reference FX and official RBI source observation, each with visible fallback provenance |
+| Integrated company/freelancer deal room and seven human decisions | ✅ Role-specific controls plus automatic PostgreSQL, MinIO, Fabric and Algorand stages |
+| Multi-applicant hiring and private agreement | ✅ Three independent proposals, advisory ranking, human selection, party-only MinIO document and stable hashes |
+| Live decision support | ✅ OpenAI advisory agents, Frankfurter reference FX and seven official regulation-source observations, each with visible fallback provenance |
 | Five evaluator dashboards and two-corridor browser demonstration | ✅ Runs locally with deterministic AI/FX fixtures |
 | Marketplace, contracts, credentials, compliance, FX, books and timelines | ✅ Implemented, runtime-validated and tested |
 | PostgreSQL and MinIO adapters | ✅ Real local acceptance profile verified |

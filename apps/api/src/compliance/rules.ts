@@ -65,7 +65,7 @@ export const THRESHOLD_RULES: readonly ThresholdRule[] = [
     requiredDocuments: [],
     requiresEnhancedAssurance: false,
     rationale: 'Payments above the per-unit ceiling cannot be processed by a PA-CB in this demonstration.',
-    citation: { ...RBI_PA_CB, section: 'Paragraph 4.2', quote: 'Per unit of goods or services, the value shall not exceed ₹25,00,000.' },
+    citation: { ...RBI_PA_CB, section: 'Annex paragraph 8.2', quote: 'The maximum value per unit of goods / services sold / purchased shall be ₹25,00,000.' },
   },
   {
     code: 'RBI_IMPORT_BUYER_DD',
@@ -77,7 +77,7 @@ export const THRESHOLD_RULES: readonly ThresholdRule[] = [
     requiredDocuments: ['BUYER_DUE_DILIGENCE'],
     requiresEnhancedAssurance: true,
     rationale: 'Import transactions above the threshold require buyer due diligence by the import collection service.',
-    citation: { ...RBI_PA_CB, section: 'Paragraph 4.4', quote: 'For import transactions above ₹2,50,000 per unit, due diligence of the buyer shall be undertaken.' },
+    citation: { ...RBI_PA_CB, section: 'Annex paragraph 4.4', quote: 'In case per unit goods / services imported is more than ₹2,50,000, then the concerned PA-CB shall undertake due diligence of buyer also.' },
   },
 ];
 

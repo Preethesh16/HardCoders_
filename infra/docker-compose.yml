@@ -139,6 +139,7 @@ services:
       # so the offline acceptance gate remains deterministic.
       FX_MODE: ${FX_MODE:-frankfurter}
       AI_MODE: ${AI_MODE:-fixture}
+      REGULATION_REFRESH_MODE: ${REGULATION_REFRESH_MODE:-live}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ALGORAND_MODE: executor
       ALGORAND_NETWORK: localnet

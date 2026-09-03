@@ -26,6 +26,7 @@ export interface SeededParty {
 export interface SeedResult {
   readonly polishCompany: SeededParty;
   readonly indianFreelancer: SeededParty;
+  readonly indianFreelancers: readonly SeededParty[];
   readonly indianCompany: SeededParty;
   readonly ukSupplier: SeededParty;
   readonly providerOperator: SeededParty;
@@ -66,6 +67,28 @@ const PARTIES: readonly PartySpec[] = [
     displayName: 'Bengaluru contract engineer',
     roles: ['freelancer'],
     assuranceLevel: 'BASIC',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-IN-TALENT-2',
+    legalName: 'Kabir Rao Digital Services',
+    country: 'IN',
+    kind: 'FREELANCER',
+    userId: 'USER-IN-FREELANCER-2',
+    displayName: 'Hyderabad full-stack specialist',
+    roles: ['freelancer'],
+    assuranceLevel: 'BASIC',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-IN-TALENT-3',
+    legalName: 'Ananya Sen Technology Studio',
+    country: 'IN',
+    kind: 'FREELANCER',
+    userId: 'USER-IN-FREELANCER-3',
+    displayName: 'Kolkata product engineer',
+    roles: ['freelancer'],
+    assuranceLevel: 'ENHANCED',
     credential: true,
   },
   {
@@ -183,9 +206,15 @@ export async function seedDemo(context: AppContext): Promise<SeedResult> {
     });
   }
 
+  const indianFreelancers = [
+    seeded.get('ORG-IN-TALENT')!,
+    seeded.get('ORG-IN-TALENT-2')!,
+    seeded.get('ORG-IN-TALENT-3')!,
+  ];
   return {
     polishCompany: seeded.get('ORG-PL-NOVA')!,
-    indianFreelancer: seeded.get('ORG-IN-TALENT')!,
+    indianFreelancer: indianFreelancers[0]!,
+    indianFreelancers,
     indianCompany: seeded.get('ORG-IN-IMPORTER')!,
     ukSupplier: seeded.get('ORG-GB-SUPPLIER')!,
     providerOperator: seeded.get('ORG-OPTIWORK-OPS')!,

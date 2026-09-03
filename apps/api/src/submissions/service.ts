@@ -10,7 +10,7 @@
 import { assertTransition } from '@optiwork/domain';
 import type { WorkContractState } from '@optiwork/contracts';
 import type { AppContext } from '../context.js';
-import { conflict, notFound, unprocessable } from '../errors.js';
+import { conflict, forbidden, notFound, unprocessable } from '../errors.js';
 import { documentHashes, uploadedObjects, workContracts, workSubmissions } from '../db/schema.js';
 import { requireOwnership, requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import { ALLOWED_CONTENT_TYPES, MAX_OBJECT_BYTES, objectKeyFor } from '../storage/object-store.js';
@@ -30,6 +30,23 @@ export interface SubmitWorkInput {
 export interface DecideInput {
   readonly decision: 'APPROVED' | 'REVISION_REQUIRED' | 'DISPUTED';
   readonly comment: string;
+}
+
+function decodeBase64(value: string): Buffer {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(value) || value.length % 4 === 1) {
+    throw unprocessable('The deliverable is not valid base64.');
+  }
+  const bytes = Buffer.from(value, 'base64');
+  if (bytes.toString('base64').replace(/=+$/u, '') !== value.replace(/=+$/u, '')) {
+    throw unprocessable('The deliverable is not canonical base64.');
+  }
+  return bytes;
+}
+
+function assertSafeContentType(value: string): void {
+  if (!value.includes('/') || /[\r\n\0]/u.test(value)) {
+    throw unprocessable('The deliverable content type is invalid.');
+  }
 }
 
 export class SubmissionService {
@@ -60,10 +77,11 @@ export class SubmissionService {
     if (!['ESCROW_FUNDED', 'IN_PROGRESS', 'REVISION_REQUIRED'].includes(contract.state)) {
       throw conflict(`Contract ${contractId} is not accepting a submission in state ${contract.state}.`);
     }
-    if (!ALLOWED_CONTENT_TYPES.includes(input.contentType)) {
-      throw unprocessable(`Content type ${input.contentType} is not accepted.`, { allowed: ALLOWED_CONTENT_TYPES });
-    }
-    const bytes = Buffer.from(input.contentBase64, 'base64');
+    // Deliverables may be source archives, design files, media, binaries or
+    // another client-declared type. We constrain control characters and size,
+    // but intentionally do not maintain a brittle MIME allowlist.
+    assertSafeContentType(input.contentType);
+    const bytes = decodeBase64(input.contentBase64);
     if (bytes.byteLength === 0) throw unprocessable('The deliverable is empty.');
     if (bytes.byteLength > MAX_OBJECT_BYTES) {
       throw unprocessable(`The deliverable exceeds ${MAX_OBJECT_BYTES} bytes.`);
@@ -162,7 +180,9 @@ export class SubmissionService {
   async access(principal: Principal, submissionId: string) {
     const submission = await this.requireSubmission(submissionId);
     const contract = await this.requireContract(submission.contractId);
-    requireReadAccess(principal, contract.buyerOrganizationId, contract.providerOrganizationId);
+    if (![contract.buyerOrganizationId, contract.providerOrganizationId].includes(principal.organizationId)) {
+      throw forbidden('The deliverable is available only to its two contract parties.');
+    }
 
     const object = await this.context.store.findOne(uploadedObjects, { id: submission.objectId });
     if (!object) throw notFound('The stored deliverable is missing.');

@@ -101,6 +101,8 @@ export const jobs = pgTable('jobs', {
   title: text('title').notNull(),
   description: text('description').notNull(),
   skills: jsonb('skills').$type<string[]>().notNull(),
+  acceptanceCriteria: jsonb('acceptance_criteria').$type<string[]>(),
+  targetDeliveryDate: varchar('target_delivery_date', { length: 10 }),
   destinationCountry: varchar('destination_country', { length: 2 }).notNull(),
   budgetAmountMinor: minor('budget_amount_minor').notNull(),
   budgetCurrency: currency('budget_currency').notNull(),
@@ -115,6 +117,14 @@ export const applications = pgTable('applications', {
   applicantUserId: ref('applicant_user_id').notNull(),
   applicantOrganizationId: ref('applicant_organization_id').notNull(),
   coverLetter: text('cover_letter').notNull(),
+  approach: text('approach').notNull(),
+  proposedSkills: jsonb('proposed_skills').$type<string[]>().notNull(),
+  proposedAmountMinor: minor('proposed_amount_minor').notNull(),
+  proposedCurrency: currency('proposed_currency').notNull(),
+  proposedScale: smallint('proposed_scale').notNull(),
+  deliveryDays: integer('delivery_days').notNull(),
+  deliveryDate: varchar('delivery_date', { length: 10 }),
+  availability: text('availability').notNull(),
   resumeObjectId: ref('resume_object_id'),
   status: varchar('status', { length: 24 }).notNull(),
   createdAt: instant('created_at').notNull(),
@@ -156,6 +166,15 @@ export const workContracts = pgTable('work_contracts', {
   state: varchar('state', { length: 32 }).notNull(),
   terms: text('terms').notNull(),
   contractHash: hash('contract_hash').notNull(),
+  agreementObjectId: ref('agreement_object_id'),
+  agreementArtifactHash: hash('agreement_artifact_hash'),
+  agreementVersion: integer('agreement_version').notNull().default(0),
+  agreementTerms: jsonb('agreement_terms').$type<{
+    policies: string[];
+    legalClauses: string[];
+    acceptanceCriteria: string[];
+    commercialTerms: string[];
+  }>(),
   milestoneId: ref('milestone_id').notNull(),
   milestoneHash: hash('milestone_hash').notNull(),
   amountMinor: minor('amount_minor').notNull(),
@@ -163,7 +182,7 @@ export const workContracts = pgTable('work_contracts', {
   amountScale: smallint('amount_scale').notNull(),
   createdAt: instant('created_at').notNull(),
   updatedAt: instant('updated_at').notNull(),
-});
+}, (table) => [index('work_contracts_agreement_object_idx').on(table.agreementObjectId)]);
 
 export const contractApprovals = pgTable('contract_approvals', {
   id: id(),

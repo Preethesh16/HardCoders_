@@ -5,7 +5,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('OpenAI advisory adapter', () => {
   it('reads raw Responses API output and uses the configured /v1 endpoint', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({
       model: 'gpt-4.1-mini-test',
       output: [{
         type: 'message',
@@ -27,8 +27,9 @@ describe('OpenAI advisory adapter', () => {
     });
 
     expect(result).toMatchObject({ source: 'OPENAI', model: 'gpt-4.1-mini-test', score: 87, advisoryOnly: true });
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('https://api.openai.com/v1/responses');
-    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const firstCall = fetchMock.mock.calls[0];
+    expect(String(firstCall?.[0])).toBe('https://api.openai.com/v1/responses');
+    const request = JSON.parse(String(firstCall?.[1]?.body));
     expect(request.text.format).toMatchObject({ type: 'json_schema', strict: true });
   });
 });
