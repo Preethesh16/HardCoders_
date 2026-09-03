@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "1.0",
+  "label": "ALGORAND TESTNET — DUMMY FUNDS",
+  "network": "testnet",
+  "genesisId": "testnet-v1.0",
+  "genesisHash": "SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=",
+  "algodUrl": "https://testnet-api.algonode.cloud",
+  "deployedAt": "2026-09-03T18:09:51.588Z",
+  "applicationId": "770960502",
+  "applicationAddress": "KIMSRIRY5C4NO3QQMA74GKWRL63IIBH4M7OPASWIQLJOBKA74TAU3KXLWA",
+  "assetId": "10458941",
+  "assetUnitName": "USDC",
+  "assetSource": "Circle official Algorand TestNet USDC ASA. Zero monetary value; never deployed by this project.",
+  "assetValueStatement": "Zero-value TestNet settlement asset. Not redeemable, not a security, no monetary value.",
+  "publicAddresses": {
+    "deployer": "T3QLUSLZN4UVTRNFYCMCXUG24PGF5JZT5DKM5PPKBZ4S7DUPH4EBPTFIM4",
+    "originProviderTreasury": "QFBSXTFANNSNTJR4Z7NAHXEPTCHZXNHUQWJGCDWKJSW6SBVW4HI5PSBB4A",
+    "ORG-DEST-001": "H4IRR75YXGO4MU3VXRXONJSGB7OKFT5QIP72AU5IKWVIT6Z6MPI5IS3KGE",
+    "ORG-DEST-002": "LGLW4UA4ZOXWQ2AIEWHNDIWJAQCMACFFTQD2CS6FU2DYERMKFPA4KTEAW4",
+    "ORG-DEST-003": "X2C742TUIKIYFADFDAVD2NXEBWGRBWZWZCXMTERN3IS6JH35OA73CZVTEA"
+  },
+  "applicationFundingMicroAlgos": "2000000",
+  "transactions": {
+    "participantFunding": {
+      "originProviderTreasury": "W3KIIFIXYVH57MSBUMJQXLFHYZTHNT3XHOLQJIXSJFXMFVL2Y2SA",
+      "ORG-DEST-001": "7TRBZJ2FW5MORXNX5LLTVAIP6G4UA2HZLOZ4XDCQZE65PWXLRL6Q",
+      "ORG-DEST-002": "PZMC4L635FZVKGEGB2LK2NA7SFDSZRP5UT7TS56RKDP6GA3TD32Q",
+      "ORG-DEST-003": "OUYW2F72K2KHBHNT7MEFLL2COAWDNGNLK4TI3A7PKB7ZL3PF3FWQ"
+    },
+    "settlementAssetOptIns": {
+      "originProviderTreasury": "25Z34BT2XPJ4LGSJZAQ6OFBZY536QKLP3S4PA4THCNMVC6DFP36A",
+      "ORG-DEST-001": "WQOGHOJKFKMJ6XH5HWGE7EX6TKGO5CJQYPCAT5CUC7WS3SIAB2SQ",
+      "ORG-DEST-002": "5AKF3VWOJKL6YHIZVKAVV6Q4WBWYN4P4KQSGUY7GZPLKJU66YL4A",
+      "ORG-DEST-003": "HCBCTG6MVAN6I76USNRNWI7K3UYVABPSVRDJP2JYVMVSABJ7VJ4Q"
+    },
+    "applicationCreate": "Y2X5CG2TKNNBUPR3A4SNF37S72DGICWQU3T5OZCEJLRUJESOBVOA",
+    "applicationFunding": "CEKKSYZVVNIZ7REL3ITBFBJNJCT434KFVV3YLB7ZXDECSDEHCGHA",
+    "applicationAssetOptIn": "PTBBQTEC3GRZU2HR45HQ6UYR2R3NHC4XX3Q2773RPMF4QYZ5MNDQ"
+  },
+  "confirmedRounds": {
+    "applicationCreate": "66951820",
+    "applicationFunding": "66951822",
+    "applicationAssetOptIn": "66951824"
+  },
+  "explorer": {
+    "application": "https://lora.algokit.io/testnet/application/770960502",
+    "asset": "https://lora.algokit.io/testnet/asset/10458941",
+    "applicationAccount": "https://lora.algokit.io/testnet/account/KIMSRIRY5C4NO3QQMA74GKWRL63IIBH4M7OPASWIQLJOBKA74TAU3KXLWA",
+    "deployerAccount": "https://lora.algokit.io/testnet/account/T3QLUSLZN4UVTRNFYCMCXUG24PGF5JZT5DKM5PPKBZ4S7DUPH4EBPTFIM4",
+    "applicationCreateTransaction": "https://lora.algokit.io/testnet/transaction/Y2X5CG2TKNNBUPR3A4SNF37S72DGICWQU3T5OZCEJLRUJESOBVOA"
+  },
+  "publicLifecycleAcceptance": {
+    "verifiedAt": "2026-09-03T18:36:14.000Z",
+    "suite": "pnpm --dir services/algorand-executor test:testnet",
+    "result": "2 files passed; 7 tests passed",
+    "durationMilliseconds": 217500,
+    "assetScale": 6,
+    "releasePath": {
+      "create": { "transactionId": "ETW7AJ7WDUYAGIJUEDRUZNLRI6IKMWSBAV2CBTYYK2HEIEBHUVAA", "confirmedRound": "66952337" },
+      "fund": { "transactionId": "2DVTMADVC6JVS2XTZSJVNQG3HXBCS2HTEKXROADHNOWRRTOWYM5Q", "confirmedRound": "66952342" },
+      "pause": { "transactionId": "2DTRODHUYENB6YL6XXKFQOUI5JPTJTDH6CYNLNUOB3633IC2FZ5A", "confirmedRound": "66952347" },
+      "resume": { "transactionId": "KBTICF5NJHWRGDFPKPUZX7K22PXBEKBO5CS6I2WAQX3WMS7MYBJQ", "confirmedRound": "66952352" },
+      "release": { "transactionId": "T5426Z7ZHRGR5VR5BC7YO52B46PM764DIKYWUQEIRO37CRMFNG3Q", "confirmedRound": "66952357" },
+      "complete": { "transactionId": "MS5DISG46IYZCW53ZP5ZBQW24ZSUG6Y3DUVKL3KOQUPBCNQB3VKA", "confirmedRound": "66952363" }
+    },
+    "refundPath": {
+      "create": { "transactionId": "BTQMQM6P5SVIKBHOIOMHDCLG6UY2XQ7ZKSUVJERDYPYCBRSHOMLA", "confirmedRound": "66952368" },
+      "fund": { "transactionId": "EIV77L6H5MAT3VNRTF4DTF57M2F23FXQSDZI6ZZR6K2GJUMMNQIA", "confirmedRound": "66952373" },
+      "pause": { "transactionId": "MUQRAVBOP23NZIT6YKKVZU5PDXZGFDTNEZOPVAS47XAXS3B73KOA", "confirmedRound": "66952378" },
+      "refund": { "transactionId": "G53LCTJNVBHSZDLMEEITV4DTXT2AWPU4Q6OLOIS4AVR6XZ44TP2Q", "confirmedRound": "66952383" },
+      "complete": { "transactionId": "L5OD5STPBMP36LLX45OM4YQEVAVGZ6KQRAZGVVAANMNH7FKAT7OQ", "confirmedRound": "66952388" }
+    },
+    "recoveryPath": {
+      "create": { "transactionId": "CGY5HRIU7KGWB4P4CDMQ4W3SWJFCLS7TOAUYA5PJKADDA3JLJALA", "confirmedRound": "66952393" },
+      "fund": { "transactionId": "ETH3YU5YTB3R2PNHA2M2AV6D5ZMFKVCC67FVZ3TGPDHQBOEWPNQQ", "confirmedRound": "66952398" },
+      "generationOne": "Signed bytes persisted, deliberately not broadcast, expired, reconciled and abandoned without re-signing.",
+      "generationTwoRelease": { "transactionId": "VN7BHST7TMMIWBGTU3PGKZQLOPCLPUQH7E3F3TEKZND2FY3PFCHA", "confirmedRound": "66952411" }
+    },
+    "finalAssetAccounting": {
+      "originProviderMicroUsdc": "19998500",
+      "destinationProviderMicroUsdc": "1500",
+      "applicationMicroUsdc": "0"
+    },
+    "verifiedInvariants": [
+      "changed Fabric evidence rejected before signing",
+      "destination-provider substitution rejected",
+      "exact command replay created no second transaction",
+      "single-use permit reuse rejected",
+      "expired stranded transaction was never resubmitted",
+      "generation two produced one distinct confirmed release"
+    ]
+  }
+}

@@ -253,6 +253,18 @@ corepack pnpm --filter @optiwork/algorand-executor test:localnet
 corepack pnpm --filter @optiwork/algorand-executor test:testnet
 ```
 
+### Public TestNet proof
+
+Anchor's ARC-4 escrow is deployed on Algorand TestNet as
+[application `770960502`](https://lora.algokit.io/testnet/application/770960502),
+using Circle's official zero-value TestNet USDC
+[ASA `10458941`](https://lora.algokit.io/testnet/asset/10458941). The opt-in
+public lifecycle passed on 4 September 2026, including release, refund, replay
+protection and stranded-transaction recovery. Inspect the confirmed
+[evidence-bound release](https://lora.algokit.io/testnet/transaction/T5426Z7ZHRGR5VR5BC7YO52B46PM764DIKYWUQEIRO37CRMFNG3Q)
+or the sanitized [deployment and acceptance manifest](services/algorand-executor/testnet/deployment-manifest.json).
+Test ALGO and TestNet USDC have no monetary value.
+
 ## Implementation status
 
 | Capability | Status |
@@ -266,12 +278,13 @@ corepack pnpm --filter @optiwork/algorand-executor test:testnet
 | ARC-4 escrow and isolated Algorand executor | ✅ Implemented and tested |
 | Fabric-to-executor release contract | ✅ Cross-service integration tested |
 | Fully automated real Fabric + Algorand LocalNet journeys | ✅ Both corridors complete with confirmed transactions |
-| Public TestNet deployment and production OIDC hardening | ⏭️ Explicitly deferred |
+| Public Algorand TestNet deployment and lifecycle | ✅ App `770960502`; official USDC; explorer-confirmed release/refund/recovery |
+| Production OIDC deployment and custody hardening | ⏭️ Explicitly deferred |
 
 Both paths are free and deterministic. The fast preview is convenient for UI
 evaluation; `local:e2e` is the acceptance path for real local infrastructure and
-blockchain proof. Public TestNet remains opt-in so evaluation never depends on a
-faucet or external service.
+blockchain proof. The public TestNet proof is complete but remains opt-in so
+evaluation never depends on a faucet or external service.
 
 ## Repository map
 

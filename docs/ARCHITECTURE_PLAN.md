@@ -153,7 +153,8 @@ India import/outward requests, not to the inward freelancer payment.
   remain deterministic fixtures. It has zero monetary value and no public
   dependency.
 - `testnet`: the same application shape with isolated provider keys, Algorand
-  TestNet, official test USDC and explorer links. Public deployment and
-  production OIDC are intentionally deferred until the LocalNet gate passes.
+  TestNet, official test USDC and explorer links. Application `770960502` and
+  its release/refund/recovery lifecycle were publicly verified on 4 September
+  2026; the sanitized evidence is tracked in the deployment manifest.
 
-Production/mainnet configuration is intentionally unsupported.
+Production OIDC/custody hardening and MainNet configuration remain unsupported.

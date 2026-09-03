@@ -147,6 +147,12 @@ must not be committed.
    `10458941` but never mints or transfers the asset itself.
 4. Run `pnpm deploy:testnet` with `ALGORAND_DEPLOY_CONFIRM=DEPLOY_TESTNET_ESCROW`.
 
+The current sanitized manifest records TestNet application `770960502`, the
+official USDC asset, deployment transactions, the passing public lifecycle and
+its final asset reconciliation. Run `pnpm test:testnet` to create a fresh set of
+release/refund/recovery proofs; the suite is explicitly opt-in and consumes
+only zero-value TestNet assets.
+
 `testnet/deployment-manifest.legacy-custom-asa.json` records the earlier
 deployment that used a self-minted ASA. It is retained for provenance only and
 does not match the current Circle-USDC policy.

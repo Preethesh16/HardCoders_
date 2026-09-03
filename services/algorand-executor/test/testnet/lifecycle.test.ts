@@ -167,7 +167,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
         originProviderAddress: accounts.originProviderTreasury.address,
         destinationProviderAddress: destinationProvider.address,
         assetId: Number(assetId),
-        amount: { amountMinor: "1000", currency: "USD", scale: 2 },
+        amount: { amountMinor: "1000", currency: "USD", scale: 6 },
       },
     };
 
@@ -187,15 +187,6 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
 
     await run({ action: "fund", method: "POST", path: `/escrows/${dealA}/fund`, idempotencyKey: `TESTNET-FUND-A-${stamp}`, body: null });
 
-    // A permit whose Fabric state moved after issuance must be refused.
-    const stalePause: CommandContext = {
-      action: "pause", method: "POST", path: `/escrows/${dealA}/pause`,
-      idempotencyKey: `TESTNET-STALE-PAUSE-${stamp}`, body: null,
-    };
-    const stalePermit = await signedPermit(stalePause, reader, signer);
-    reader.tamper(stalePermit.paths[0]!);
-    await expect(service.mutate(stalePause, stalePermit.compact)).rejects.toThrow(/Fabric state changed/u);
-
     await run({ action: "pause", method: "POST", path: `/escrows/${dealA}/pause`, idempotencyKey: `TESTNET-PAUSE-A-${stamp}`, body: null });
     await run({ action: "resume", method: "POST", path: `/escrows/${dealA}/resume`, idempotencyKey: `TESTNET-RESUME-A-${stamp}`, body: null });
 
@@ -212,12 +203,19 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
       idempotencyKey: `TESTNET-RELEASE-A-${stamp}`,
       workEvidenceHash: seedApprovedEvidence(
         evidenceReader, dealA, `MS-TESTNET-001-${stamp}`, `FABRIC-TESTNET-CLAIM-001-${stamp}`,
+        { evidenceId: "EVIDENCE-TEST-001" },
       ),
     });
     const releaseCommandA: CommandContext = {
       action: "release", method: "POST", path: `/escrows/${dealA}/releases`,
       idempotencyKey: `TESTNET-RELEASE-A-${stamp}`, body: releaseA,
     };
+    // Lifecycle permits intentionally carry zero Fabric reads. A release
+    // permit carries the single approved-evidence read and must fail if that
+    // evidence changes after issuance.
+    const stalePermit = await signedPermit(releaseCommandA, reader, signer);
+    reader.tamper(stalePermit.paths[0]!);
+    await expect(service.mutate(releaseCommandA, stalePermit.compact)).rejects.toThrow(/Fabric state changed/u);
     const released = await run(releaseCommandA) as { escrow: Escrow; transactionId: string; replay: boolean };
     expect(released).toMatchObject({ replay: false, escrow: { state: "COMPLETED", lockedMinor: "0", releasedMinor: "1000" } });
     expect(released.transactionId).toMatch(/^[A-Z2-7]{52}$/u);
@@ -252,7 +250,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
         originProviderAddress: accounts.originProviderTreasury.address,
         destinationProviderAddress: destinationProvider.address,
         assetId: Number(assetId),
-        amount: { amountMinor: "700", currency: "USD", scale: 2 },
+        amount: { amountMinor: "700", currency: "USD", scale: 6 },
       },
     });
     await run({ action: "fund", method: "POST", path: `/escrows/${dealB}/fund`, idempotencyKey: `TESTNET-FUND-B-${stamp}`, body: null });
@@ -290,7 +288,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
         originProviderAddress: accounts.originProviderTreasury.address,
         destinationProviderAddress: destinationProvider.address,
         assetId: Number(assetId),
-        amount: { amountMinor: "500", currency: "USD", scale: 2 },
+        amount: { amountMinor: "500", currency: "USD", scale: 6 },
       },
     });
     await run({ action: "fund", method: "POST", path: `/escrows/${dealC}/fund`, idempotencyKey: `TESTNET-FUND-C-${stamp}`, body: null });
@@ -324,6 +322,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
       idempotencyKey: `TESTNET-RELEASE-RECOVERY-N-${stamp}`,
       workEvidenceHash: seedApprovedEvidence(
         evidenceReader, dealC, `MS-TESTNET-RECOVERY-${stamp}`, `FABRIC-TESTNET-RECOVERY-N-${stamp}`,
+        { evidenceId: "EVIDENCE-TEST-001" },
       ),
     });
     const releaseCommandN: CommandContext = {
@@ -366,6 +365,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
       idempotencyKey: `TESTNET-RELEASE-RECOVERY-N1-${stamp}`,
       workEvidenceHash: seedApprovedEvidence(
         evidenceReader, dealC, releaseN.milestoneId, `FABRIC-TESTNET-RECOVERY-N1-${stamp}`,
+        { evidenceId: "EVIDENCE-TEST-001" },
       ),
     });
     const releaseCommandNext: CommandContext = {
