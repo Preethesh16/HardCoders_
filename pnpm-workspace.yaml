@@ -3,6 +3,9 @@ packages:
   - packages/*
   - services/*
 
+# Native postinstall builds are opt-in. Only these three are approved, and each
+# is a build-time toolchain rather than anything the running service loads.
 allowBuilds:
+  '@tailwindcss/oxide': true
   esbuild: true
   unrs-resolver: true

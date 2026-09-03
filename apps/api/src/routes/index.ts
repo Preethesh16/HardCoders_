@@ -19,6 +19,7 @@ import { buildQuote } from '../fx/quote.js';
 import { money } from '../money.js';
 import { requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import { mutate } from './mutation.js';
+import { demoState, runWalkthrough } from '../demo/walkthrough.js';
 import {
   ApproveContractBody,
   CreateApplicationBody,
@@ -379,6 +380,55 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
       },
     });
   });
+
+  // ---- demonstration -----------------------------------------------------
+
+  /**
+   * Runs the two journeys end to end through the same services the HTTP routes
+   * use, then exposes the resulting read model. Both are available only in the
+   * demo profile: a hosted deployment must never be able to script a payment.
+   */
+  if (context.config.profile === 'demo') {
+    app.post('/v1/demo/walkthrough', async (request, reply) => {
+      const principal = principalOf(request);
+      requireRole(principal, 'platform_admin');
+      return mutate(context, request, reply, principal, {
+        scope: 'demo.walkthrough',
+        run: async () => {
+          const result = await runWalkthrough(context);
+          return { journeys: result.journeys, issuerDid: result.seed.issuerDid };
+        },
+      });
+    });
+
+    app.get('/v1/demo/state', async (request) => {
+      const principal = principalOf(request);
+      requireRole(principal, 'platform_admin', 'audit_service', 'provider_operator');
+      return demoState(context);
+    });
+
+    /**
+     * The demonstration principals, so a reviewer can act as each party without
+     * an identity provider. These are local principal tokens, not credentials,
+     * and the route does not exist outside the demo profile.
+     */
+    app.get('/v1/demo/principals', async (request) => {
+      const principal = principalOf(request);
+      requireRole(principal, 'platform_admin');
+      const { seedDemo } = await import('../demo/seed.js');
+      const seed = await seedDemo(context);
+      return {
+        parties: [
+          { key: 'polishCompany', ...seed.polishCompany },
+          { key: 'indianFreelancer', ...seed.indianFreelancer },
+          { key: 'indianCompany', ...seed.indianCompany },
+          { key: 'ukSupplier', ...seed.ukSupplier },
+          { key: 'providerOperator', ...seed.providerOperator },
+          { key: 'platformAdmin', ...seed.platformAdmin },
+        ],
+      };
+    });
+  }
 
   // ---- audit -------------------------------------------------------------
 

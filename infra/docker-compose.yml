@@ -1,0 +1,178 @@
+# OptiWork local infrastructure.
+#
+# Profiles let you start only what a given demonstration needs:
+#
+#   docker compose --profile data up -d          PostgreSQL, MinIO, Keycloak
+#   docker compose --profile app up -d           the API, the web app
+#   docker compose --profile settlement up -d    the Algorand executor
+#   docker compose --profile full up -d          everything above
+#
+# The Hyperledger Fabric network is owned by a separate workstream and is
+# deliberately not defined here.
+#
+# Nothing in this file is production configuration. Every credential below is a
+# well-known local development value; a hosted deployment must supply its own
+# through a secret manager and must not reuse any of them.
+
+name: optiwork
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    profiles: [data, full]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-optiwork}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-optiwork-local-development}
+      POSTGRES_DB: ${POSTGRES_DB:-optiwork}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-optiwork} -d ${POSTGRES_DB:-optiwork}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    profiles: [data, full]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-optiwork}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-optiwork-local-development}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Creates the document bucket once, then exits. Object keys are opaque and no
+  # bucket is ever public: the API hands out short-lived signed URLs instead.
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    profiles: [data, full]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-optiwork} ${MINIO_ROOT_PASSWORD:-optiwork-local-development} &&
+      mc mb --ignore-existing local/${S3_BUCKET:-optiwork-documents} &&
+      mc anonymous set none local/${S3_BUCKET:-optiwork-documents}
+      "
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    profiles: [data, full]
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-optiwork-local-development}
+      KC_HTTP_PORT: 8080
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PORT:-18080}:8080"
+    volumes:
+      - ./keycloak/realm-optiwork.json:/opt/keycloak/data/import/realm-optiwork.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\nhost: localhost\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  api:
+    profiles: [app, full]
+    build:
+      context: ..
+      dockerfile: infra/api.Dockerfile
+    environment:
+      OPTIWORK_PROFILE: ${OPTIWORK_PROFILE:-local}
+      API_HOST: 0.0.0.0
+      API_PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-optiwork}:${POSTGRES_PASSWORD:-optiwork-local-development}@postgres:5432/${POSTGRES_DB:-optiwork}
+      AUTH_MODE: ${AUTH_MODE:-demo}
+      OIDC_ISSUER: http://keycloak:8080/realms/optiwork
+      OIDC_AUDIENCE: optiwork-api
+      OIDC_JWKS_URI: http://keycloak:8080/realms/optiwork/protocol/openid-connect/certs
+      STORAGE_MODE: ${STORAGE_MODE:-s3}
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: ${S3_BUCKET:-optiwork-documents}
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-optiwork}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-optiwork-local-development}
+      FX_MODE: ${FX_MODE:-fixture}
+      AI_MODE: ${AI_MODE:-fixture}
+      # Supply OPENAI_API_KEY through the environment or a secret manager only.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ALGORAND_MODE: ${ALGORAND_MODE:-simulated}
+      ALGORAND_NETWORK: ${ALGORAND_NETWORK:-localnet}
+      ALGORAND_EXECUTOR_URL: http://algorand-executor:4301
+      ALGORAND_EXECUTOR_TOKEN: ${ALGORAND_EXECUTOR_TOKEN:-}
+      FABRIC_MODE: ${FABRIC_MODE:-mock}
+      FABRIC_EVIDENCE_FIXTURE_PATH: /var/lib/optiwork/fabric-evidence.json
+    ports:
+      - "${API_PORT:-4000}:4000"
+    volumes:
+      - fabric-evidence:/var/lib/optiwork
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  web:
+    profiles: [app, full]
+    build:
+      context: ..
+      dockerfile: infra/web.Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      OPTIWORK_API_BASE_URL: http://api:4000
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:${API_PORT:-4000}
+      NEXT_PUBLIC_ALGORAND_EXPLORER_BASE_URL: ${ALGORAND_EXPLORER_BASE_URL:-https://lora.algokit.io/testnet}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+
+  # The isolated signing boundary. It owns every provider key and is the only
+  # service that talks to algod. MainNet is refused by its own configuration.
+  algorand-executor:
+    profiles: [settlement, full]
+    build:
+      context: ../services/algorand-executor
+      dockerfile: Dockerfile
+    env_file:
+      - ../services/algorand-executor/.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4301
+      DATABASE_URL: postgresql://${POSTGRES_USER:-optiwork}:${POSTGRES_PASSWORD:-optiwork-local-development}@postgres:5432/${POSTGRES_DB:-optiwork}
+      DATABASE_SSL_MODE: disable
+      FABRIC_EVIDENCE_MODE: ${FABRIC_EVIDENCE_MODE:-mock}
+      FABRIC_EVIDENCE_FIXTURE_PATH: /var/lib/optiwork/fabric-evidence.json
+    ports:
+      - "${EXECUTOR_PORT:-4301}:4301"
+    volumes:
+      - fabric-evidence:/var/lib/optiwork
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  minio-data:
+  # Shared between the API and the executor: the API writes approved Fabric
+  # work-evidence commitments, the executor re-reads them before it signs.
+  fabric-evidence:
