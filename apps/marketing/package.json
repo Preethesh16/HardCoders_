@@ -1,0 +1,13 @@
+{
+  "name": "@optiwork/marketing",
+  "private": true,
+  "description": "OptiWork landing page — static design prototype with links into the running @optiwork/web dashboards.",
+  "scripts": {
+    "dev": "node serve.mjs",
+    "start": "node serve.mjs",
+    "build": "echo '@optiwork/marketing: static site, nothing to build'",
+    "lint": "echo '@optiwork/marketing: static site, nothing to lint'",
+    "typecheck": "echo '@optiwork/marketing: static site, nothing to typecheck'",
+    "test": "echo '@optiwork/marketing: static site, no tests'"
+  }
+}
