@@ -49,6 +49,7 @@ const envSchema = z.object({
     z.string().min(1).max(512).regex(/^[\x21-\x7E]+(?: [\x21-\x7E]+)*$/u).optional(),
   ),
   FABRIC_GATEWAY_OIDC_REFRESH_SKEW_SECONDS: integer(1, 300, 30),
+  FABRIC_GATEWAY_DEMO_AUTH: environmentBoolean,
   FABRIC_GATEWAY_TIMEOUT_MS: integer(100, 30_000, 3_000),
   FABRIC_PERMIT_ISSUER: z.string().min(1).max(256),
   FABRIC_PERMIT_AUDIENCE: z.string().min(1).max(256),
@@ -77,12 +78,16 @@ const envSchema = z.object({
   ALGORAND_ASSET_ID: z.preprocess((value) => BigInt(String(value)), z.bigint().positive().max(BigInt(Number.MAX_SAFE_INTEGER))),
   ALGORAND_SIGNER_ADDRESS: z.string().refine((value) => algosdk.isValidAddress(value), "Invalid signer address."),
   ALGORAND_SIGNER_PRIVATE_KEY_BASE64: z.string().min(80).max(128).regex(/^[A-Za-z0-9+/]+={0,2}$/u),
-  ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: z.string().refine((value) => algosdk.isValidAddress(value), "Invalid origin provider treasury address."),
-  ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: z.string().min(80).max(128).regex(/^[A-Za-z0-9+/]+={0,2}$/u),
+  ALGORAND_ORIGIN_PROVIDER_TREASURIES_JSON: z.string().min(1).max(32_768).optional(),
+  // Retained as an input compatibility path for existing deployments. New
+  // LocalNet manifests use the address-keyed JSON array above.
+  ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: z.string().refine((value) => algosdk.isValidAddress(value), "Invalid origin provider treasury address.").optional(),
+  ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: z.string().min(80).max(128).regex(/^[A-Za-z0-9+/]+={0,2}$/u).optional(),
   ALGORAND_MAX_VALIDITY_ROUNDS: integer(4, 1_000, 100),
 });
 
 export type FabricGatewayAuth =
+  | { readonly mode: "demo" }
   | { readonly mode: "static"; readonly bearerToken: string }
   | {
       readonly mode: "oidc";
@@ -97,6 +102,8 @@ type RawSecretField =
   | "FABRIC_PERMIT_PUBLIC_JWK_JSON"
   | "ALGORAND_SIGNER_PRIVATE_KEY_BASE64"
   | "ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64"
+  | "ALGORAND_ORIGIN_PROVIDER_TREASURIES_JSON"
+  | "ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS"
   | "FABRIC_GATEWAY_BEARER_TOKEN"
   | "FABRIC_GATEWAY_OIDC_TOKEN_URL"
   | "FABRIC_GATEWAY_OIDC_CLIENT_ID"
@@ -108,6 +115,9 @@ export type ExecutorConfig = Omit<z.infer<typeof envSchema>, RawSecretField> & {
   permitPublicJwk: JsonWebKey & { kid: string };
   signerPrivateKey: Uint8Array;
   originProviderTreasuryPrivateKey: Uint8Array;
+  /** Compatibility alias for the first configured treasury. */
+  ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: string;
+  readonly originProviderTreasuries: ReadonlyMap<string, Uint8Array>;
   fabricGatewayAuth: FabricGatewayAuth;
 };
 
@@ -118,6 +128,10 @@ function normalizedHostname(url: URL): string {
 function isLoopback(url: URL): boolean {
   const hostname = normalizedHostname(url);
   return hostname === "localhost" || hostname === "::1" || /^127(?:\.[0-9]{1,3}){3}$/u.test(hostname);
+}
+
+function isLocalComposeService(url: URL): boolean {
+  return ["postgres", "fabric-gateway", "host.docker.internal"].includes(normalizedHostname(url));
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ExecutorConfig {
@@ -140,7 +154,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
   if (databaseUrl.search || databaseUrl.hash) {
     throw new Error("DATABASE_URL must not contain query parameters or a fragment; configure TLS only with DATABASE_SSL_MODE.");
   }
-  if (!isLoopback(databaseUrl) && parsed.DATABASE_SSL_MODE !== "verify-full") {
+  if (!isLoopback(databaseUrl) && !isLocalComposeService(databaseUrl) && parsed.DATABASE_SSL_MODE !== "verify-full") {
     throw new Error("A non-loopback DATABASE_URL requires DATABASE_SSL_MODE=verify-full.");
   }
 
@@ -150,19 +164,25 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
     parsed.FABRIC_GATEWAY_OIDC_CLIENT_SECRET,
   ];
   const oidcConfigured = oidcValues.filter((value) => value !== undefined).length;
+  if (parsed.FABRIC_GATEWAY_DEMO_AUTH
+    && (parsed.FABRIC_GATEWAY_BEARER_TOKEN !== undefined || oidcConfigured > 0)) {
+    throw new Error("Local Gateway demo authentication cannot be combined with bearer or OIDC credentials.");
+  }
   if (parsed.FABRIC_GATEWAY_BEARER_TOKEN !== undefined && oidcConfigured > 0) {
     throw new Error("Configure either FABRIC_GATEWAY_BEARER_TOKEN or Gateway OIDC client credentials, never both.");
   }
   if (oidcConfigured !== 0 && oidcConfigured !== oidcValues.length) {
     throw new Error("Gateway OIDC requires token URL, client ID, and client secret together.");
   }
-  if (parsed.FABRIC_GATEWAY_BEARER_TOKEN === undefined && oidcConfigured === 0) {
+  if (!parsed.FABRIC_GATEWAY_DEMO_AUTH && parsed.FABRIC_GATEWAY_BEARER_TOKEN === undefined && oidcConfigured === 0) {
     throw new Error("Configure Gateway OIDC client credentials or a LocalNet-only static bearer token.");
   }
   if (parsed.FABRIC_GATEWAY_OIDC_SCOPE !== undefined && oidcConfigured === 0) {
     throw new Error("FABRIC_GATEWAY_OIDC_SCOPE requires Gateway OIDC client credentials.");
   }
-  const fabricGatewayAuth: FabricGatewayAuth = oidcConfigured === oidcValues.length
+  const fabricGatewayAuth: FabricGatewayAuth = parsed.FABRIC_GATEWAY_DEMO_AUTH
+    ? { mode: "demo" }
+    : oidcConfigured === oidcValues.length
     ? {
         mode: "oidc",
         tokenUrl: parsed.FABRIC_GATEWAY_OIDC_TOKEN_URL!,
@@ -178,6 +198,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
   assertNotDeniedNetwork(parsed.ALGORAND_GENESIS_HASH);
 
   if (parsed.ALGORAND_NETWORK === "testnet") {
+    if (fabricGatewayAuth.mode === "demo") {
+      throw new Error("Gateway demo authentication is LocalNet-only.");
+    }
     const loopbackGatewayDemo = parsed.PUBLIC_TESTNET_DEMO && isLoopback(parsed.FABRIC_GATEWAY_URL);
     if (parsed.ALGORAND_ALGOD_URL.protocol !== "https:"
       || (parsed.FABRIC_GATEWAY_URL.protocol !== "https:" && !loopbackGatewayDemo)) {
@@ -202,13 +225,20 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
       throw new Error("TestNet requires FABRIC_EVIDENCE_MODE=gateway; the mock evidence reader is LocalNet-only.");
     }
   } else {
+    if (fabricGatewayAuth.mode === "demo"
+      && !isLoopback(parsed.FABRIC_GATEWAY_URL)
+      && !isLocalComposeService(parsed.FABRIC_GATEWAY_URL)) {
+      throw new Error("Gateway demo authentication requires a loopback LocalNet Gateway URL.");
+    }
     const localUrls = [
       ["ALGORAND_ALGOD_URL", parsed.ALGORAND_ALGOD_URL],
       ["FABRIC_GATEWAY_URL", parsed.FABRIC_GATEWAY_URL],
       ...(parsed.ALGORAND_INDEXER_URL === undefined ? [] : [["ALGORAND_INDEXER_URL", parsed.ALGORAND_INDEXER_URL] as const]),
     ] as const;
     for (const [name, url] of localUrls) {
-      if (url.protocol !== "https:" && !isLoopback(url)) throw new Error(`${name} permits HTTP only on loopback LocalNet.`);
+      if (url.protocol !== "https:" && !isLoopback(url) && !isLocalComposeService(url)) {
+        throw new Error(`${name} permits HTTP only on loopback or the isolated local Compose network.`);
+      }
     }
     if (fabricGatewayAuth.mode === "oidc"
       && fabricGatewayAuth.tokenUrl.protocol !== "https:"
@@ -244,18 +274,55 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
     parsed.ALGORAND_SIGNER_ADDRESS,
     "ALGORAND_SIGNER_PRIVATE_KEY_BASE64",
   );
-  const originProviderTreasuryPrivateKey = decodePrivateKey(
-    parsed.ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64,
-    parsed.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS,
-    "ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64",
-  );
-  if (parsed.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS === parsed.ALGORAND_SIGNER_ADDRESS) {
-    throw new Error("The origin provider treasury and executor must use distinct Algorand accounts.");
+  const hasLegacyAddress = parsed.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS !== undefined;
+  const hasLegacyKey = parsed.ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64 !== undefined;
+  if (hasLegacyAddress !== hasLegacyKey) {
+    throw new Error("The legacy origin provider treasury address and private key must be configured together.");
   }
+  if (parsed.ALGORAND_ORIGIN_PROVIDER_TREASURIES_JSON !== undefined && hasLegacyAddress) {
+    throw new Error("Configure the address-keyed origin treasury JSON or the legacy single treasury, never both.");
+  }
+  let treasuryDocuments: Array<{ address: string; privateKeyBase64: string }>;
+  if (parsed.ALGORAND_ORIGIN_PROVIDER_TREASURIES_JSON !== undefined) {
+    let value: unknown;
+    try {
+      value = JSON.parse(parsed.ALGORAND_ORIGIN_PROVIDER_TREASURIES_JSON) as unknown;
+    } catch {
+      throw new Error("ALGORAND_ORIGIN_PROVIDER_TREASURIES_JSON must contain valid JSON.");
+    }
+    treasuryDocuments = z.array(z.object({
+      address: z.string().refine((candidate) => algosdk.isValidAddress(candidate), "Invalid origin provider treasury address."),
+      privateKeyBase64: z.string().min(80).max(128).regex(/^[A-Za-z0-9+/]+={0,2}$/u),
+    }).strict()).min(1).max(16).parse(value);
+  } else if (hasLegacyAddress && hasLegacyKey) {
+    treasuryDocuments = [{
+      address: parsed.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS!,
+      privateKeyBase64: parsed.ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64!,
+    }];
+  } else {
+    throw new Error("Configure ALGORAND_ORIGIN_PROVIDER_TREASURIES_JSON with at least one treasury signer.");
+  }
+  const originProviderTreasuries = new Map<string, Uint8Array>();
+  for (const treasury of treasuryDocuments) {
+    if (treasury.address === parsed.ALGORAND_SIGNER_ADDRESS) {
+      throw new Error("Every origin provider treasury must be distinct from the executor account.");
+    }
+    if (originProviderTreasuries.has(treasury.address)) {
+      throw new Error(`Duplicate origin provider treasury address ${treasury.address}.`);
+    }
+    originProviderTreasuries.set(treasury.address, decodePrivateKey(
+      treasury.privateKeyBase64,
+      treasury.address,
+      `private key for origin treasury ${treasury.address}`,
+    ));
+  }
+  const firstOrigin = treasuryDocuments[0]!;
+  const originProviderTreasuryPrivateKey = originProviderTreasuries.get(firstOrigin.address)!;
 
   const {
     FABRIC_PERMIT_PUBLIC_JWK_JSON: _jwkJson,
     ALGORAND_SIGNER_PRIVATE_KEY_BASE64: _signerKey,
+    ALGORAND_ORIGIN_PROVIDER_TREASURIES_JSON: _originTreasuriesJson,
     ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: _originTreasuryKey,
     FABRIC_GATEWAY_BEARER_TOKEN: _gatewayBearer,
     FABRIC_GATEWAY_OIDC_TOKEN_URL: _oidcTokenUrl,
@@ -265,5 +332,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
     FABRIC_GATEWAY_OIDC_REFRESH_SKEW_SECONDS: _oidcRefreshSkew,
     ...safe
   } = parsed;
-  return { ...safe, fabricGatewayAuth, permitPublicJwk: jwk, signerPrivateKey, originProviderTreasuryPrivateKey };
+  return {
+    ...safe,
+    ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: firstOrigin.address,
+    fabricGatewayAuth,
+    permitPublicJwk: jwk,
+    signerPrivateKey,
+    originProviderTreasuryPrivateKey,
+    originProviderTreasuries,
+  };
 }

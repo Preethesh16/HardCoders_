@@ -139,7 +139,7 @@ describe("executor configuration", () => {
     expect(testConfig({ ALGORAND_INDEXER_URL: "http://127.0.0.1:8980" }).ALGORAND_INDEXER_URL?.protocol).toBe("http:");
     expect(testConfig({}).ALGORAND_INDEXER_URL).toBeUndefined();
     expect(() => testConfig({ ALGORAND_INDEXER_URL: "http://indexer.optiwork.example" }))
-      .toThrow(/ALGORAND_INDEXER_URL permits HTTP only on loopback LocalNet/u);
+      .toThrow(/ALGORAND_INDEXER_URL permits HTTP only on loopback or the isolated local Compose network/u);
     expect(() => testConfig({
       ALGORAND_NETWORK: "testnet",
       ALGORAND_GENESIS_HASH: TESTNET_GENESIS_HASH,

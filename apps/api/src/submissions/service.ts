@@ -39,6 +39,13 @@ export class SubmissionService {
     return { subject: principal.subject, role: principal.roles[0] ?? 'unknown' };
   }
 
+  private fabricActor(principal: Principal) {
+    const role = principal.roles.find((candidate) =>
+      candidate === 'company_member' || candidate === 'freelancer' || candidate === 'supplier');
+    if (role === undefined) throw unprocessable('This actor has no Fabric evidence role.');
+    return { subject: principal.subject, organizationId: principal.organizationId, role };
+  }
+
   /**
    * Stores the deliverable and records its commitment on Fabric.
    *
@@ -94,10 +101,14 @@ export class SubmissionService {
 
     // The subject reference is an opaque commitment, never a user identifier.
     const subjectRef = sha256Text(`optiwork-subject:${contract.providerOrganizationId}`).slice(7, 39);
-    const record = await this.context.fabric.recordSubmission({
+    // Revisions are new immutable versions of the same Fabric aggregate. The
+    // evidence identifier is allocated before the first write and persisted in
+    // PostgreSQL so decisions and releases can always address it directly.
+    const evidenceId = latest?.evidenceId ?? this.context.ids.next('EV');
+    const record = await this.context.fabric.recordSubmission(this.fabricActor(principal), {
       dealId: contract.id,
       milestoneId: contract.milestoneId,
-      evidenceId: this.context.ids.next('EV'),
+      evidenceId,
       contractHash: contract.contractHash,
       milestoneHash: contract.milestoneHash,
       fileHash: stored.sha256,
@@ -110,6 +121,7 @@ export class SubmissionService {
     const submission = await this.context.store.insert(workSubmissions, {
       id: this.context.ids.next('SUB'),
       contractId,
+      evidenceId,
       version,
       objectId,
       fileHash: stored.sha256,
@@ -201,12 +213,11 @@ export class SubmissionService {
     });
 
     const now = this.context.clock.now().toISOString();
-    const record = await this.context.fabric.recordDecision({
-      dealId: contract.id,
-      milestoneId: contract.milestoneId,
+    const record = await this.context.fabric.recordDecision(this.fabricActor(principal), {
+      evidenceId: submission.evidenceId,
       decision: input.decision,
-      buyerRef: sha256Text(`optiwork-buyer:${contract.buyerOrganizationId}`).slice(7, 39),
-      decidedAt: now,
+      expectedFileHash: submission.fileHash,
+      expectedVersion: submission.version,
     });
 
     const [updated] = await this.context.store.update(workSubmissions, { id: submissionId }, {

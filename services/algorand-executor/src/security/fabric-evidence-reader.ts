@@ -206,7 +206,14 @@ export class HttpFabricEvidenceReader implements FabricEvidenceReader {
         redirect: "error",
         cache: "no-store",
         signal: AbortSignal.timeout(this.config.FABRIC_GATEWAY_TIMEOUT_MS),
-        headers: { accept: "application/json", authorization: `Bearer ${await this.accessToken()}` },
+        headers: {
+          accept: "application/json",
+          ...(this.config.fabricGatewayAuth.mode === "demo" ? {
+            "x-demo-subject": "optiwork-executor",
+            "x-demo-organization": "optiwork-platform",
+            "x-demo-role": "payments_service",
+          } : { authorization: `Bearer ${await this.accessToken()}` }),
+        },
       });
     } catch {
       throw unavailable("The approved Fabric work-evidence re-read failed.");

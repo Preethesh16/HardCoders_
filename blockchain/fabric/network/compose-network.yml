@@ -1,0 +1,119 @@
+name: optiwork-fabric-network
+
+x-peer-env: &peer-env
+  CORE_VM_ENDPOINT: unix:///host/var/run/docker.sock
+  CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE: ${COMPOSE_NETWORK_NAME}
+  CORE_PEER_TLS_ENABLED: "true"
+  CORE_PEER_GOSSIP_USELEADERELECTION: "true"
+  CORE_PEER_GOSSIP_ORGLEADER: "false"
+  CORE_PEER_DISCOVERY_ENABLED: "true"
+  CORE_LEDGER_STATE_STATEDATABASE: goleveldb
+  CORE_CHAINCODE_EXECUTETIMEOUT: 300s
+  CORE_CHAINCODE_BUILDER: ${FABRIC_CCENV_IMAGE}
+  CORE_CHAINCODE_GOLANG_RUNTIME: ${FABRIC_BASEOS_IMAGE}
+  CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:9444
+  CORE_OPERATIONS_TLS_ENABLED: "false"
+
+x-peer: &peer
+  image: ${FABRIC_PEER_IMAGE}
+  command: peer node start
+  restart: unless-stopped
+  working_dir: /root
+  security_opt: ["no-new-privileges:true"]
+  healthcheck:
+    test: ["CMD-SHELL", "bash -ec 'exec 3<>/dev/tcp/127.0.0.1/9444; echo -e \"GET /healthz HTTP/1.0\\r\\n\\r\\n\" >&3; grep -q \"200 OK\" <&3'"]
+    interval: 3s
+    timeout: 10s
+    retries: 30
+  networks: [optiwork-fabric]
+
+services:
+  orderer.optiwork.local:
+    image: ${FABRIC_ORDERER_IMAGE}
+    container_name: optiwork-orderer
+    hostname: orderer.optiwork.local
+    environment:
+      ORDERER_GENERAL_LISTENADDRESS: 0.0.0.0
+      ORDERER_GENERAL_LISTENPORT: "7050"
+      ORDERER_GENERAL_LOCALMSPID: OrdererMSP
+      ORDERER_GENERAL_LOCALMSPDIR: /var/hyperledger/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/msp
+      ORDERER_GENERAL_BOOTSTRAPMETHOD: none
+      ORDERER_CHANNELPARTICIPATION_ENABLED: "true"
+      ORDERER_GENERAL_TLS_ENABLED: "true"
+      ORDERER_GENERAL_TLS_PRIVATEKEY: /var/hyperledger/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/tls/server.key
+      ORDERER_GENERAL_TLS_CERTIFICATE: /var/hyperledger/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/tls/server.crt
+      ORDERER_GENERAL_TLS_ROOTCAS: '[/var/hyperledger/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/tls/ca.crt]'
+      ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE: /var/hyperledger/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/tls/server.crt
+      ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY: /var/hyperledger/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/tls/server.key
+      ORDERER_GENERAL_CLUSTER_ROOTCAS: '[/var/hyperledger/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/tls/ca.crt]'
+      ORDERER_ADMIN_LISTENADDRESS: 0.0.0.0:9443
+      ORDERER_ADMIN_TLS_ENABLED: "true"
+      ORDERER_ADMIN_TLS_CERTIFICATE: /var/hyperledger/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/tls/server.crt
+      ORDERER_ADMIN_TLS_PRIVATEKEY: /var/hyperledger/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/tls/server.key
+      ORDERER_ADMIN_TLS_CLIENTROOTCAS: '[/var/hyperledger/organizations/ordererOrganizations/optiwork.local/users/Admin@optiwork.local/tls/ca.crt]'
+      ORDERER_OPERATIONS_LISTENADDRESS: 0.0.0.0:8443
+      ORDERER_OPERATIONS_TLS_ENABLED: "false"
+      ORDERER_FILELEDGER_LOCATION: /var/hyperledger/production/orderer
+    ports: ["127.0.0.1:13050:7050", "127.0.0.1:13053:9443", "127.0.0.1:13443:8443"]
+    volumes:
+      - ./generated/organizations:/var/hyperledger/organizations:ro
+      - ./generated/data/orderer:/var/hyperledger/production/orderer
+    healthcheck:
+      test: ["CMD-SHELL", "bash -ec 'exec 3<>/dev/tcp/127.0.0.1/8443; echo -e \"GET /healthz HTTP/1.0\\r\\n\\r\\n\" >&3; grep -q \"200 OK\" <&3'"]
+      interval: 3s
+      timeout: 10s
+      retries: 30
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    networks: [optiwork-fabric]
+
+  peer0.buyer.optiwork.local:
+    <<: *peer
+    container_name: optiwork-peer-buyer
+    hostname: peer0.buyer.optiwork.local
+    environment:
+      <<: *peer-env
+      CORE_PEER_ID: peer0.buyer.optiwork.local
+      CORE_PEER_ADDRESS: peer0.buyer.optiwork.local:7051
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:7051
+      CORE_PEER_CHAINCODEADDRESS: peer0.buyer.optiwork.local:7052
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:7052
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer0.buyer.optiwork.local:7051
+      CORE_PEER_LOCALMSPID: BuyerOrgMSP
+      CORE_PEER_MSPCONFIGPATH: /var/hyperledger/organizations/peerOrganizations/buyer.optiwork.local/peers/peer0.buyer.optiwork.local/msp
+      CORE_PEER_TLS_CERT_FILE: /var/hyperledger/organizations/peerOrganizations/buyer.optiwork.local/peers/peer0.buyer.optiwork.local/tls/server.crt
+      CORE_PEER_TLS_KEY_FILE: /var/hyperledger/organizations/peerOrganizations/buyer.optiwork.local/peers/peer0.buyer.optiwork.local/tls/server.key
+      CORE_PEER_TLS_ROOTCERT_FILE: /var/hyperledger/organizations/peerOrganizations/buyer.optiwork.local/peers/peer0.buyer.optiwork.local/tls/ca.crt
+    ports: ["127.0.0.1:14051:7051", "127.0.0.1:14444:9444"]
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./generated/organizations:/var/hyperledger/organizations:ro
+      - ./generated/data/peer-buyer:/var/hyperledger/production
+
+  peer0.seller.optiwork.local:
+    <<: *peer
+    container_name: optiwork-peer-seller
+    hostname: peer0.seller.optiwork.local
+    environment:
+      <<: *peer-env
+      CORE_PEER_ID: peer0.seller.optiwork.local
+      CORE_PEER_ADDRESS: peer0.seller.optiwork.local:7051
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:7051
+      CORE_PEER_CHAINCODEADDRESS: peer0.seller.optiwork.local:7052
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:7052
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer0.seller.optiwork.local:7051
+      CORE_PEER_LOCALMSPID: SellerOrgMSP
+      CORE_PEER_MSPCONFIGPATH: /var/hyperledger/organizations/peerOrganizations/seller.optiwork.local/peers/peer0.seller.optiwork.local/msp
+      CORE_PEER_TLS_CERT_FILE: /var/hyperledger/organizations/peerOrganizations/seller.optiwork.local/peers/peer0.seller.optiwork.local/tls/server.crt
+      CORE_PEER_TLS_KEY_FILE: /var/hyperledger/organizations/peerOrganizations/seller.optiwork.local/peers/peer0.seller.optiwork.local/tls/server.key
+      CORE_PEER_TLS_ROOTCERT_FILE: /var/hyperledger/organizations/peerOrganizations/seller.optiwork.local/peers/peer0.seller.optiwork.local/tls/ca.crt
+    ports: ["127.0.0.1:15051:7051", "127.0.0.1:15444:9444"]
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./generated/organizations:/var/hyperledger/organizations:ro
+      - ./generated/data/peer-seller:/var/hyperledger/production
+
+networks:
+  optiwork-fabric:
+    external: true
+    name: ${COMPOSE_NETWORK_NAME}

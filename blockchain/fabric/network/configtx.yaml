@@ -1,0 +1,83 @@
+Organizations:
+  - &OrdererOrg
+    Name: OrdererOrg
+    ID: OrdererMSP
+    MSPDir: generated/organizations/ordererOrganizations/optiwork.local/msp
+    Policies:
+      Readers: {Type: Signature, Rule: "OR('OrdererMSP.member')"}
+      Writers: {Type: Signature, Rule: "OR('OrdererMSP.member')"}
+      Admins: {Type: Signature, Rule: "OR('OrdererMSP.admin')"}
+    OrdererEndpoints: [orderer.optiwork.local:7050]
+  - &BuyerOrg
+    Name: BuyerOrg
+    ID: BuyerOrgMSP
+    MSPDir: generated/organizations/peerOrganizations/buyer.optiwork.local/msp
+    Policies:
+      Readers: {Type: Signature, Rule: "OR('BuyerOrgMSP.admin', 'BuyerOrgMSP.peer', 'BuyerOrgMSP.client')"}
+      Writers: {Type: Signature, Rule: "OR('BuyerOrgMSP.admin', 'BuyerOrgMSP.client')"}
+      Admins: {Type: Signature, Rule: "OR('BuyerOrgMSP.admin')"}
+      Endorsement: {Type: Signature, Rule: "OR('BuyerOrgMSP.peer')"}
+    AnchorPeers: [{Host: peer0.buyer.optiwork.local, Port: 7051}]
+  - &SellerOrg
+    Name: SellerOrg
+    ID: SellerOrgMSP
+    MSPDir: generated/organizations/peerOrganizations/seller.optiwork.local/msp
+    Policies:
+      Readers: {Type: Signature, Rule: "OR('SellerOrgMSP.admin', 'SellerOrgMSP.peer', 'SellerOrgMSP.client')"}
+      Writers: {Type: Signature, Rule: "OR('SellerOrgMSP.admin', 'SellerOrgMSP.client')"}
+      Admins: {Type: Signature, Rule: "OR('SellerOrgMSP.admin')"}
+      Endorsement: {Type: Signature, Rule: "OR('SellerOrgMSP.peer')"}
+    AnchorPeers: [{Host: peer0.seller.optiwork.local, Port: 7051}]
+
+Capabilities:
+  Channel: &ChannelCapabilities {V2_0: true}
+  Orderer: &OrdererCapabilities {V2_0: true}
+  Application: &ApplicationCapabilities {V2_5: true}
+
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers: {Type: ImplicitMeta, Rule: "ANY Readers"}
+    Writers: {Type: ImplicitMeta, Rule: "ANY Writers"}
+    Admins: {Type: ImplicitMeta, Rule: "MAJORITY Admins"}
+    LifecycleEndorsement: {Type: ImplicitMeta, Rule: "ANY Endorsement"}
+    Endorsement: {Type: ImplicitMeta, Rule: "MAJORITY Endorsement"}
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  EtcdRaft:
+    Consenters:
+      - Host: orderer.optiwork.local
+        Port: 7050
+        ClientTLSCert: generated/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/tls/server.crt
+        ServerTLSCert: generated/organizations/ordererOrganizations/optiwork.local/orderers/orderer.optiwork.local/tls/server.crt
+  BatchTimeout: 1s
+  BatchSize: {MaxMessageCount: 10, AbsoluteMaxBytes: 16 MB, PreferredMaxBytes: 2 MB}
+  Organizations:
+  Policies:
+    Readers: {Type: ImplicitMeta, Rule: "ANY Readers"}
+    Writers: {Type: ImplicitMeta, Rule: "ANY Writers"}
+    Admins: {Type: ImplicitMeta, Rule: "MAJORITY Admins"}
+    BlockValidation: {Type: ImplicitMeta, Rule: "ANY Writers"}
+  Capabilities:
+    <<: *OrdererCapabilities
+
+Channel: &ChannelDefaults
+  Policies:
+    Readers: {Type: ImplicitMeta, Rule: "ANY Readers"}
+    Writers: {Type: ImplicitMeta, Rule: "ANY Writers"}
+    Admins: {Type: ImplicitMeta, Rule: "MAJORITY Admins"}
+  Capabilities:
+    <<: *ChannelCapabilities
+
+Profiles:
+  OptiWorkApplicationGenesis:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations: [*OrdererOrg]
+    Application:
+      <<: *ApplicationDefaults
+      Organizations: [*BuyerOrg, *SellerOrg]

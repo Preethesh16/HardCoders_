@@ -1,0 +1,12 @@
+.git
+.github
+.optiwork
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/.turbo
+blockchain/fabric/network/generated
+blockchain/fabric/network/.work
+docs/screenshots
+*.log

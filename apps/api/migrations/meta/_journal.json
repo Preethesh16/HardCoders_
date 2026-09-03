@@ -8,6 +8,27 @@
       "when": 1788438804995,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788438805995,
+      "tag": "0001_ledger_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788438806995,
+      "tag": "0002_compliance_commitment",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788438807995,
+      "tag": "0003_submission_evidence_id",
+      "breakpoints": true
     }
   ]
 }

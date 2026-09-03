@@ -20,6 +20,7 @@ import {
   type PermitClaims,
   type ReleaseInput,
 } from "../../src/types.js";
+import { approvedEvidence } from "../helpers.js";
 
 /**
  * Stands in for the Gateway's authoritative Fabric re-read. It records the
@@ -42,8 +43,11 @@ export class RecordingFabricReader implements AuthoritativeFabricReader {
   async verifyCurrent(claims: PermitClaims, command: CommandContext): Promise<void> {
     this.verifiedCommands += 1;
     if (claims.action !== command.action) throw new Error("Fabric action mismatch.");
-    if (claims.action === "release" && claims.authoritativeReads.length !== 3) {
-      throw new Error("Release did not perform all three authoritative Fabric reads.");
+    if (claims.action === "release" && claims.authoritativeReads.length !== 1) {
+      throw new Error("Release did not perform its single approved-evidence Fabric read.");
+    }
+    if (claims.action !== "release" && claims.authoritativeReads.length !== 0) {
+      throw new Error("A lifecycle permit must not claim mutable Fabric reads.");
     }
     for (const read of claims.authoritativeReads) {
       if (!this.values.has(read.path) || sha256(this.values.get(read.path)) !== read.dataHash) {
@@ -120,12 +124,6 @@ export async function createPermitSigner(kid: string, issuer: string, audience: 
   };
 }
 
-function commandDealId(command: CommandContext): string {
-  if (command.action === "create") return (command.body as { dealId: string }).dealId;
-  if (command.action === "release") return (command.body as ReleaseInput).escrowBinding.dealId;
-  return decodeURIComponent(command.path.split("/")[2] ?? "");
-}
-
 /** Issues a signed Fabric permit and records the state it was issued against. */
 export async function signedPermit(
   command: CommandContext,
@@ -134,27 +132,13 @@ export async function signedPermit(
   options: { jti?: string } = {},
 ): Promise<{ compact: string; paths: string[] }> {
   signer.sequence += 1;
-  const dealId = commandDealId(command);
   const release = command.action === "release" ? command.body as ReleaseInput : undefined;
-  const base = `/ledger/deals/${encodeURIComponent(dealId)}`;
-  const paths = release
-    ? [
-        `${base}/milestones/${encodeURIComponent(release.milestoneId)}/payment-intents/${encodeURIComponent(release.intentId)}`,
-        `${base}/milestones/${encodeURIComponent(release.milestoneId)}/payment-intents/${encodeURIComponent(release.intentId)}/binding`,
-        `${base}/milestones/${encodeURIComponent(release.milestoneId)}/payment-intents/${encodeURIComponent(release.intentId)}/fence`,
-      ]
-    : [`${base}/algorand-authorization`];
-  const authoritativeReads = paths.map((path, index) => {
-    const value = {
-      schemaVersion: "1.0",
-      dealId,
-      action: command.action,
-      permitSequence: signer.sequence,
-      readIndex: index,
-    };
+  const paths = release ? [`/v1/evidence/${encodeURIComponent(release.evidenceId)}/projection`] : [];
+  const authoritativeReads = release ? paths.map((path) => {
+    const value = approvedEvidence(release.fabricClaimTransactionId, { evidenceId: release.evidenceId });
     reader.set(path, value);
     return { path, dataHash: sha256(value) };
-  });
+  }) : [];
   const now = Math.floor(Date.now() / 1_000);
   const fabricTransactionId = release?.fabricClaimTransactionId
     ?? `FABRIC-${command.action.toUpperCase()}-${signer.sequence}`;

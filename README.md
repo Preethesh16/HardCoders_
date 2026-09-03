@@ -89,7 +89,9 @@ flowchart LR
 
 This makes a database flag such as `APPROVED=true` insufficient to move money. The release must still match the cryptographic evidence and every bound decision that produced it.
 
-## Run the complete judge demo
+## Run the judge demo
+
+### Fast browser preview
 
 ### Prerequisites
 
@@ -106,6 +108,28 @@ corepack pnpm demo
 ```
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000), then click **Run the demonstration**.
+
+### Full cryptographic proof run
+
+The acceptance profile replaces every simulated persistence and blockchain
+adapter with PostgreSQL, MinIO, a two-organization Fabric network, the real
+Fabric Gateway, AlgoKit LocalNet, the deployed ARC-4 escrow and the durable
+Algorand executor. It generates owner-only local keys and requires no API key,
+faucet or paid service.
+
+Additional prerequisites: Docker with Compose, AlgoKit and `rg`.
+
+```bash
+corepack pnpm install --frozen-lockfile
+corepack pnpm local:e2e
+```
+
+The command starts isolated resources, deploys `OptiUSD-DEMO` and the escrow,
+executes both HTTP journeys, verifies both ledgers, checks cross-organization
+authorization and privacy boundaries, smoke-tests all six browser routes, and
+leaves the app running at [http://127.0.0.1:3000](http://127.0.0.1:3000).
+See the [LocalNet runbook](docs/LOCALNET_RUNBOOK.md) for ports, lifecycle
+commands, generated artifacts and troubleshooting.
 
 The app executes both corridors end to end and exposes five role-specific views:
 
@@ -200,6 +224,8 @@ Every mutation requires authentication and an `Idempotency-Key`. Demo-only walkt
 ```bash
 corepack pnpm verify
 cd blockchain/fabric/chaincode && go test ./...
+cd ../../..
+corepack pnpm local:e2e
 ```
 
 The automated suite covers:
@@ -225,14 +251,18 @@ corepack pnpm --filter @optiwork/algorand-executor test:testnet
 |---|---|
 | Two-corridor browser demonstration | ✅ Runs locally with deterministic adapters |
 | Marketplace, contracts, credentials, compliance, FX, books and timelines | ✅ Implemented and tested |
-| PostgreSQL, MinIO and Keycloak adapters | ✅ Compose profiles available |
+| PostgreSQL and MinIO adapters | ✅ Real local acceptance profile verified |
+| Keycloak OIDC adapter and realm | ✅ Implemented; production OIDC deployment deferred |
 | Fabric evidence chaincode and Gateway | ✅ Implemented and tested |
 | ARC-4 escrow and isolated Algorand executor | ✅ Implemented and tested |
 | Fabric-to-executor release contract | ✅ Cross-service integration tested |
-| Fully automated all-real Fabric + Algorand LocalNet journey | 🚧 Integration profile in progress |
+| Fully automated real Fabric + Algorand LocalNet journeys | ✅ Both corridors complete with confirmed transactions |
 | Public TestNet deployment and production OIDC hardening | ⏭️ Explicitly deferred |
 
-The default judge path is deliberately deterministic and free. Real-network suites are opt-in so a reviewer is never blocked by Docker capacity, faucets or an unavailable public service.
+Both paths are free and deterministic. The fast preview is convenient for UI
+evaluation; `local:e2e` is the acceptance path for real local infrastructure and
+blockchain proof. Public TestNet remains opt-in so evaluation never depends on a
+faucet or external service.
 
 ## Repository map
 
@@ -255,6 +285,7 @@ docs                        Architecture plan, ADRs and third-party provenance
 - [ADR 002 — Algorand settlement](docs/architecture/adr-002-algorand-settlement.md)
 - [ADR 003 — Fabric for work evidence only](docs/architecture/adr-003-fabric-work-evidence-only.md)
 - [Third-party provenance](docs/THIRD_PARTY_PROVENANCE.md)
+- [Real LocalNet runbook](docs/LOCALNET_RUNBOOK.md)
 
 ## Scope and disclaimer
 

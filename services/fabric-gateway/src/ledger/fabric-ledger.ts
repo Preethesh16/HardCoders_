@@ -41,9 +41,13 @@ export function normalizeEvidence(value: unknown): LedgerWorkEvidence {
   const version = record['version'];
   const aggregateVersion = record['aggregateVersion'];
   const buyerDecision = record['buyerDecision'];
+  const buyerDecisionHash = record['buyerDecisionHash'];
+  const decidedAt = record['decidedAt'];
   if (!Number.isSafeInteger(version) || (version as number) < 1
     || !Number.isSafeInteger(aggregateVersion) || (aggregateVersion as number) < 1
-    || !['PENDING', 'APPROVED', 'REVISION_REQUIRED', 'DISPUTED'].includes(String(buyerDecision))) {
+    || !['PENDING', 'APPROVED', 'REVISION_REQUIRED', 'DISPUTED'].includes(String(buyerDecision))
+    || (buyerDecisionHash !== undefined && typeof buyerDecisionHash !== 'string')
+    || (decidedAt !== undefined && typeof decidedAt !== 'string')) {
     throw new AppError('LEDGER_UNAVAILABLE');
   }
   const result: LedgerWorkEvidence = {
@@ -59,10 +63,10 @@ export function normalizeEvidence(value: unknown): LedgerWorkEvidence {
     buyerDecision: buyerDecision as LedgerWorkEvidence['buyerDecision'],
     fabricTxId: requiredString(record, 'fabricTxId', ID),
     aggregateVersion: aggregateVersion as number,
-    ...(record['buyerDecisionHash'] === undefined
+    ...(buyerDecisionHash === undefined || buyerDecisionHash === ''
       ? {}
       : { buyerDecisionHash: requiredString(record, 'buyerDecisionHash', HASH) }),
-    ...(record['decidedAt'] === undefined ? {} : { decidedAt: requiredString(record, 'decidedAt') }),
+    ...(decidedAt === undefined || decidedAt === '' ? {} : { decidedAt: requiredString(record, 'decidedAt') }),
   };
   if (Number.isNaN(Date.parse(result.submittedAt))
     || (result.decidedAt !== undefined && Number.isNaN(Date.parse(result.decidedAt)))) {

@@ -58,9 +58,6 @@ export function testConfig(overrides: NodeJS.ProcessEnv = {}): ExecutorConfig {
 }
 
 export function baseClaims(command: CommandContext, nowSeconds: number): PermitClaims {
-  const dealId = command.action === "create"
-    ? (command.body as { dealId: string }).dealId
-    : decodeURIComponent(command.path.split("/")[2] ?? "");
   return {
     iss: "test-fabric-gateway",
     aud: "test-algorand-executor",
@@ -75,10 +72,7 @@ export function baseClaims(command: CommandContext, nowSeconds: number): PermitC
     idempotencyKey: command.idempotencyKey,
     commandHash: "sha256:" + "0".repeat(64),
     fabricTransactionId: `FABRIC-${command.idempotencyKey}`,
-    authoritativeReads: [{
-      path: `/ledger/deals/${encodeURIComponent(dealId)}/algorand-authorization`,
-      dataHash: "sha256:" + "1".repeat(64),
-    }],
+    authoritativeReads: [],
   } as PermitClaims;
 }
 

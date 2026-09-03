@@ -58,7 +58,7 @@ committed.
 | Settlement | Algorand ARC-4, Algorand TypeScript/Puya, AlgoKit | Provider-to-provider test-USDC escrow. |
 | FX | Frankfurter reference adapter with fixtures | PLN/USD and USD/INR legs with expiry and fixed-point math. |
 | AI | OpenAI Responses API with fixture fallback | Explainable shortlist, drafting and advisory analysis. |
-| Runtime | Docker Compose; Algorand LocalNet; separately started Fabric test network | Free offline demo, with TestNet as the public proof mode. |
+| Runtime | Docker Compose, AlgoKit LocalNet, isolated Fabric network | One-command, offline, real-ledger acceptance profile; TestNet is a deferred public proof mode. |
 
 Algorand TestNet uses Circle's zero-value USDC ASA `10458941`, scale six.
 LocalNet creates a zero-value `OptiUSD-DEMO` ASA. Mainnet is rejected by
@@ -142,10 +142,13 @@ India import/outward requests, not to the inward freelancer payment.
 
 - `demo`: in-process adapters, deterministic FX/AI fixtures and no external
   infrastructure; used by tests and the one-command UI demo.
-- `local`: PostgreSQL, MinIO and Keycloak in Docker, with AlgoKit LocalNet and
-  the Fabric test network started by their own tooling; zero monetary value and
-  no public dependency. The default Compose demo keeps both ledgers simulated.
-- `testnet`: the same app with isolated provider keys, Algorand TestNet, official
-  test USDC and explorer links. Fabric remains permissioned and local/hosted.
+- `local`: `pnpm local:e2e` orchestrates PostgreSQL, MinIO, the real Fabric
+  chaincode/Gateway, AlgoKit LocalNet, a deployed ARC-4 escrow and the durable
+  executor. Authentication is the explicitly guarded local demo mode; AI and FX
+  remain deterministic fixtures. It has zero monetary value and no public
+  dependency.
+- `testnet`: the same application shape with isolated provider keys, Algorand
+  TestNet, official test USDC and explorer links. Public deployment and
+  production OIDC are intentionally deferred until the LocalNet gate passes.
 
 Production/mainnet configuration is intentionally unsupported.

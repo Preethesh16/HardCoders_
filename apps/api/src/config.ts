@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 /**
  * Runtime configuration.
  *
@@ -47,14 +49,29 @@ export interface ApiConfig {
     readonly executorToken?: string;
     readonly network: 'localnet' | 'testnet';
     readonly explorerBaseUrl: string;
+    readonly deployment?: AlgorandDeploymentManifest;
   };
   readonly fabric: {
     readonly mode: 'gateway' | 'mock';
+    readonly gatewayAuthMode: 'demo' | 'bearer';
     readonly gatewayUrl?: string;
     readonly gatewayToken?: string;
     readonly gatewayTimeoutMs: number;
     readonly evidenceFixturePath?: string;
   };
+}
+
+export interface AlgorandDeploymentManifest {
+  readonly schemaVersion: '1.0';
+  readonly network: 'localnet' | 'testnet';
+  readonly genesisHash: string;
+  readonly applicationId: string;
+  readonly assetId: number;
+  readonly executorAddress: string;
+  readonly providers: Readonly<Record<string, {
+    readonly originAddress: string;
+    readonly destinationAddress: string;
+  }>>;
 }
 
 const text = (env: NodeJS.ProcessEnv, key: string): string | undefined => {
@@ -81,6 +98,46 @@ function choice<T extends string>(env: NodeJS.ProcessEnv, key: string, allowed: 
   return raw as T;
 }
 
+function loadAlgorandManifest(path: string | undefined): AlgorandDeploymentManifest | undefined {
+  if (path === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+  } catch {
+    throw new Error('ALGORAND_DEPLOYMENT_MANIFEST_PATH must reference readable JSON.');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('The Algorand deployment manifest is invalid.');
+  }
+  const record = parsed as Record<string, unknown>;
+  const providers = record['providers'];
+  const applicationId = record['applicationId'];
+  const assetId = record['assetId'];
+  const address = /^[A-Z2-7]{58}$/u;
+  if (record['schemaVersion'] !== '1.0'
+    || (record['network'] !== 'localnet' && record['network'] !== 'testnet')
+    || typeof record['genesisHash'] !== 'string' || record['genesisHash'].length < 16
+    || typeof applicationId !== 'string' || !/^[1-9][0-9]*$/u.test(applicationId)
+    || !Number.isSafeInteger(assetId) || (assetId as number) < 1
+    || typeof record['executorAddress'] !== 'string' || !address.test(record['executorAddress'])
+    || typeof providers !== 'object' || providers === null || Array.isArray(providers)) {
+    throw new Error('The Algorand deployment manifest is invalid.');
+  }
+  for (const [bookId, pair] of Object.entries(providers as Record<string, unknown>)) {
+    if (!['PL-IN-INWARD', 'IN-GB-OUTWARD'].includes(bookId)
+      || typeof pair !== 'object' || pair === null || Array.isArray(pair)
+      || !address.test(String((pair as Record<string, unknown>)['originAddress']))
+      || !address.test(String((pair as Record<string, unknown>)['destinationAddress']))) {
+      throw new Error(`The Algorand provider mapping for ${bookId} is invalid.`);
+    }
+  }
+  if (!['PL-IN-INWARD', 'IN-GB-OUTWARD'].every((bookId) => Object.hasOwn(providers, bookId))
+    || Object.keys(providers).length !== 2) {
+    throw new Error('The Algorand deployment manifest must map both supported corridor books exactly once.');
+  }
+  return parsed as AlgorandDeploymentManifest;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const profile = choice(env, 'OPTIWORK_PROFILE', ['demo', 'local', 'testnet'] as const, 'demo');
   const databaseUrl = text(env, 'DATABASE_URL');
@@ -97,8 +154,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const algorandMode = choice(env, 'ALGORAND_MODE', ['executor', 'simulated'] as const, profile === 'demo' ? 'simulated' : 'executor');
   const executorUrl = text(env, 'ALGORAND_EXECUTOR_URL');
   const executorToken = text(env, 'ALGORAND_EXECUTOR_TOKEN');
+  const algorandNetwork = choice(env, 'ALGORAND_NETWORK', ['localnet', 'testnet'] as const, 'localnet');
+  const algorandManifest = loadAlgorandManifest(text(env, 'ALGORAND_DEPLOYMENT_MANIFEST_PATH'));
   if (algorandMode === 'executor' && (executorUrl === undefined || executorToken === undefined)) {
     throw new Error('ALGORAND_MODE=executor requires ALGORAND_EXECUTOR_URL and ALGORAND_EXECUTOR_TOKEN.');
+  }
+  if (algorandMode === 'executor' && algorandManifest === undefined) {
+    throw new Error('ALGORAND_MODE=executor requires ALGORAND_DEPLOYMENT_MANIFEST_PATH.');
+  }
+  if (algorandManifest !== undefined && algorandManifest.network !== algorandNetwork) {
+    throw new Error('The Algorand deployment manifest network does not match ALGORAND_NETWORK.');
   }
 
   const authMode = choice(env, 'AUTH_MODE', ['oidc', 'demo'] as const, profile === 'demo' ? 'demo' : 'oidc');
@@ -113,6 +178,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const fabricGatewayToken = text(env, 'FABRIC_GATEWAY_TOKEN');
   if ((fabricMode === 'gateway' || algorandMode === 'executor') && fabricGatewayUrl === undefined) {
     throw new Error('Fabric Gateway URL is required for gateway or executor mode.');
+  }
+  const fabricGatewayAuthMode = choice(
+    env,
+    'FABRIC_GATEWAY_AUTH_MODE',
+    ['demo', 'bearer'] as const,
+    profile === 'demo' ? 'demo' : 'bearer',
+  );
+  if (fabricGatewayAuthMode === 'demo') {
+    if (profile !== 'demo') throw new Error('Fabric Gateway demo authentication is allowed only in the demo profile.');
+    if (fabricGatewayUrl !== undefined) {
+      const hostname = new URL(fabricGatewayUrl).hostname;
+      if (!['127.0.0.1', 'localhost', 'fabric-gateway'].includes(hostname)) {
+        throw new Error('Fabric Gateway demo authentication requires a loopback or local Compose Gateway URL.');
+      }
+    }
+  } else if (fabricMode === 'gateway' && fabricGatewayToken === undefined) {
+    throw new Error('Fabric Gateway bearer authentication requires FABRIC_GATEWAY_TOKEN.');
   }
 
   return {
@@ -152,11 +234,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       mode: algorandMode,
       ...(executorUrl === undefined ? {} : { executorUrl }),
       ...(executorToken === undefined ? {} : { executorToken }),
-      network: choice(env, 'ALGORAND_NETWORK', ['localnet', 'testnet'] as const, 'localnet'),
+      network: algorandNetwork,
       explorerBaseUrl: text(env, 'ALGORAND_EXPLORER_BASE_URL') ?? 'https://lora.algokit.io/testnet',
+      ...(algorandManifest === undefined ? {} : { deployment: algorandManifest }),
     },
     fabric: {
       mode: fabricMode,
+      gatewayAuthMode: fabricGatewayAuthMode,
       ...(fabricGatewayUrl === undefined ? {} : { gatewayUrl: fabricGatewayUrl }),
       ...(fabricGatewayToken === undefined ? {} : { gatewayToken: fabricGatewayToken }),
       gatewayTimeoutMs: integer(env, 'FABRIC_GATEWAY_TIMEOUT_MS', 4_000, 250, 30_000),

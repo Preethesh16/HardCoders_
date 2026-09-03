@@ -15,7 +15,11 @@
     "typecheck": "turbo run typecheck",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "infra:up": "docker compose -f infra/docker-compose.yml --profile full up -d",
-    "infra:down": "docker compose -f infra/docker-compose.yml --profile full down"
+    "infra:down": "docker compose -f infra/docker-compose.yml --profile full down",
+    "local:up": "bash scripts/local.sh up",
+    "local:down": "bash scripts/local.sh down",
+    "local:status": "bash scripts/local.sh status",
+    "local:e2e": "bash scripts/local.sh e2e"
   },
   "devDependencies": {
     "turbo": "2.5.6",

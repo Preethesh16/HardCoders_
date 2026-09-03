@@ -94,7 +94,7 @@ permit, or points at a different approval transaction.
 Three implementations ship:
 
 - `HttpFabricEvidenceReader` — the real Gateway projection
-  (`GET /ledger/deals/:dealId/milestones/:milestoneId/work-evidence`), selected by
+  (`GET /v1/evidence/:evidenceId/projection`), selected by
   `FABRIC_EVIDENCE_MODE=gateway`.
 - `FileFabricEvidenceReader` — reads a shared JSON fixture on every call, for the
   offline demo. Selected by `FABRIC_EVIDENCE_MODE=mock` plus

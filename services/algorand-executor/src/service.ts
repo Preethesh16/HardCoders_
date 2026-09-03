@@ -353,7 +353,7 @@ export class ExecutorService {
       || binding.genesisHash !== this.config.ALGORAND_GENESIS_HASH
       || binding.applicationId !== this.config.ALGORAND_APPLICATION_ID.toString()
       || BigInt(binding.assetId) !== this.config.ALGORAND_ASSET_ID
-      || binding.originProviderAddress !== this.config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS) {
+      || !this.config.originProviderTreasuries.has(binding.originProviderAddress)) {
       throw conflict("The escrow is bound to another Algorand deployment.");
     }
   }

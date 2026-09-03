@@ -54,16 +54,16 @@ function release(config: ReturnType<typeof testConfig>, leaseSeconds: number): {
     action: "release", method: "POST", path: "/escrows/DEAL-001/releases", idempotencyKey: `RELEASE-${leaseSeconds}`, body,
   };
   const nowSeconds = Math.floor(now / 1_000);
-  const base = "/ledger/deals/DEAL-001/milestones/MS-001/payment-intents/INTENT-001";
   const claims: PermitClaims = {
     iss: config.FABRIC_PERMIT_ISSUER, aud: config.FABRIC_PERMIT_AUDIENCE, sub: "optiwork-payments",
     jti: `permit-release-${leaseSeconds}`, iat: nowSeconds, exp: nowSeconds + 20,
     schemaVersion: "1.0", action: "release", method: "POST", path: command.path,
     idempotencyKey: command.idempotencyKey, commandHash: commandHash(command),
     fabricTransactionId: "FABRIC-CLAIM-001",
-    authoritativeReads: [base, `${base}/binding`, `${base}/fence`].map((path, index) => ({
-      path, dataHash: `sha256:${String(index + 1).repeat(64)}`,
-    })),
+    authoritativeReads: [{
+      path: `/v1/evidence/${body.evidenceId}/projection`,
+      dataHash: body.releaseBinding.workEvidenceHash,
+    }],
     releaseAuthorization: {
       ...body,
     },
@@ -81,7 +81,7 @@ describe("signed Fabric action permits", () => {
       jti: "permit-create-1", iat: seconds, exp: seconds + 20, schemaVersion: "1.0",
       action: "create", method: "POST", path: command.path, idempotencyKey: command.idempotencyKey,
       commandHash: commandHash(command), fabricTransactionId: "FABRIC-CREATE-001",
-      authoritativeReads: [{ path: "/ledger/deals/DEAL-001/algorand-authorization", dataHash: `sha256:${"d".repeat(64)}` }],
+      authoritativeReads: [],
     };
     const compact = await sign(claims);
     await expect(verifier.verify(compact, command)).resolves.toMatchObject({ action: "create" });

@@ -19,7 +19,7 @@ RUN pnpm install --frozen-lockfile
 COPY packages packages
 COPY apps/api apps/api
 RUN pnpm --filter @optiwork/contracts --filter @optiwork/domain --filter @optiwork/api build \
- && pnpm deploy --filter @optiwork/api --prod /app
+ && pnpm deploy --legacy --filter @optiwork/api --prod /app
 
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production

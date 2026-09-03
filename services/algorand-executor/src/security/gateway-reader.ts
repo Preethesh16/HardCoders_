@@ -83,7 +83,7 @@ export class HttpAuthoritativeFabricReader implements AuthoritativeFabricReader 
 
   async readiness(): Promise<boolean> {
     try {
-      await this.accessToken();
+      if (this.config.fabricGatewayAuth.mode !== "demo") await this.accessToken();
       return true;
     } catch {
       return false;
@@ -130,7 +130,7 @@ export class HttpAuthoritativeFabricReader implements AuthoritativeFabricReader 
   }
 
   private async read(path: string): Promise<unknown> {
-    let accessToken = await this.accessToken();
+    let accessToken = this.config.fabricGatewayAuth.mode === "demo" ? "" : await this.accessToken();
     let response = await this.fabricRequest(path, accessToken);
     if (response.status === 401 && this.config.fabricGatewayAuth.mode === "oidc") {
       this.invalidateAccessToken(accessToken);
@@ -164,7 +164,11 @@ export class HttpAuthoritativeFabricReader implements AuthoritativeFabricReader 
         signal: AbortSignal.timeout(this.config.FABRIC_GATEWAY_TIMEOUT_MS),
         headers: {
           accept: "application/json",
-          authorization: `Bearer ${accessToken}`,
+          ...(this.config.fabricGatewayAuth.mode === "demo" ? {
+            "x-demo-subject": "optiwork-executor",
+            "x-demo-organization": "optiwork-platform",
+            "x-demo-role": "payments_service",
+          } : { authorization: `Bearer ${accessToken}` }),
         },
       });
     } catch {
@@ -174,6 +178,7 @@ export class HttpAuthoritativeFabricReader implements AuthoritativeFabricReader 
 
   private async accessToken(): Promise<string> {
     const auth = this.config.fabricGatewayAuth;
+    if (auth.mode === "demo") return "";
     if (auth.mode === "static") return auth.bearerToken;
     const cached = this.cachedAccessToken;
     if (cached !== undefined && cached.refreshAtMs > Date.now()) return cached.value;

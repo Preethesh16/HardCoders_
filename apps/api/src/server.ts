@@ -2,8 +2,10 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createContext } from './context.js';
 import { seedDemo } from './demo/seed.js';
+import { migrateDatabase } from './db/migrate.js';
 
 const config = loadConfig();
+if (config.databaseUrl !== undefined) await migrateDatabase(config.databaseUrl);
 const context = createContext(config);
 const app = await buildApp({ logger: true, config, context });
 

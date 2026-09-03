@@ -18,8 +18,8 @@ type WorkEvidence struct {
 	Version              uint64 `json:"version"`
 	SubmittedAt          string `json:"submittedAt"`
 	BuyerDecision        string `json:"buyerDecision"`
-	BuyerDecisionHash    string `json:"buyerDecisionHash,omitempty"`
-	DecidedAt            string `json:"decidedAt,omitempty"`
+	BuyerDecisionHash    string `json:"buyerDecisionHash"`
+	DecidedAt            string `json:"decidedAt"`
 	FabricTxID           string `json:"fabricTxId"`
 	AggregateVersion     uint64 `json:"aggregateVersion"`
 }

@@ -150,14 +150,13 @@ function claims(command: CommandContext, release?: ReleaseInput): PermitClaims {
     schemaVersion: "1.0" as const, method: "POST" as const, path: command.path,
     idempotencyKey: command.idempotencyKey, commandHash: commandHash(command),
     fabricTransactionId: claimTransactionId,
-    authoritativeReads: [{ path: "/ledger/deals/DEAL-001/algorand-authorization", dataHash: `sha256:${"a".repeat(64)}` }],
+    authoritativeReads: [],
   };
   return command.action === "release" ? {
-    ...common, action: "release", authoritativeReads: [
-      "/ledger/deals/DEAL-001/milestones/MS-001/payment-intents/INTENT-001",
-      "/ledger/deals/DEAL-001/milestones/MS-001/payment-intents/INTENT-001/binding",
-      "/ledger/deals/DEAL-001/milestones/MS-001/payment-intents/INTENT-001/fence",
-    ].map((path) => ({ path, dataHash: `sha256:${"b".repeat(64)}` })),
+    ...common, action: "release", authoritativeReads: [{
+      path: `/v1/evidence/${encodeURIComponent(release!.evidenceId)}/projection`,
+      dataHash: release!.releaseBinding.workEvidenceHash,
+    }],
     releaseAuthorization: { ...release!, fabricClaimTransactionId: claimTransactionId },
   } : { ...common, action: command.action } as PermitClaims;
 }

@@ -15,7 +15,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { canonicalHash } from '../canonical.js';
-import { conflict, notFound, unavailable } from '../errors.js';
+import { conflict, forbidden, notFound, unavailable } from '../errors.js';
 import { sha256Text } from '../runtime.js';
 
 export type BuyerDecision = 'PENDING' | 'APPROVED' | 'REVISION_REQUIRED' | 'DISPUTED';
@@ -48,12 +48,17 @@ export interface SubmissionCommitment {
   readonly submittedAt: string;
 }
 
+export interface FabricActorContext {
+  readonly subject: string;
+  readonly organizationId: string;
+  readonly role: 'company_member' | 'freelancer' | 'supplier' | 'payments_service';
+}
+
 export interface DecisionCommitment {
-  readonly dealId: string;
-  readonly milestoneId: string;
+  readonly evidenceId: string;
   readonly decision: Exclude<BuyerDecision, 'PENDING'>;
-  readonly buyerRef: string;
-  readonly decidedAt: string;
+  readonly expectedFileHash: string;
+  readonly expectedVersion: number;
 }
 
 export interface FabricRecord {
@@ -63,9 +68,9 @@ export interface FabricRecord {
 
 export interface FabricEvidenceReader {
   readonly mode: 'gateway' | 'mock';
-  recordSubmission(commitment: SubmissionCommitment): Promise<FabricRecord>;
-  recordDecision(commitment: DecisionCommitment): Promise<FabricRecord>;
-  read(dealId: string, milestoneId: string): Promise<WorkEvidence | null>;
+  recordSubmission(actor: FabricActorContext, commitment: SubmissionCommitment): Promise<FabricRecord>;
+  recordDecision(actor: FabricActorContext, commitment: DecisionCommitment): Promise<FabricRecord>;
+  read(evidenceId: string): Promise<WorkEvidence | null>;
 }
 
 /** The canonical hash the executor and the Gateway must both reproduce. */
@@ -82,10 +87,6 @@ export function buyerOrganizationRef(organizationId: string): string {
   return `buyer:${sha256Text(`optiwork.fabric.buyer-organization-ref.v1\0${organizationId}`).slice(7)}`;
 }
 
-function key(dealId: string, milestoneId: string): string {
-  return `${encodeURIComponent(dealId)}/${encodeURIComponent(milestoneId)}`;
-}
-
 /**
  * In-memory Fabric stand-in.
  *
@@ -98,14 +99,24 @@ function key(dealId: string, milestoneId: string): string {
 export class MockFabricEvidenceReader implements FabricEvidenceReader {
   readonly mode = 'mock' as const;
   readonly #records = new Map<string, WorkEvidence>();
+  readonly #owners = new Map<string, { sellerOrganizationId: string; buyerOrganizationRef: string }>();
   #sequence = 0;
 
   constructor(private readonly fixturePath?: string) {}
 
-  async recordSubmission(commitment: SubmissionCommitment): Promise<FabricRecord> {
-    const existing = this.#records.get(key(commitment.dealId, commitment.milestoneId));
-    if (existing && existing.version >= commitment.version) {
-      throw conflict(`Fabric already holds version ${existing.version} for this milestone.`);
+  async recordSubmission(actor: FabricActorContext, commitment: SubmissionCommitment): Promise<FabricRecord> {
+    if (actor.role !== 'freelancer' && actor.role !== 'supplier') throw forbidden();
+    const existing = this.#records.get(commitment.evidenceId);
+    const owner = this.#owners.get(commitment.evidenceId);
+    if (existing === undefined && commitment.version !== 1) {
+      throw conflict('A Fabric evidence aggregate must begin at version 1.');
+    }
+    if (existing && (existing.buyerDecision !== 'REVISION_REQUIRED' || commitment.version !== existing.version + 1)) {
+      throw conflict(`Fabric cannot accept version ${commitment.version} after ${existing.buyerDecision}.`);
+    }
+    if (owner && (owner.sellerOrganizationId !== actor.organizationId
+      || owner.buyerOrganizationRef !== commitment.buyerOrganizationRef)) {
+      throw forbidden('The Fabric evidence aggregate belongs to another organization.');
     }
     const evidence: WorkEvidence = {
       evidenceId: commitment.evidenceId,
@@ -117,40 +128,48 @@ export class MockFabricEvidenceReader implements FabricEvidenceReader {
       submittedAt: commitment.submittedAt,
       buyerDecision: 'PENDING',
     };
-    return this.#write(commitment.dealId, commitment.milestoneId, evidence, 'SUBMIT');
+    this.#owners.set(commitment.evidenceId, {
+      sellerOrganizationId: actor.organizationId,
+      buyerOrganizationRef: commitment.buyerOrganizationRef,
+    });
+    return this.#write(evidence, 'SUBMIT');
   }
 
-  async recordDecision(commitment: DecisionCommitment): Promise<FabricRecord> {
-    const current = this.#records.get(key(commitment.dealId, commitment.milestoneId));
+  async recordDecision(actor: FabricActorContext, commitment: DecisionCommitment): Promise<FabricRecord> {
+    if (actor.role !== 'company_member') throw forbidden();
+    const current = this.#records.get(commitment.evidenceId);
     if (!current) throw notFound('Fabric holds no submission for this milestone.');
+    const owner = this.#owners.get(commitment.evidenceId);
+    if (!owner || owner.buyerOrganizationRef !== buyerOrganizationRef(actor.organizationId)) throw forbidden();
     if (current.buyerDecision !== 'PENDING') {
       throw conflict(`Fabric already recorded decision ${current.buyerDecision} for this version.`);
+    }
+    if (current.fileHash !== commitment.expectedFileHash || current.version !== commitment.expectedVersion) {
+      throw conflict('The Fabric evidence version changed before the buyer decision.');
     }
     const buyerDecisionHash = canonicalHash({
       evidenceId: current.evidenceId,
       fileHash: current.fileHash,
       version: current.version,
       decision: commitment.decision,
-      buyerRef: commitment.buyerRef,
-      decidedAt: commitment.decidedAt,
+      buyerOrganizationRef: owner.buyerOrganizationRef,
     });
+    const decidedAt = new Date().toISOString();
     const evidence: WorkEvidence = {
       ...current,
       buyerDecision: commitment.decision,
       buyerDecisionHash,
-      decidedAt: commitment.decidedAt,
+      decidedAt,
     };
-    return this.#write(commitment.dealId, commitment.milestoneId, evidence, 'DECIDE');
+    return this.#write(evidence, 'DECIDE');
   }
 
-  async read(dealId: string, milestoneId: string): Promise<WorkEvidence | null> {
-    const found = this.#records.get(key(dealId, milestoneId));
+  async read(evidenceId: string): Promise<WorkEvidence | null> {
+    const found = this.#records.get(evidenceId);
     return found ? structuredClone(found) : null;
   }
 
   async #write(
-    dealId: string,
-    milestoneId: string,
     evidence: WorkEvidence,
     action: 'SUBMIT' | 'DECIDE',
   ): Promise<FabricRecord> {
@@ -160,7 +179,7 @@ export class MockFabricEvidenceReader implements FabricEvidenceReader {
     const fabricTxId = `FABRIC-${action}-${String(this.#sequence).padStart(6, '0')}-`
       + `${workEvidenceHash(evidence).slice(7, 19)}`;
     const stored: WorkEvidence = { ...evidence, fabricTxId };
-    this.#records.set(key(dealId, milestoneId), stored);
+    this.#records.set(evidence.evidenceId, stored);
     await this.#mirror();
     return { evidence: structuredClone(stored), fabricTxId };
   }
@@ -172,8 +191,8 @@ export class MockFabricEvidenceReader implements FabricEvidenceReader {
   async #mirror(): Promise<void> {
     if (!this.fixturePath) return;
     const evidence: Record<string, WorkEvidence> = {};
-    for (const [path, record] of this.#records) {
-      if (record.buyerDecision === 'APPROVED') evidence[path] = record;
+    for (const [evidenceId, record] of this.#records) {
+      if (record.buyerDecision === 'APPROVED') evidence[evidenceId] = record;
     }
     try {
       await mkdir(dirname(this.fixturePath), { recursive: true });
@@ -190,6 +209,11 @@ interface Envelope {
   readonly error: null;
 }
 
+interface GatewayAuth {
+  readonly mode: 'demo' | 'bearer';
+  readonly bearerToken?: string;
+}
+
 /**
  * Gateway-backed reader. Writes are the Fabric workstream's responsibility, so
  * this implementation reads the same projection the executor reads and refuses
@@ -200,39 +224,120 @@ export class GatewayFabricEvidenceReader implements FabricEvidenceReader {
 
   constructor(
     private readonly gatewayUrl: string,
-    private readonly authorization: () => Promise<string>,
+    private readonly auth: GatewayAuth,
     private readonly timeoutMs = 4_000,
   ) {}
 
-  async recordSubmission(): Promise<FabricRecord> {
-    throw unavailable('Writing work evidence is owned by the Fabric Gateway workstream.');
+  async recordSubmission(actor: FabricActorContext, commitment: SubmissionCommitment): Promise<FabricRecord> {
+    const evidence = await this.#request('/v1/evidence', 'POST', actor, {
+      evidenceId: commitment.evidenceId,
+      contractHash: commitment.contractHash,
+      milestoneHash: commitment.milestoneHash,
+      fileHash: commitment.fileHash,
+      buyerOrganizationRef: commitment.buyerOrganizationRef,
+      version: commitment.version,
+    }, `submit-${commitment.evidenceId}-v${commitment.version}`);
+    return this.#record(evidence);
   }
 
-  async recordDecision(): Promise<FabricRecord> {
-    throw unavailable('Writing buyer decisions is owned by the Fabric Gateway workstream.');
+  async recordDecision(actor: FabricActorContext, commitment: DecisionCommitment): Promise<FabricRecord> {
+    const evidence = await this.#request(
+      `/v1/evidence/${encodeURIComponent(commitment.evidenceId)}/decisions`,
+      'POST',
+      actor,
+      {
+        decision: commitment.decision,
+        expectedFileHash: commitment.expectedFileHash,
+        expectedVersion: commitment.expectedVersion,
+      },
+      `decide-${commitment.evidenceId}-v${commitment.expectedVersion}-${commitment.decision}`,
+    );
+    return this.#record(evidence);
   }
 
-  async read(dealId: string, milestoneId: string): Promise<WorkEvidence | null> {
-    const target = new URL(this.gatewayUrl);
-    target.pathname = `${target.pathname.replace(/\/$/u, '')}`
-      + `/ledger/deals/${encodeURIComponent(dealId)}`
-      + `/milestones/${encodeURIComponent(milestoneId)}/work-evidence`;
+  async read(evidenceId: string): Promise<WorkEvidence | null> {
+    const serviceActor: FabricActorContext = {
+      subject: 'optiwork-payments', organizationId: 'optiwork-platform', role: 'payments_service',
+    };
+    const result = await this.#request(
+      `/v1/evidence/${encodeURIComponent(evidenceId)}/projection`, 'GET', serviceActor,
+    );
+    return result === null ? null : this.#project(result);
+  }
+
+  async #request(
+    path: string,
+    method: 'GET' | 'POST',
+    actor: FabricActorContext,
+    body?: unknown,
+    idempotencyKey?: string,
+  ): Promise<unknown | null> {
+    const target = new URL(path, `${this.gatewayUrl.replace(/\/$/u, '')}/`);
+    const headers: Record<string, string> = { accept: 'application/json' };
+    if (body !== undefined) headers['content-type'] = 'application/json';
+    if (idempotencyKey !== undefined) headers['idempotency-key'] = idempotencyKey;
+    if (this.auth.mode === 'demo') {
+      headers['x-demo-subject'] = actor.subject;
+      headers['x-demo-organization'] = actor.organizationId;
+      headers['x-demo-role'] = actor.role;
+    } else if (this.auth.bearerToken !== undefined) {
+      headers['authorization'] = `Bearer ${this.auth.bearerToken}`;
+    }
     let response: Response;
     try {
       response = await fetch(target, {
-        method: 'GET',
+        method,
         redirect: 'error',
         cache: 'no-store',
         signal: AbortSignal.timeout(this.timeoutMs),
-        headers: { accept: 'application/json', authorization: await this.authorization() },
+        headers,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch {
       throw unavailable('The Fabric Gateway is unreachable.');
     }
     if (response.status === 404) return null;
-    if (!response.ok) throw unavailable('The Fabric Gateway rejected the read.');
+    if (response.status === 403) throw forbidden('The Fabric Gateway rejected the actor.');
+    if (response.status === 409) throw conflict('The Fabric Gateway rejected a stale or duplicate command.');
+    if (!response.ok) throw unavailable('The Fabric Gateway rejected the request.');
     const envelope = await response.json() as Envelope;
-    return envelope.data as WorkEvidence;
+    if (envelope.success !== true || envelope.error !== null) throw unavailable('The Fabric Gateway returned an invalid envelope.');
+    return envelope.data;
+  }
+
+  #record(value: unknown): FabricRecord {
+    const evidence = this.#project(value);
+    if (!evidence.fabricTxId) throw unavailable('The Fabric Gateway omitted the transaction identifier.');
+    return { evidence, fabricTxId: evidence.fabricTxId };
+  }
+
+  #project(value: unknown): WorkEvidence {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw unavailable('The Fabric Gateway returned invalid evidence.');
+    }
+    const record = value as Record<string, unknown>;
+    const subjectRef = typeof record['subjectRef'] === 'string'
+      ? record['subjectRef']
+      : record['sellerIdentityRef'];
+    const required = ['evidenceId', 'contractHash', 'milestoneHash', 'fileHash', 'submittedAt', 'buyerDecision'];
+    if (required.some((key) => typeof record[key] !== 'string')
+      || typeof subjectRef !== 'string'
+      || !Number.isSafeInteger(record['version'])) {
+      throw unavailable('The Fabric Gateway returned invalid evidence.');
+    }
+    return {
+      evidenceId: record['evidenceId'] as string,
+      contractHash: record['contractHash'] as string,
+      milestoneHash: record['milestoneHash'] as string,
+      fileHash: record['fileHash'] as string,
+      subjectRef,
+      version: record['version'] as number,
+      submittedAt: record['submittedAt'] as string,
+      buyerDecision: record['buyerDecision'] as BuyerDecision,
+      ...(typeof record['buyerDecisionHash'] === 'string' ? { buyerDecisionHash: record['buyerDecisionHash'] } : {}),
+      ...(typeof record['decidedAt'] === 'string' ? { decidedAt: record['decidedAt'] } : {}),
+      ...(typeof record['fabricTxId'] === 'string' ? { fabricTxId: record['fabricTxId'] } : {}),
+    };
   }
 }
 
