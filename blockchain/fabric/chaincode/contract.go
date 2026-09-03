@@ -42,6 +42,18 @@ func actor(ctx contractapi.TransactionContextInterface, expectedRole string) (st
 	return id, nil
 }
 
+func reader(ctx contractapi.TransactionContextInterface) error {
+	identity := ctx.GetClientIdentity()
+	if identity == nil {
+		return errors.New("valid Fabric identity required")
+	}
+	id, err := identity.GetID()
+	if err != nil || id == "" {
+		return errors.New("Fabric identity cannot be resolved")
+	}
+	return nil
+}
+
 func (s *SmartContract) SubmitWorkEvidence(
 	ctx contractapi.TransactionContextInterface,
 	evidenceID, contractHash, milestoneHash, fileHash, sellerIdentityRef string,
@@ -96,7 +108,9 @@ func (s *SmartContract) SubmitWorkEvidence(
 
 func (s *SmartContract) DecideWorkEvidence(
 	ctx contractapi.TransactionContextInterface,
-	evidenceID, decision, expectedFileHash, buyerDecisionHash, idempotencyKey string,
+	evidenceID, decision, expectedFileHash string,
+	expectedVersion uint64,
+	buyerDecisionHash, idempotencyKey string,
 ) (*WorkEvidence, error) {
 	identity, err := actor(ctx, "buyer")
 	if err != nil {
@@ -105,7 +119,7 @@ func (s *SmartContract) DecideWorkEvidence(
 	if err := validateIdentifier(idempotencyKey, "idempotencyKey"); err != nil {
 		return nil, err
 	}
-	fingerprint := hashParts(evidenceID, decision, expectedFileHash, buyerDecisionHash)
+	fingerprint := hashParts(evidenceID, decision, expectedFileHash, fmt.Sprint(expectedVersion), buyerDecisionHash)
 	if replay, err := readReplay(ctx, commandKey(identity, "decide", idempotencyKey), fingerprint); err != nil || replay != nil {
 		return replay, err
 	}
@@ -113,7 +127,7 @@ func (s *SmartContract) DecideWorkEvidence(
 	if err != nil {
 		return nil, err
 	}
-	if err := applyDecision(evidence, decision, expectedFileHash, buyerDecisionHash); err != nil {
+	if err := applyDecision(evidence, decision, expectedFileHash, expectedVersion, buyerDecisionHash); err != nil {
 		return nil, err
 	}
 	evidence.DecidedAt, err = timestamp(ctx)
@@ -137,6 +151,9 @@ func (s *SmartContract) DecideWorkEvidence(
 var errNotFound = errors.New("work evidence not found")
 
 func (s *SmartContract) GetWorkEvidence(ctx contractapi.TransactionContextInterface, evidenceID string) (*WorkEvidence, error) {
+	if err := reader(ctx); err != nil {
+		return nil, err
+	}
 	if err := validateIdentifier(evidenceID, "evidenceId"); err != nil {
 		return nil, err
 	}
@@ -152,6 +169,107 @@ func (s *SmartContract) GetWorkEvidence(ctx contractapi.TransactionContextInterf
 		return nil, errors.New("stored work evidence is invalid")
 	}
 	return &evidence, nil
+}
+
+const (
+	maxHistoryEntries       = 64
+	maxHistoryResponseBytes = 512 * 1024
+)
+
+func (s *SmartContract) GetWorkEvidenceHistory(
+	ctx contractapi.TransactionContextInterface,
+	evidenceID string,
+) ([]WorkEvidenceHistoryEntry, error) {
+	if err := reader(ctx); err != nil {
+		return nil, err
+	}
+	if err := validateIdentifier(evidenceID, "evidenceId"); err != nil {
+		return nil, err
+	}
+	iterator, err := ctx.GetStub().GetHistoryForKey(evidenceKey(evidenceID))
+	if err != nil {
+		return nil, errors.New("unable to read work evidence history")
+	}
+	defer iterator.Close()
+
+	entries := make([]WorkEvidenceHistoryEntry, 0)
+	responseBytes := 0
+	for iterator.HasNext() {
+		if len(entries) >= maxHistoryEntries {
+			return nil, errors.New("work evidence history exceeds the bounded response limit")
+		}
+		modification, err := iterator.Next()
+		if err != nil {
+			return nil, errors.New("unable to read work evidence history entry")
+		}
+		if modification.Timestamp == nil {
+			return nil, errors.New("work evidence history entry has no timestamp")
+		}
+		entry := WorkEvidenceHistoryEntry{
+			TransactionID: modification.TxId,
+			Timestamp: time.Unix(
+				modification.Timestamp.Seconds,
+				int64(modification.Timestamp.Nanos),
+			).UTC().Format(time.RFC3339Nano),
+			IsDelete: modification.IsDelete,
+		}
+		if !modification.IsDelete {
+			var evidence WorkEvidence
+			if err := json.Unmarshal(modification.Value, &evidence); err != nil {
+				return nil, errors.New("stored work evidence history is invalid")
+			}
+			entry.Value = &evidence
+		}
+		encoded, err := json.Marshal(entry)
+		if err != nil {
+			return nil, errors.New("unable to encode work evidence history")
+		}
+		responseBytes += len(encoded)
+		if responseBytes > maxHistoryResponseBytes {
+			return nil, errors.New("work evidence history exceeds the bounded response size")
+		}
+		entries = append(entries, entry)
+	}
+	if len(entries) == 0 {
+		return nil, errNotFound
+	}
+	return entries, nil
+}
+
+var errCommandNotFound = errors.New("idempotent command result not found")
+
+func (s *SmartContract) GetCommandResult(
+	ctx contractapi.TransactionContextInterface,
+	operation, idempotencyKey string,
+) (*WorkEvidence, error) {
+	expectedRole := ""
+	switch operation {
+	case "submit":
+		expectedRole = "seller"
+	case "decide":
+		expectedRole = "buyer"
+	default:
+		return nil, errors.New("unsupported command operation")
+	}
+	identity, err := actor(ctx, expectedRole)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateIdentifier(idempotencyKey, "idempotencyKey"); err != nil {
+		return nil, err
+	}
+	encoded, err := ctx.GetStub().GetState(commandKey(identity, operation, idempotencyKey))
+	if err != nil {
+		return nil, errors.New("unable to read idempotency record")
+	}
+	if len(encoded) == 0 {
+		return nil, errCommandNotFound
+	}
+	var record CommandRecord
+	if err := json.Unmarshal(encoded, &record); err != nil || record.Result == nil {
+		return nil, errors.New("stored idempotency record is invalid")
+	}
+	return record.Result, nil
 }
 
 func putJSON(ctx contractapi.TransactionContextInterface, key string, value any) error {

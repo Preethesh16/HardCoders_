@@ -35,9 +35,9 @@ func validateSubmission(evidence *WorkEvidence) error {
 		return err
 	}
 	for name, value := range map[string]string{
-		"contractHash": evidence.ContractHash,
+		"contractHash":  evidence.ContractHash,
 		"milestoneHash": evidence.MilestoneHash,
-		"fileHash": evidence.FileHash,
+		"fileHash":      evidence.FileHash,
 	} {
 		if err := validateHash(value, name); err != nil {
 			return err
@@ -52,12 +52,20 @@ func validateSubmission(evidence *WorkEvidence) error {
 	return nil
 }
 
-func applyDecision(evidence *WorkEvidence, decision, expectedFileHash, decisionHash string) error {
+func applyDecision(
+	evidence *WorkEvidence,
+	decision, expectedFileHash string,
+	expectedVersion uint64,
+	decisionHash string,
+) error {
 	if evidence.BuyerDecision != decisionPending {
 		return errors.New("evidence version already decided")
 	}
 	if expectedFileHash != evidence.FileHash {
 		return errors.New("expected file hash does not match current evidence")
+	}
+	if expectedVersion != evidence.Version {
+		return errors.New("expected version does not match current evidence")
 	}
 	if decision != decisionApproved && decision != decisionRevisionRequired && decision != decisionDisputed {
 		return errors.New("unsupported buyer decision")

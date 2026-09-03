@@ -13,16 +13,19 @@ func TestValidateSubmissionRejectsPIIStyleSellerReference(t *testing.T) {
 	}
 }
 
-func TestApplyDecisionBindsExpectedFile(t *testing.T) {
-	evidence := &WorkEvidence{FileHash: validHash, BuyerDecision: decisionPending}
+func TestApplyDecisionBindsExpectedFileAndVersion(t *testing.T) {
+	evidence := &WorkEvidence{FileHash: validHash, Version: 1, BuyerDecision: decisionPending}
 	other := "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	if err := applyDecision(evidence, decisionApproved, other, validHash); err == nil {
+	if err := applyDecision(evidence, decisionApproved, other, 1, validHash); err == nil {
 		t.Fatal("expected mismatched file hash to be rejected")
 	}
-	if err := applyDecision(evidence, decisionApproved, validHash, other); err != nil {
+	if err := applyDecision(evidence, decisionApproved, validHash, 2, validHash); err == nil {
+		t.Fatal("expected stale evidence version to be rejected")
+	}
+	if err := applyDecision(evidence, decisionApproved, validHash, 1, other); err != nil {
 		t.Fatalf("expected approval to pass: %v", err)
 	}
-	if err := applyDecision(evidence, decisionDisputed, validHash, other); err == nil {
+	if err := applyDecision(evidence, decisionDisputed, validHash, 1, other); err == nil {
 		t.Fatal("expected a second decision to be rejected")
 	}
 }

@@ -37,3 +37,10 @@ type EvidenceEvent struct {
 	FabricTxID    string `json:"fabricTxId"`
 	OccurredAt    string `json:"occurredAt"`
 }
+
+type WorkEvidenceHistoryEntry struct {
+	TransactionID string        `json:"transactionId"`
+	Timestamp     string        `json:"timestamp"`
+	IsDelete      bool          `json:"isDelete"`
+	Value         *WorkEvidence `json:"value,omitempty"`
+}
