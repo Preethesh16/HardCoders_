@@ -56,6 +56,7 @@ wait_stack() {
     --filter @optiwork/fabric-gateway \
     --filter @optiwork/algorand-executor \
     --filter @optiwork/api \
+    --filter @optiwork/marketing \
     --filter @optiwork/web build
   # Next standalone excludes empty/static directories. Create the two nested
   # bind-mount targets before the read-only standalone tree is mounted.
@@ -66,6 +67,7 @@ wait_stack() {
   curl -fsS http://127.0.0.1:4301/health/ready >/dev/null
   curl -fsS http://127.0.0.1:4000/health/live >/dev/null
   curl -fsS http://127.0.0.1:3000/ >/dev/null
+  curl -fsS http://127.0.0.1:4175/api/workflow/steps >/dev/null
 }
 
 verify_private_boundaries() {
@@ -128,9 +130,10 @@ e2e() {
   done
   if [[ -n "${browser}" ]]; then
     node "${ROOT}/scripts/verify-browser-smoke.mjs" "${browser}"
-    log 'browser smoke clicked the run action and passed all five dashboards'
+    node "${ROOT}/scripts/verify-marketing-browser-smoke.mjs" "${browser}"
+    log 'browser smoke passed the five dashboards and the integrated 12-step portal workflow'
   fi
-  log 'real LocalNet E2E passed; services remain available at http://127.0.0.1:3000'
+  log 'real LocalNet E2E passed; the experience is at http://127.0.0.1:4175 and dashboards at http://127.0.0.1:3000'
 }
 
 down() {

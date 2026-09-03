@@ -3,8 +3,9 @@
 // This runs the same HTTP routes apps/api exposes, in the same order and as
 // the same principals as apps/api/src/demo/walkthrough.ts does internally —
 // but one step at a time, so the pixel-art portal can execute a stage, show
-// the real response, and move on. Nothing here is simulated: every step is a
-// live call that writes to the ledger, Fabric evidence and Algorand escrow.
+// the real response, and move on. Every step is a live call that writes to the
+// business ledger, Fabric evidence and Algorand escrow; the surrounding fiat,
+// AI and FX demo adapters remain deterministic fixtures by design.
 //
 // Party tokens stay in this process. The browser addresses steps by index and
 // never sees a bearer token, matching the boundary apps/web/lib/api.ts keeps.

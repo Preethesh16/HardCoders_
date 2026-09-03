@@ -9,7 +9,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
-    "demo": "turbo run dev --parallel --filter @optiwork/api --filter @optiwork/web",
+    "demo": "turbo run dev --parallel --filter @optiwork/api --filter @optiwork/web --filter @optiwork/marketing",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",

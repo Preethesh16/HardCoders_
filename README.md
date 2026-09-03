@@ -15,7 +15,7 @@
 
 </div>
 
-![Anchor overview showing the completed Poland to India and India to United Kingdom journeys](docs/assets/readme/overview.png)
+![Anchor product experience showing global work moving from Poland to India](docs/assets/readme/product-experience.png)
 
 > **The core insight:** one ledger should not be forced to prove everything. Fabric proves **what work was approved**. Algorand proves **that settlement happened**. PostgreSQL proves **who, how much and why**.
 
@@ -108,7 +108,10 @@ corepack pnpm install
 corepack pnpm demo
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000), then click **Run the demonstration**.
+Open the integrated experience at [http://127.0.0.1:4175](http://127.0.0.1:4175).
+Choose a role, enter the demo portal, and open **Workflow** to execute the real
+12-stage API journey one decision at a time. The five evaluator dashboards
+remain available at [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
 ### Full cryptographic proof run
 
@@ -127,8 +130,11 @@ corepack pnpm local:e2e
 
 The command starts isolated resources, deploys `OptiUSD-DEMO` and the escrow,
 executes both HTTP journeys, verifies both ledgers, checks cross-organization
-authorization and privacy boundaries, clicks the browser demo action, smoke-tests all six routes, and
-leaves the app running at [http://127.0.0.1:3000](http://127.0.0.1:3000).
+authorization and privacy boundaries, smoke-tests all five dashboards, then
+opens the integrated portal in a real headless browser and completes its
+12-stage workflow. It leaves the product experience running at
+[http://127.0.0.1:4175](http://127.0.0.1:4175) and the evaluator dashboards at
+[http://127.0.0.1:3000](http://127.0.0.1:3000).
 See the [LocalNet runbook](docs/LOCALNET_RUNBOOK.md) for ports, lifecycle
 commands, generated artifacts and troubleshooting.
 
@@ -142,11 +148,11 @@ The app executes both corridors end to end and exposes five role-specific views:
 
 ### 90-second evaluator walkthrough
 
-1. Click **Run the demonstration** and confirm both journeys show `COMPLETED`.
-2. Open **Polish company** and follow PLN funding → two-leg FX → approved Fabric evidence → Algorand escrow.
-3. Open **Provider operations** and verify the `INWARD` and `OUTWARD` books, accounts and treasuries never net.
-4. Open **Administrator & audit** and inspect the rule versions, hashes, actors and reconciliation status.
-5. Refresh the demo: idempotency returns the recorded outcome instead of duplicating a payment.
+1. Open `:4175`, choose **Company**, sign in with the prefilled demo credentials and skip the tour.
+2. Select **Workflow**, click **Run full workflow**, and watch all 12 live stages reach `DONE`.
+3. Open **Audit** to inspect the refreshed books, compliance decisions and event trail.
+4. Open **Provider operations** at `:3000/provider` and verify the `INWARD` and `OUTWARD` books and treasuries never net.
+5. Open **Administrator & audit** at `:3000/admin` and inspect rule versions, hashes, actors and reconciliation status.
 
 ## Product tour
 
@@ -251,7 +257,8 @@ corepack pnpm --filter @optiwork/algorand-executor test:testnet
 
 | Capability | Status |
 |---|---|
-| Two-corridor browser demonstration | ✅ Runs locally with deterministic adapters |
+| Integrated role portal and live 12-stage workflow | ✅ Runs against the real local API, Fabric and Algorand stack |
+| Five evaluator dashboards and two-corridor browser demonstration | ✅ Runs locally with deterministic AI/FX fixtures |
 | Marketplace, contracts, credentials, compliance, FX, books and timelines | ✅ Implemented, runtime-validated and tested |
 | PostgreSQL and MinIO adapters | ✅ Real local acceptance profile verified |
 | Keycloak OIDC adapter and realm | ✅ Implemented; production OIDC deployment deferred |
@@ -270,6 +277,7 @@ faucet or external service.
 
 ```text
 apps/api                    Fastify API, workflow services, Drizzle schema and migrations
+apps/marketing              Integrated landing page, role portal and live workflow driver
 apps/web                    Next.js dashboards and remittance advice
 packages/contracts          Shared TypeBox boundary schemas
 packages/domain             Money, corridor, state-machine and ledger invariants

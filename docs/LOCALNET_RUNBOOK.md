@@ -58,9 +58,10 @@ The command performs these operations in order:
 10. proves cross-organization evidence reads and decisions return HTTP 403;
 11. scans Fabric projections, Algorand boxes/transactions, permit claims and
     scoped service logs for personal, signing and raw-file data; and
-12. opens a real headless Chrome session, clicks the landing-page demonstration
-    action, and smoke-tests `/`, `/company`, `/freelancer`, `/supplier`,
-    `/provider` and `/admin` when Chrome or Chromium is installed.
+12. opens a real headless Chrome session, clicks the dashboard demonstration,
+    smoke-tests `/`, `/company`, `/freelancer`, `/supplier`, `/provider` and
+    `/admin`, then signs into the integrated role portal and completes all 12
+    live workflow stages when Chrome or Chromium is installed.
 
 Successful completion leaves the services running for browser inspection.
 
@@ -68,6 +69,7 @@ Successful completion leaves the services running for browser inspection.
 
 | Component | Endpoint |
 |---|---|
+| Integrated product experience | `http://127.0.0.1:4175` |
 | Web application | `http://127.0.0.1:3000` |
 | API | `http://127.0.0.1:4000` |
 | Fabric Gateway | `http://127.0.0.1:4200` |
