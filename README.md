@@ -126,7 +126,7 @@ corepack pnpm local:e2e
 
 The command starts isolated resources, deploys `OptiUSD-DEMO` and the escrow,
 executes both HTTP journeys, verifies both ledgers, checks cross-organization
-authorization and privacy boundaries, smoke-tests all six browser routes, and
+authorization and privacy boundaries, clicks the browser demo action, smoke-tests all six routes, and
 leaves the app running at [http://127.0.0.1:3000](http://127.0.0.1:3000).
 See the [LocalNet runbook](docs/LOCALNET_RUNBOOK.md) for ports, lifecycle
 commands, generated artifacts and troubleshooting.

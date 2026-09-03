@@ -58,8 +58,9 @@ The command performs these operations in order:
 10. proves cross-organization evidence reads and decisions return HTTP 403;
 11. scans Fabric projections, Algorand boxes/transactions, permit claims and
     scoped service logs for personal, signing and raw-file data; and
-12. smoke-tests `/`, `/company`, `/freelancer`, `/supplier`, `/provider` and
-    `/admin` when Google Chrome is installed.
+12. opens a real headless Chrome session, clicks the landing-page demonstration
+    action, and smoke-tests `/`, `/company`, `/freelancer`, `/supplier`,
+    `/provider` and `/admin` when Chrome or Chromium is installed.
 
 Successful completion leaves the services running for browser inspection.
 

@@ -122,11 +122,13 @@ e2e() {
   node "${ROOT}/scripts/verify-local-e2e.mjs"
   node "${ROOT}/scripts/verify-fabric-authorization.mjs"
   verify_private_boundaries
-  if command -v google-chrome-stable >/dev/null 2>&1; then
-    for route in / /company /freelancer /supplier /provider /admin; do
-      google-chrome-stable --headless=new --no-sandbox --disable-gpu --dump-dom "http://127.0.0.1:3000${route}" >/dev/null
-    done
-    log 'browser smoke passed for the overview and all five dashboards'
+  local browser=''
+  for candidate in "${CHROME_BIN:-}" google-chrome-stable google-chrome chromium chromium-browser; do
+    if [[ -n "${candidate}" ]] && command -v "${candidate}" >/dev/null 2>&1; then browser="$(command -v "${candidate}")"; break; fi
+  done
+  if [[ -n "${browser}" ]]; then
+    node "${ROOT}/scripts/verify-browser-smoke.mjs" "${browser}"
+    log 'browser smoke clicked the run action and passed all five dashboards'
   fi
   log 'real LocalNet E2E passed; services remain available at http://127.0.0.1:3000'
 }
