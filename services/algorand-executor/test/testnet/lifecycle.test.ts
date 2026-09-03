@@ -21,6 +21,7 @@ import { RealAlgorandChain } from "../../src/chain.js";
 import { loadConfig, type ExecutorConfig } from "../../src/config.js";
 import { ALGORAND_TESTNET_GENESIS_HASH, ALGORAND_TESTNET_GENESIS_ID } from "../../src/networks.js";
 import { Ed25519FabricPermitVerifier } from "../../src/security/permit.js";
+import { MockFabricEvidenceReader } from "../../src/security/fabric-evidence-reader.js";
 import { ExecutorService } from "../../src/service.js";
 import { MemoryExecutorStore } from "../../src/store.js";
 import { DEFAULT_TESTNET_ACCOUNTS_PATH, DEFAULT_TESTNET_MANIFEST_PATH } from "../../src/testnet-constants.js";
@@ -33,6 +34,7 @@ import {
   createPermitSigner,
   signedPermit,
 } from "../support/permit-harness.js";
+import { releaseInput, seedApprovedEvidence } from "../helpers.js";
 
 const ALGOD_URL = process.env.OPTIWORK_TESTNET_ALGOD_URL ?? "https://testnet-api.algonode.cloud";
 const enabled = process.env.OPTIWORK_TESTNET_E2E === "1";
@@ -77,7 +79,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
     expect(Buffer.from(params.genesisHash ?? []).toString("base64")).toBe(ALGORAND_TESTNET_GENESIS_HASH);
     expect(params.genesisID).toBe(ALGORAND_TESTNET_GENESIS_ID);
 
-    const seller = accounts.sellers["ORG-SELL-001"];
+    const destinationProvider = accounts.destinationProviders["ORG-DEST-001"];
     const assetId = BigInt(manifest.assetId);
     const appAddress = algosdk.Address.fromString(manifest.applicationAddress);
 
@@ -95,9 +97,9 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
       // network `testnet` and the pinned-genesis guard applies. That forces
       // HTTPS Gateway OIDC credentials, which are supplied here even though the
       // authoritative reader itself is stubbed and issues no Gateway request.
-      FABRIC_GATEWAY_URL: "https://gateway.anchor.invalid",
-      FABRIC_GATEWAY_OIDC_TOKEN_URL: "https://identity.anchor.invalid/realms/anchor/protocol/openid-connect/token",
-      FABRIC_GATEWAY_OIDC_CLIENT_ID: "anchor-algorand-executor",
+      FABRIC_GATEWAY_URL: "https://gateway.optiwork.invalid",
+      FABRIC_GATEWAY_OIDC_TOKEN_URL: "https://identity.optiwork.invalid/realms/optiwork/protocol/openid-connect/token",
+      FABRIC_GATEWAY_OIDC_CLIENT_ID: "optiwork-algorand-executor",
       FABRIC_GATEWAY_OIDC_CLIENT_SECRET: process.env.OPTIWORK_TESTNET_GATEWAY_CLIENT_SECRET
         ?? "unused-stubbed-reader-secret-0000000001",
       FABRIC_GATEWAY_TIMEOUT_MS: "3000",
@@ -132,6 +134,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
     });
 
     const reader = new RecordingFabricReader();
+    const evidenceReader = new MockFabricEvidenceReader();
     const store = new MemoryExecutorStore();
     const service = new ExecutorService(
       config,
@@ -139,6 +142,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
       new Ed25519FabricPermitVerifier(config),
       reader,
       new RealAlgorandChain(config),
+      evidenceReader,
     );
     await service.initialize();
     expect(await service.readiness()).toBe(true);
@@ -147,8 +151,8 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
       service.mutate(command, (await signedPermit(command, reader, signer, options)).compact);
 
     const stamp = Date.now().toString(36).toUpperCase();
-    const sellerBefore = await algod.accountAssetInformation(algosdk.Address.fromString(seller.address), assetId).do();
-    const sellerStart = sellerBefore.assetHolding?.amount ?? 0n;
+    const destinationBefore = await algod.accountAssetInformation(algosdk.Address.fromString(destinationProvider.address), assetId).do();
+    const destinationStart = destinationBefore.assetHolding?.amount ?? 0n;
 
     // ---- Deal A: create, fund, pause, resume, release, complete -----------
     const dealA = `DEAL-TESTNET-RELEASE-${stamp}`;
@@ -161,7 +165,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
         dealId: dealA,
         agreementHash: `sha256:${"1".repeat(64)}`,
         originProviderAddress: accounts.originProviderTreasury.address,
-        destinationProviderAddress: seller.address,
+        destinationProviderAddress: destinationProvider.address,
         assetId: Number(assetId),
         amount: { amountMinor: "1000", currency: "USD", scale: 2 },
       },
@@ -196,7 +200,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
     await run({ action: "resume", method: "POST", path: `/escrows/${dealA}/resume`, idempotencyKey: `TESTNET-RESUME-A-${stamp}`, body: null });
 
     const escrowA = await service.getEscrow(dealA);
-    const releaseA: ReleaseInput = {
+    const releaseA: ReleaseInput = releaseInput({
       escrowBinding: binding(escrowA),
       milestoneId: `MS-TESTNET-001-${stamp}`,
       amountMinor: "1000",
@@ -204,9 +208,12 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
       bindingHash: `sha256:${"2".repeat(64)}`,
       fenceGeneration: 1,
       leaseExpiresAt: new Date(Date.now() + 600_000).toISOString(),
-      authorizationCommitment: `sha256:${"3".repeat(64)}`,
       fabricClaimTransactionId: `FABRIC-TESTNET-CLAIM-001-${stamp}`,
-    };
+      idempotencyKey: `TESTNET-RELEASE-A-${stamp}`,
+      workEvidenceHash: seedApprovedEvidence(
+        evidenceReader, dealA, `MS-TESTNET-001-${stamp}`, `FABRIC-TESTNET-CLAIM-001-${stamp}`,
+      ),
+    });
     const releaseCommandA: CommandContext = {
       action: "release", method: "POST", path: `/escrows/${dealA}/releases`,
       idempotencyKey: `TESTNET-RELEASE-A-${stamp}`, body: releaseA,
@@ -243,7 +250,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
         dealId: dealB,
         agreementHash: `sha256:${"4".repeat(64)}`,
         originProviderAddress: accounts.originProviderTreasury.address,
-        destinationProviderAddress: seller.address,
+        destinationProviderAddress: destinationProvider.address,
         assetId: Number(assetId),
         amount: { amountMinor: "700", currency: "USD", scale: 2 },
       },
@@ -281,7 +288,7 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
         dealId: dealC,
         agreementHash: `sha256:${"5".repeat(64)}`,
         originProviderAddress: accounts.originProviderTreasury.address,
-        destinationProviderAddress: seller.address,
+        destinationProviderAddress: destinationProvider.address,
         assetId: Number(assetId),
         amount: { amountMinor: "500", currency: "USD", scale: 2 },
       },
@@ -299,12 +306,13 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
       new Ed25519FabricPermitVerifier(shortValidity),
       reader,
       strandChain,
+      evidenceReader,
     );
 
     const escrowC = await recovered.getEscrow(dealC);
     expect(escrowC.state).toBe("FUNDED");
 
-    const releaseN: ReleaseInput = {
+    const releaseN: ReleaseInput = releaseInput({
       escrowBinding: binding(escrowC),
       milestoneId: `MS-TESTNET-RECOVERY-${stamp}`,
       amountMinor: "500",
@@ -312,9 +320,12 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
       bindingHash: `sha256:${"6".repeat(64)}`,
       fenceGeneration: 1,
       leaseExpiresAt: new Date(Date.now() + 900_000).toISOString(),
-      authorizationCommitment: `sha256:${"7".repeat(64)}`,
       fabricClaimTransactionId: `FABRIC-TESTNET-RECOVERY-N-${stamp}`,
-    };
+      idempotencyKey: `TESTNET-RELEASE-RECOVERY-N-${stamp}`,
+      workEvidenceHash: seedApprovedEvidence(
+        evidenceReader, dealC, `MS-TESTNET-RECOVERY-${stamp}`, `FABRIC-TESTNET-RECOVERY-N-${stamp}`,
+      ),
+    });
     const releaseCommandN: CommandContext = {
       action: "release", method: "POST", path: `/escrows/${dealC}/releases`,
       idempotencyKey: `TESTNET-RELEASE-RECOVERY-N-${stamp}`, body: releaseN,
@@ -343,12 +354,20 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
     expect(strandChain.submissionAttempts).toBe(attemptsAfterExpiry);
 
     // Generation N+1 produces one distinct confirmed TestNet payout.
-    const releaseNext: ReleaseInput = {
-      ...releaseN,
+    const releaseNext: ReleaseInput = releaseInput({
+      escrowBinding: releaseN.escrowBinding,
+      milestoneId: releaseN.milestoneId,
+      amountMinor: releaseN.amountMinor,
+      intentId: releaseN.intentId,
+      bindingHash: releaseN.bindingHash,
+      leaseExpiresAt: releaseN.leaseExpiresAt,
       fenceGeneration: 2,
-      authorizationCommitment: `sha256:${"8".repeat(64)}`,
       fabricClaimTransactionId: `FABRIC-TESTNET-RECOVERY-N1-${stamp}`,
-    };
+      idempotencyKey: `TESTNET-RELEASE-RECOVERY-N1-${stamp}`,
+      workEvidenceHash: seedApprovedEvidence(
+        evidenceReader, dealC, releaseN.milestoneId, `FABRIC-TESTNET-RECOVERY-N1-${stamp}`,
+      ),
+    });
     const releaseCommandNext: CommandContext = {
       ...releaseCommandN,
       idempotencyKey: `TESTNET-RELEASE-RECOVERY-N1-${stamp}`,
@@ -365,12 +384,12 @@ describe.skipIf(!enabled)("public Algorand TestNet escrow", () => {
     expect(recoveredRelease.transactionId).not.toBe(preparedN!.prepared!.transactionId);
 
     // ---- Exact accounting on the public network ---------------------------
-    const [sellerAfter, appHolding] = await Promise.all([
-      algod.accountAssetInformation(algosdk.Address.fromString(seller.address), assetId).do(),
+    const [destinationAfter, appHolding] = await Promise.all([
+      algod.accountAssetInformation(algosdk.Address.fromString(destinationProvider.address), assetId).do(),
       algod.accountAssetInformation(appAddress, assetId).do(),
     ]);
     // Deal A released 1000 and deal C released 500; deal B was fully refunded.
-    expect((sellerAfter.assetHolding?.amount ?? 0n) - sellerStart).toBe(1_500n);
+    expect((destinationAfter.assetHolding?.amount ?? 0n) - destinationStart).toBe(1_500n);
     expect(appHolding.assetHolding?.amount).toBe(0n);
     expect(reader.verifiedCommands).toBeGreaterThanOrEqual(14);
     await service.close();

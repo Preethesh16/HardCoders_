@@ -40,8 +40,8 @@ function json(body: unknown, status = 200): Response {
 function oidcConfig() {
   return testConfig({
     FABRIC_GATEWAY_BEARER_TOKEN: "",
-    FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://127.0.0.1:18080/realms/anchor/protocol/openid-connect/token",
-    FABRIC_GATEWAY_OIDC_CLIENT_ID: "anchor-algorand-executor",
+    FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://127.0.0.1:18080/realms/optiwork/protocol/openid-connect/token",
+    FABRIC_GATEWAY_OIDC_CLIENT_ID: "optiwork-algorand-executor",
     FABRIC_GATEWAY_OIDC_CLIENT_SECRET: "executor-client-secret-test-only-0000001",
   });
 }

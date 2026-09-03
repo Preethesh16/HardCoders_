@@ -44,6 +44,6 @@ process.stdout.write(`${JSON.stringify({
     address: addresses.deployer,
     minimumAlgos: MINIMUM_DEPLOYER_FUNDING_ALGOS,
     dispenser: TESTNET_DISPENSER_URL,
-    note: "Only the deployer needs dispenser funding. The deployer distributes dummy TestAlgos to the buyer treasury and the three seller accounts during deployment.",
+    note: "Only the deployer needs dispenser funding. The deployer distributes dummy TestAlgos to the originTreasury treasury and the three destinationProvider accounts during deployment.",
   },
 }, null, 2)}\n`);

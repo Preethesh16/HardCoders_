@@ -6,6 +6,8 @@ import { AppFactory } from "@algorandfoundation/algokit-utils/types/app-factory"
 import algosdk from "algosdk";
 import { z } from "zod";
 
+import { LOCALNET_DEMO_ASSET, assertNotDeniedNetwork } from "./networks.js";
+
 const uint64 = z.preprocess(
   // Leave a missing value untouched so Zod reports the field as required
   // instead of throwing an opaque BigInt conversion error before validation.
@@ -18,7 +20,9 @@ const deployEnvironmentSchema = z.object({
   ALGORAND_DEPLOY_ALGOD_URL: z.string().url(),
   ALGORAND_DEPLOY_ALGOD_TOKEN: z.string().max(4_096).default(""),
   ALGORAND_DEPLOY_GENESIS_HASH: z.string().min(16).max(256),
-  ALGORAND_DEPLOY_ASSET_ID: uint64,
+  // Optional: reuse an existing LocalNet ASA. When omitted the deployer mints
+  // the zero-value OptiUSD-DEMO settlement asset with USDC's six decimals.
+  ALGORAND_DEPLOY_ASSET_ID: uint64.optional(),
   ALGORAND_DEPLOY_EXECUTOR_ADDRESS: z.string().refine(algosdk.isValidAddress, "Invalid executor address."),
   ALGORAND_DEPLOY_EXECUTOR_PRIVATE_KEY_BASE64: z.string().min(80).max(128).regex(/^[A-Za-z0-9+/]+={0,2}$/u),
   ALGORAND_DEPLOY_APP_FUNDING_MICROALGOS: z.preprocess(
@@ -59,7 +63,8 @@ const params = await algod.getTransactionParams().do();
 if (Buffer.from(params.genesisHash ?? []).toString("base64") !== environment.ALGORAND_DEPLOY_GENESIS_HASH) {
   throw new Error("Algod genesis does not match ALGORAND_DEPLOY_GENESIS_HASH.");
 }
-await algod.getAssetByID(environment.ALGORAND_DEPLOY_ASSET_ID).do();
+// A real-value genesis is refused even here, where only loopback is reachable.
+assertNotDeniedNetwork(environment.ALGORAND_DEPLOY_GENESIS_HASH, params.genesisID);
 
 const appSpec = await readFile(
   new URL("../contracts/artifacts/OptiWorkEscrow.arc56.json", import.meta.url),
@@ -69,6 +74,33 @@ const algorand = AlgorandClient.fromClients({ algod })
   .setSigner(environment.ALGORAND_DEPLOY_EXECUTOR_ADDRESS, signer)
   .setDefaultSigner(signer)
   .setDefaultValidityWindow(100);
+
+// LocalNet mints a fresh chain on every reset, so the demo settlement asset is
+// created per environment. Its six decimals match USDC, which keeps every
+// fixed-point amount identical between LocalNet and TestNet.
+let assetCreateTransactionId: string | null = null;
+let assetId: bigint;
+if (environment.ALGORAND_DEPLOY_ASSET_ID === undefined) {
+  const createdAsset = await algorand.send.assetCreate({
+    sender: account.addr,
+    signer,
+    total: LOCALNET_DEMO_ASSET.total,
+    decimals: LOCALNET_DEMO_ASSET.decimals,
+    assetName: LOCALNET_DEMO_ASSET.assetName,
+    unitName: LOCALNET_DEMO_ASSET.unitName,
+    defaultFrozen: false,
+    maxRoundsToWaitForConfirmation: 20,
+    suppressLog: true,
+  });
+  assetId = createdAsset.assetId;
+  assetCreateTransactionId = createdAsset.txIds.at(-1) ?? null;
+} else {
+  const existing = await algod.getAssetByID(environment.ALGORAND_DEPLOY_ASSET_ID).do();
+  if (existing.params?.decimals !== LOCALNET_DEMO_ASSET.decimals) {
+    throw new Error(`LocalNet settlement asset ${environment.ALGORAND_DEPLOY_ASSET_ID} must have six decimals.`);
+  }
+  assetId = environment.ALGORAND_DEPLOY_ASSET_ID;
+}
 const factory = new AppFactory({
   algorand,
   appSpec,
@@ -79,7 +111,7 @@ const factory = new AppFactory({
 
 const created = await factory.send.create({
   method: "createApplication",
-  args: [environment.ALGORAND_DEPLOY_ASSET_ID],
+  args: [assetId],
   sender: account.addr,
   signer,
   maxRoundsToWaitForConfirmation: 20,
@@ -97,7 +129,7 @@ const optedIn = await created.appClient.send.call({
   args: [],
   sender: account.addr,
   signer,
-  assetReferences: [environment.ALGORAND_DEPLOY_ASSET_ID],
+  assetReferences: [assetId],
   maxFee: AlgoAmount.MicroAlgo(2_000n),
   coverAppCallInnerTransactionFees: true,
   maxRoundsToWaitForConfirmation: 20,
@@ -110,7 +142,12 @@ process.stdout.write(`${JSON.stringify({
   genesisHash: environment.ALGORAND_DEPLOY_GENESIS_HASH,
   applicationId: created.result.appId.toString(),
   applicationAddress: created.result.appAddress.toString(),
-  assetId: environment.ALGORAND_DEPLOY_ASSET_ID.toString(),
+  assetId: assetId.toString(),
+  assetName: LOCALNET_DEMO_ASSET.assetName,
+  assetUnitName: LOCALNET_DEMO_ASSET.unitName,
+  assetDecimals: LOCALNET_DEMO_ASSET.decimals,
+  assetValueStatement: "Zero-value LocalNet demonstration asset. Not redeemable, no monetary value.",
+  assetCreateTransactionId,
   executorAddress: environment.ALGORAND_DEPLOY_EXECUTOR_ADDRESS,
   appFundingMicroAlgos: environment.ALGORAND_DEPLOY_APP_FUNDING_MICROALGOS.toString(),
   createTransactionId: created.result.txIds.at(-1),

@@ -14,14 +14,14 @@ import { dirname } from "node:path";
 import algosdk from "algosdk";
 import { z } from "zod";
 
-/** Fabric organization IDs of the three governed seller organizations. */
-export const SELLER_ORGANIZATION_IDS = Object.freeze([
-  "ORG-SELL-001",
-  "ORG-SELL-002",
-  "ORG-SELL-003",
+/** Fabric organization IDs of the three governed destinationProvider organizations. */
+export const DESTINATION_PROVIDER_ORGANIZATION_IDS = Object.freeze([
+  "ORG-DEST-001",
+  "ORG-DEST-002",
+  "ORG-DEST-003",
 ] as const);
 
-export type SellerOrganizationId = (typeof SELLER_ORGANIZATION_IDS)[number];
+export type DestinationProviderOrganizationId = (typeof DESTINATION_PROVIDER_ORGANIZATION_IDS)[number];
 
 const addressSchema = z.string().refine((value) => algosdk.isValidAddress(value), "Invalid Algorand address.");
 const privateKeySchema = z.string().min(80).max(128).regex(/^[A-Za-z0-9+/]+={0,2}$/u);
@@ -39,10 +39,10 @@ export const testnetAccountFileSchema = z.object({
   warning: z.string().min(1),
   deployer: accountSchema,
   originProviderTreasury: accountSchema,
-  sellers: z.object({
-    "ORG-SELL-001": accountSchema,
-    "ORG-SELL-002": accountSchema,
-    "ORG-SELL-003": accountSchema,
+  destinationProviders: z.object({
+    "ORG-DEST-001": accountSchema,
+    "ORG-DEST-002": accountSchema,
+    "ORG-DEST-003": accountSchema,
   }).strict(),
 }).strict();
 
@@ -63,7 +63,7 @@ function accountDocument(account: algosdk.Account): TestnetAccount {
 export function generateAccountSet(now: Date = new Date()): TestnetAccountFile {
   const deployer = algosdk.generateAccount();
   const originProviderTreasury = algosdk.generateAccount();
-  const sellers = SELLER_ORGANIZATION_IDS.map((organizationId) => [organizationId, algosdk.generateAccount()] as const);
+  const destinationProviders = DESTINATION_PROVIDER_ORGANIZATION_IDS.map((organizationId) => [organizationId, algosdk.generateAccount()] as const);
 
   const file: TestnetAccountFile = {
     schemaVersion: "1.0",
@@ -73,16 +73,16 @@ export function generateAccountSet(now: Date = new Date()): TestnetAccountFile {
     warning: WARNING,
     deployer: accountDocument(deployer),
     originProviderTreasury: accountDocument(originProviderTreasury),
-    sellers: Object.fromEntries(
-      sellers.map(([organizationId, account]) => [organizationId, accountDocument(account)]),
-    ) as TestnetAccountFile["sellers"],
+    destinationProviders: Object.fromEntries(
+      destinationProviders.map(([organizationId, account]) => [organizationId, accountDocument(account)]),
+    ) as TestnetAccountFile["destinationProviders"],
   };
   assertDistinctAddresses(file);
   return testnetAccountFileSchema.parse(file);
 }
 
 /**
- * Every role must be a separate account. The executor and buyer treasury
+ * Every role must be a separate account. The executor and origin provider treasury
  * separation is already enforced by the runtime configuration; enforcing it at
  * generation time stops an operator from creating material that can never load.
  */
@@ -99,7 +99,7 @@ export function publicAddresses(file: TestnetAccountFile): Record<string, string
     deployer: file.deployer.address,
     originProviderTreasury: file.originProviderTreasury.address,
     ...Object.fromEntries(
-      SELLER_ORGANIZATION_IDS.map((organizationId) => [organizationId, file.sellers[organizationId].address]),
+      DESTINATION_PROVIDER_ORGANIZATION_IDS.map((organizationId) => [organizationId, file.destinationProviders[organizationId].address]),
     ),
   };
 }

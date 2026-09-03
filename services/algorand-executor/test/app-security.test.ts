@@ -4,7 +4,7 @@ import { buildApp } from "../src/app.js";
 import { ExecutorService } from "../src/service.js";
 import { MemoryExecutorStore } from "../src/store.js";
 import { commandHash, type CommandContext, type PermitClaims, type ReleaseInput } from "../src/types.js";
-import { testConfig } from "./helpers.js";
+import { approvingEvidenceReader, releaseInput, testConfig } from "./helpers.js";
 
 describe("executor transport boundary", () => {
   it("exposes only health probes without bearer authentication", async () => {
@@ -22,6 +22,7 @@ describe("executor transport boundary", () => {
         getReleaseEvidence: async () => { throw new Error("not used"); },
         readiness: async () => true,
       },
+      approvingEvidenceReader(),
     );
     const app = await buildApp(config, service);
     await expect(app.inject({ method: "GET", url: "/health/live" })).resolves.toMatchObject({ statusCode: 200 });
@@ -54,6 +55,7 @@ describe("executor transport boundary", () => {
         getReleaseEvidence: async () => { throw new Error("must not read"); },
         readiness: async () => true,
       },
+      approvingEvidenceReader(),
     );
     const app = await buildApp(config, service);
     const response = await app.inject({
@@ -87,9 +89,10 @@ describe("executor transport boundary", () => {
         getReleaseEvidence: async () => { throw new Error("not used"); },
         readiness: async () => true,
       },
+      approvingEvidenceReader(),
     );
     const app = await buildApp(config, service);
-    const body: ReleaseInput = {
+    const body: ReleaseInput = releaseInput({
       escrowBinding: {
         dealId: "DEAL-RECONCILE", agreementHash: `sha256:${"a".repeat(64)}`,
         originProviderAddress: config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS,
@@ -101,9 +104,9 @@ describe("executor transport boundary", () => {
       milestoneId: "MS-RECONCILE", amountMinor: "10", intentId: "INTENT-RECONCILE",
       bindingHash: `sha256:${"b".repeat(64)}`, fenceGeneration: 1,
       leaseExpiresAt: new Date(Date.now() - 60_000).toISOString(),
-      authorizationCommitment: `sha256:${"c".repeat(64)}`,
       fabricClaimTransactionId: "FABRIC-RECONCILE",
-    };
+      idempotencyKey: "RECONCILE-PENDING",
+    });
     const command: CommandContext = {
       action: "release", method: "POST", path: "/escrows/DEAL-RECONCILE/releases",
       idempotencyKey: "RECONCILE-PENDING", body,

@@ -1,5 +1,6 @@
 import { createLocalJWKSet, jwtVerify } from "jose";
 
+import { sha256 } from "../canonical.js";
 import type { ExecutorConfig } from "../config.js";
 import { forbidden } from "../errors.js";
 import {
@@ -10,7 +11,7 @@ import {
   type PermitClaims,
 } from "../types.js";
 
-const PERMIT_TYPE = "anchor-fabric-permit+jwt";
+const PERMIT_TYPE = "optiwork-fabric-permit+jwt";
 
 export interface FabricPermitVerifier {
   verify(compactPermit: string, command: CommandContext): Promise<PermitClaims>;
@@ -64,6 +65,10 @@ export class Ed25519FabricPermitVerifier implements FabricPermitVerifier {
         throw forbidden("The release permit does not bind the complete escrow beneficiary target.");
       }
       const expected = claims.releaseAuthorization;
+      if (sha256(expected.releaseBinding) !== sha256(body.data.releaseBinding)
+        || expected.releaseBinding.idempotencyKey !== command.idempotencyKey) {
+        throw forbidden("The release permit does not bind this command's complete release authorization.");
+      }
       if (expected.milestoneId !== body.data.milestoneId
         || expected.amountMinor !== body.data.amountMinor
         || expected.intentId !== body.data.intentId

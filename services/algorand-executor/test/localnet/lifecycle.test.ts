@@ -14,6 +14,7 @@ import {
   type PreparedTransactionReconciliation,
 } from "../../src/chain.js";
 import { loadConfig, type ExecutorConfig } from "../../src/config.js";
+import { MockFabricEvidenceReader } from "../../src/security/fabric-evidence-reader.js";
 import type { AuthoritativeFabricReader } from "../../src/security/gateway-reader.js";
 import { Ed25519FabricPermitVerifier, FABRIC_PERMIT_TYPE } from "../../src/security/permit.js";
 import { ExecutorService } from "../../src/service.js";
@@ -25,6 +26,7 @@ import {
   type PermitClaims,
   type ReleaseInput,
 } from "../../src/types.js";
+import { releaseInput, seedApprovedEvidence } from "../helpers.js";
 
 const ALGOD_URL = "http://127.0.0.1:4001";
 const ALGOD_TOKEN = "a".repeat(64);
@@ -188,17 +190,17 @@ describe("real AlgoKit LocalNet escrow", () => {
     const algod = algorand.client.algod;
     const dispenser = await algorand.account.localNetDispenser();
     const executor = algosdk.generateAccount();
-    const buyer = algosdk.generateAccount();
-    const seller = algosdk.generateAccount();
+    const originTreasury = algosdk.generateAccount();
+    const destinationProvider = algosdk.generateAccount();
     const executorSigner = algosdk.makeBasicAccountTransactionSigner(executor);
-    const buyerSigner = algosdk.makeBasicAccountTransactionSigner(buyer);
-    const sellerSigner = algosdk.makeBasicAccountTransactionSigner(seller);
+    const originTreasurySigner = algosdk.makeBasicAccountTransactionSigner(originTreasury);
+    const destinationSigner = algosdk.makeBasicAccountTransactionSigner(destinationProvider);
     algorand
       .setSigner(executor.addr, executorSigner)
-      .setSigner(buyer.addr, buyerSigner)
-      .setSigner(seller.addr, sellerSigner);
+      .setSigner(originTreasury.addr, originTreasurySigner)
+      .setSigner(destinationProvider.addr, destinationSigner);
 
-    for (const receiver of [executor.addr, buyer.addr, seller.addr]) {
+    for (const receiver of [executor.addr, originTreasury.addr, destinationProvider.addr]) {
       await algorand.send.payment({
         sender: dispenser.addr,
         signer: dispenser.signer,
@@ -210,8 +212,8 @@ describe("real AlgoKit LocalNet escrow", () => {
     }
 
     const createdAsset = await algorand.send.assetCreate({
-      sender: buyer.addr,
-      signer: buyerSigner,
+      sender: originTreasury.addr,
+      signer: originTreasurySigner,
       total: 1_000_000n,
       decimals: 0,
       assetName: "Anchor LocalNet Settlement",
@@ -221,8 +223,8 @@ describe("real AlgoKit LocalNet escrow", () => {
     });
     const assetId = createdAsset.assetId;
     await algorand.send.assetOptIn({
-      sender: seller.addr,
-      signer: sellerSigner,
+      sender: destinationProvider.addr,
+      signer: destinationSigner,
       assetId,
       maxRoundsToWaitForConfirmation: 20,
       suppressLog: true,
@@ -298,11 +300,12 @@ describe("real AlgoKit LocalNet escrow", () => {
       ALGORAND_ASSET_ID: assetId.toString(),
       ALGORAND_SIGNER_ADDRESS: executor.addr.toString(),
       ALGORAND_SIGNER_PRIVATE_KEY_BASE64: Buffer.from(executor.sk).toString("base64"),
-      ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: buyer.addr.toString(),
-      ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: Buffer.from(buyer.sk).toString("base64"),
+      ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: originTreasury.addr.toString(),
+      ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: Buffer.from(originTreasury.sk).toString("base64"),
       ALGORAND_MAX_VALIDITY_ROUNDS: "100",
     });
     const reader = new LocalFabricReader();
+    const evidenceReader = new MockFabricEvidenceReader();
     const store = new MemoryExecutorStore();
     const realChain = new RealAlgorandChain(config);
     const service = new ExecutorService(
@@ -311,6 +314,7 @@ describe("real AlgoKit LocalNet escrow", () => {
       new Ed25519FabricPermitVerifier(config),
       reader,
       realChain,
+      evidenceReader,
     );
     await service.initialize();
     const permitSigner: PermitSigner = { privateKey, kid, sequence: 0 };
@@ -328,8 +332,8 @@ describe("real AlgoKit LocalNet escrow", () => {
       body: {
         dealId: dealA,
         agreementHash: `sha256:${"1".repeat(64)}`,
-        originProviderAddress: buyer.addr.toString(),
-        destinationProviderAddress: seller.addr.toString(),
+        originProviderAddress: originTreasury.addr.toString(),
+        destinationProviderAddress: destinationProvider.addr.toString(),
         assetId: Number(assetId),
         amount: { amountMinor: "10000", currency: "USD", scale: 2 },
       },
@@ -358,7 +362,7 @@ describe("real AlgoKit LocalNet escrow", () => {
 
     const escrowA = await service.getEscrow(dealA);
     const leaseExpiresAt = new Date(Date.now() + 180_000).toISOString();
-    const releaseA: ReleaseInput = {
+    const releaseA: ReleaseInput = releaseInput({
       escrowBinding: binding(escrowA),
       milestoneId: "MS-LOCALNET-001",
       amountMinor: "10000",
@@ -366,9 +370,12 @@ describe("real AlgoKit LocalNet escrow", () => {
       bindingHash: `sha256:${"2".repeat(64)}`,
       fenceGeneration: 1,
       leaseExpiresAt,
-      authorizationCommitment: `sha256:${"3".repeat(64)}`,
       fabricClaimTransactionId: "FABRIC-LOCALNET-CLAIM-001",
-    };
+      idempotencyKey: "LOCALNET-RELEASE-A",
+      workEvidenceHash: seedApprovedEvidence(
+        evidenceReader, dealA, "MS-LOCALNET-001", "FABRIC-LOCALNET-CLAIM-001",
+      ),
+    });
     const releaseCommand: CommandContext = {
       action: "release",
       method: "POST",
@@ -400,8 +407,8 @@ describe("real AlgoKit LocalNet escrow", () => {
       body: {
         dealId: dealB,
         agreementHash: `sha256:${"4".repeat(64)}`,
-        originProviderAddress: buyer.addr.toString(),
-        destinationProviderAddress: seller.addr.toString(),
+        originProviderAddress: originTreasury.addr.toString(),
+        destinationProviderAddress: destinationProvider.addr.toString(),
         assetId: Number(assetId),
         amount: { amountMinor: "7000", currency: "USD", scale: 2 },
       },
@@ -436,8 +443,8 @@ describe("real AlgoKit LocalNet escrow", () => {
       body: {
         dealId: dealC,
         agreementHash: `sha256:${"5".repeat(64)}`,
-        originProviderAddress: buyer.addr.toString(),
-        destinationProviderAddress: seller.addr.toString(),
+        originProviderAddress: originTreasury.addr.toString(),
+        destinationProviderAddress: destinationProvider.addr.toString(),
         assetId: Number(assetId),
         amount: { amountMinor: "5000", currency: "USD", scale: 2 },
       },
@@ -452,9 +459,10 @@ describe("real AlgoKit LocalNet escrow", () => {
       new Ed25519FabricPermitVerifier(shortValidityConfig),
       reader,
       strandChain,
+      evidenceReader,
     );
     const escrowC = await recoveryService.getEscrow(dealC);
-    const releaseN: ReleaseInput = {
+    const releaseN: ReleaseInput = releaseInput({
       escrowBinding: binding(escrowC),
       milestoneId: "MS-LOCALNET-RECOVERY",
       amountMinor: "5000",
@@ -462,9 +470,12 @@ describe("real AlgoKit LocalNet escrow", () => {
       bindingHash: `sha256:${"6".repeat(64)}`,
       fenceGeneration: 1,
       leaseExpiresAt: new Date(Date.now() + 180_000).toISOString(),
-      authorizationCommitment: `sha256:${"7".repeat(64)}`,
       fabricClaimTransactionId: "FABRIC-LOCALNET-CLAIM-RECOVERY-N",
-    };
+      idempotencyKey: "LOCALNET-RELEASE-RECOVERY-N",
+      workEvidenceHash: seedApprovedEvidence(
+        evidenceReader, dealC, "MS-LOCALNET-RECOVERY", "FABRIC-LOCALNET-CLAIM-RECOVERY-N",
+      ),
+    });
     const releaseCommandN: CommandContext = {
       action: "release",
       method: "POST",
@@ -488,7 +499,7 @@ describe("real AlgoKit LocalNet escrow", () => {
         signer: dispenser.signer,
         receiver: executor.addr,
         amount: AlgoAmount.MicroAlgo(1),
-        note: new TextEncoder().encode(`anchor-prepared-expiry-${advancementSequence}`),
+        note: new TextEncoder().encode(`optiwork-prepared-expiry-${advancementSequence}`),
         maxRoundsToWaitForConfirmation: 20,
         suppressLog: true,
       });
@@ -513,12 +524,20 @@ describe("real AlgoKit LocalNet escrow", () => {
     )).rejects.toThrow(/expired without confirmation/iu);
     expect(strandChain.submissionAttempts).toBe(attemptsAfterExpiry);
 
-    const releaseNPlusOne: ReleaseInput = {
-      ...releaseN,
+    const releaseNPlusOne: ReleaseInput = releaseInput({
+      escrowBinding: releaseN.escrowBinding,
+      milestoneId: releaseN.milestoneId,
+      amountMinor: releaseN.amountMinor,
+      intentId: releaseN.intentId,
+      bindingHash: releaseN.bindingHash,
+      leaseExpiresAt: releaseN.leaseExpiresAt,
       fenceGeneration: 2,
-      authorizationCommitment: `sha256:${"8".repeat(64)}`,
       fabricClaimTransactionId: "FABRIC-LOCALNET-CLAIM-RECOVERY-N-PLUS-ONE",
-    };
+      idempotencyKey: "LOCALNET-RELEASE-RECOVERY-N-PLUS-ONE",
+      workEvidenceHash: seedApprovedEvidence(
+        evidenceReader, dealC, "MS-LOCALNET-RECOVERY", "FABRIC-LOCALNET-CLAIM-RECOVERY-N-PLUS-ONE",
+      ),
+    });
     const releaseCommandNPlusOne: CommandContext = {
       ...releaseCommandN,
       idempotencyKey: "LOCALNET-RELEASE-RECOVERY-N-PLUS-ONE",
@@ -541,13 +560,13 @@ describe("real AlgoKit LocalNet escrow", () => {
       fabricClaimTransactionHash: sha256Text(releaseNPlusOne.fabricClaimTransactionId),
     });
 
-    const [sellerHolding, buyerHolding, appHolding] = await Promise.all([
-      algod.accountAssetInformation(seller.addr, assetId).do(),
-      algod.accountAssetInformation(buyer.addr, assetId).do(),
+    const [destinationHolding, originTreasuryHolding, appHolding] = await Promise.all([
+      algod.accountAssetInformation(destinationProvider.addr, assetId).do(),
+      algod.accountAssetInformation(originTreasury.addr, assetId).do(),
       algod.accountAssetInformation(createdApp.result.appAddress, assetId).do(),
     ]);
-    expect(sellerHolding.assetHolding?.amount).toBe(15_000n);
-    expect(buyerHolding.assetHolding?.amount).toBe(985_000n);
+    expect(destinationHolding.assetHolding?.amount).toBe(15_000n);
+    expect(originTreasuryHolding.assetHolding?.amount).toBe(985_000n);
     expect(appHolding.assetHolding?.amount).toBe(0n);
     expect(await service.readiness()).toBe(true);
     expect(reader.verifiedCommands).toBeGreaterThanOrEqual(14);

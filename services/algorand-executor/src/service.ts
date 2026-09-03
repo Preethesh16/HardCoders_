@@ -1,6 +1,7 @@
 import type { ExecutorConfig } from "./config.js";
 import { conflict, notFound } from "./errors.js";
 import { nextProjection, PreparedTransactionExpiredError, type AlgorandChain, type PrepareInput } from "./chain.js";
+import type { FabricEvidenceReader } from "./security/fabric-evidence-reader.js";
 import type { AuthoritativeFabricReader } from "./security/gateway-reader.js";
 import type { FabricPermitVerifier } from "./security/permit.js";
 import type { CommandRecord, ExecutorStore } from "./store.js";
@@ -16,6 +17,7 @@ import {
   type Escrow,
   type EscrowBinding,
   type ExecutorAction,
+  releaseBindingCommitment,
   type ReleaseInput,
   type ReleaseEvidence,
 } from "./types.js";
@@ -29,6 +31,7 @@ export class ExecutorService {
     private readonly permits: FabricPermitVerifier,
     private readonly fabric: AuthoritativeFabricReader,
     private readonly chain: AlgorandChain,
+    private readonly workEvidence: FabricEvidenceReader,
   ) {}
 
   async initialize(): Promise<void> {
@@ -124,6 +127,10 @@ export class ExecutorService {
         <= this.config.ALGORAND_RELEASE_SAFETY_MARGIN_SECONDS * 1_000) {
         throw conflict("The Fabric release lease cannot fit the configured Algorand confirmation safety margin.");
       }
+      // Nothing has been signed yet, so this is the last safe moment to insist
+      // that Fabric still holds the exact approved work version the permit was
+      // minted against. A changed, withdrawn or unapproved version fails closed.
+      if (release) await this.assertApprovedWorkEvidence(release);
       const prepared = await this.chain.prepare(expectedPreparedCommand);
       record = await this.store.markPrepared(command.idempotencyKey, prepared);
     }
@@ -224,6 +231,16 @@ export class ExecutorService {
     return completed.response as MutationResult;
   }
 
+  /** Re-reads the approved Fabric work evidence bound by a release permit. */
+  private async assertApprovedWorkEvidence(release: ReleaseInput): Promise<void> {
+    await this.workEvidence.readApprovedEvidence({
+      dealId: release.escrowBinding.dealId,
+      milestoneId: release.milestoneId,
+      workEvidenceHash: release.releaseBinding.workEvidenceHash,
+      fabricTxHash: release.releaseBinding.fabricTxHash,
+    });
+  }
+
   private commandDealId(command: CommandContext): string {
     if (command.action === "create") return escrowExpectationSchema.parse(command.body).dealId;
     if (command.action === "release") return releaseInputSchema.parse(command.body).escrowBinding.dealId;
@@ -249,8 +266,10 @@ export class ExecutorService {
       throw conflict("Durable release authorization evidence is missing for the milestone release.");
     }
     const onChain = await this.chain.getReleaseEvidence(escrow, milestoneId);
+    const releaseBinding = command.permitClaims.releaseAuthorization.releaseBinding;
     if (onChain.amountMinor !== release.amountMinor
-      || onChain.bindingHash !== command.permitClaims.releaseAuthorization.bindingHash) {
+      || onChain.bindingHash !== command.permitClaims.releaseAuthorization.bindingHash
+      || onChain.authorizationCommitment !== releaseBindingCommitment(releaseBinding)) {
       throw conflict("On-chain release evidence conflicts with the durable authorization and projection.");
     }
     return {
@@ -259,15 +278,17 @@ export class ExecutorService {
       transactionId: release.transactionId,
       confirmedRound: command.confirmedRound,
       ...onChain,
+      releaseBinding,
     };
   }
 
   async readiness(): Promise<boolean> {
-    const [chainReady, fabricReady] = await Promise.all([
+    const [chainReady, fabricReady, evidenceReady] = await Promise.all([
       this.chain.readiness(),
       this.fabric.readiness?.() ?? Promise.resolve(true),
+      this.workEvidence.readiness?.() ?? Promise.resolve(true),
     ]);
-    return chainReady && fabricReady;
+    return chainReady && fabricReady && evidenceReady;
   }
 
   async evidence(idempotencyKey: string): Promise<CommandEvidence> {

@@ -41,7 +41,7 @@ let directory: string;
 let accountsPath: string;
 
 beforeEach(async () => {
-  directory = await mkdtemp(join(tmpdir(), "anchor-testnet-deploy-"));
+  directory = await mkdtemp(join(tmpdir(), "optiwork-testnet-deploy-"));
   accountsPath = join(directory, "testnet-accounts.json");
   await writeAccountFile(accountsPath, generateAccountSet());
 });

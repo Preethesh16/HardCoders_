@@ -1,7 +1,7 @@
 import algosdk from "algosdk";
 import { z } from "zod";
 
-import { sha256 } from "./canonical.js";
+import { sha256, sha256Text } from "./canonical.js";
 
 const UINT64_MAX = (1n << 64n) - 1n;
 export const actionSchema = z.enum(["create", "fund", "release", "pause", "resume", "refund", "complete"]);
@@ -78,7 +78,39 @@ export const escrowSchema = escrowBindingSchema.and(z.object({
 });
 export type Escrow = z.infer<typeof escrowSchema>;
 
-export const releaseInputSchema = z.object({
+/**
+ * The complete, one-time authorization a release is bound to.
+ *
+ * Every field is a commitment or an opaque identifier: the escrow deployment,
+ * the exact approved Fabric work version, the Fabric approval transaction, the
+ * compliance decision, the FX quote, the monotonic fence generation, the
+ * idempotency key that reserves the command, and the instant the authorization
+ * stops being valid. Its canonical hash is what the escrow application records
+ * on chain, so the on-chain fence commitment *is* this binding.
+ */
+export const releaseBindingSchema = z.object({
+  escrowBindingHash: hashSchema,
+  workEvidenceHash: hashSchema,
+  fabricTxHash: hashSchema,
+  complianceResultHash: hashSchema,
+  fxQuoteHash: hashSchema,
+  generation: z.number().int().positive().safe(),
+  idempotencyKey: idempotencyKeySchema,
+  expiresAt: z.string().datetime({ offset: true }),
+}).strict();
+export type ReleaseBinding = z.infer<typeof releaseBindingSchema>;
+
+/** The canonical commitment recorded on Algorand as the authorization fence. */
+export function releaseBindingCommitment(binding: ReleaseBinding): `sha256:${string}` {
+  return sha256(releaseBindingSchema.parse(binding));
+}
+
+/** The canonical commitment for an escrow binding, as bound by a release. */
+export function escrowBindingCommitment(binding: EscrowBinding): `sha256:${string}` {
+  return sha256(escrowBindingSchema.parse(binding));
+}
+
+const releaseFields = {
   escrowBinding: escrowBindingSchema,
   milestoneId: canonicalIdSchema,
   amountMinor: positiveUint64StringSchema,
@@ -88,7 +120,34 @@ export const releaseInputSchema = z.object({
   leaseExpiresAt: z.string().datetime({ offset: true }),
   authorizationCommitment: hashSchema,
   fabricClaimTransactionId: canonicalIdSchema,
-}).strict();
+  releaseBinding: releaseBindingSchema,
+} as const;
+
+/**
+ * Cross-field consistency for a release. These invariants are what stop a
+ * caller from presenting an authorization whose parts describe different
+ * deals, generations, deadlines or Fabric transactions.
+ */
+function assertReleaseCoherence(
+  value: { [K in keyof typeof releaseFields]: z.infer<(typeof releaseFields)[K]> },
+  context: z.RefinementCtx,
+): void {
+  const issue = (message: string) => context.addIssue({ code: "custom", message });
+  const binding = value.releaseBinding;
+  if (binding.generation !== value.fenceGeneration) issue("releaseBinding.generation must equal fenceGeneration.");
+  if (binding.expiresAt !== value.leaseExpiresAt) issue("releaseBinding.expiresAt must equal leaseExpiresAt.");
+  if (binding.escrowBindingHash !== escrowBindingCommitment(value.escrowBinding)) {
+    issue("releaseBinding.escrowBindingHash must commit to the exact escrow binding.");
+  }
+  if (binding.fabricTxHash !== sha256Text(value.fabricClaimTransactionId)) {
+    issue("releaseBinding.fabricTxHash must commit to the Fabric claim transaction ID.");
+  }
+  if (value.authorizationCommitment !== releaseBindingCommitment(binding)) {
+    issue("authorizationCommitment must be the canonical hash of releaseBinding.");
+  }
+}
+
+export const releaseInputSchema = z.object(releaseFields).strict().superRefine(assertReleaseCoherence);
 export type ReleaseInput = z.infer<typeof releaseInputSchema>;
 
 export const releaseResultSchema = z.object({
@@ -121,17 +180,7 @@ const permitBase = z.object({
   authoritativeReads: z.array(commandReadSchema).min(1).max(4),
 });
 
-const releaseAuthorizationSchema = z.object({
-  escrowBinding: escrowBindingSchema,
-  milestoneId: canonicalIdSchema,
-  amountMinor: positiveUint64StringSchema,
-  intentId: canonicalIdSchema,
-  bindingHash: hashSchema,
-  fenceGeneration: z.number().int().positive().safe(),
-  leaseExpiresAt: z.string().datetime({ offset: true }),
-  authorizationCommitment: hashSchema,
-  fabricClaimTransactionId: canonicalIdSchema,
-}).strict();
+const releaseAuthorizationSchema = z.object(releaseFields).strict().superRefine(assertReleaseCoherence);
 
 export const permitClaimsSchema = z.discriminatedUnion("action", [
   permitBase.extend({ action: z.literal("release"), releaseAuthorization: releaseAuthorizationSchema }).strict(),
@@ -208,6 +257,7 @@ export const releaseEvidenceSchema = z.object({
   fenceGeneration: z.number().int().positive().safe(),
   authorizationCommitment: hashSchema,
   fabricClaimTransactionHash: hashSchema,
+  releaseBinding: releaseBindingSchema,
 }).strict();
 export type ReleaseEvidence = z.infer<typeof releaseEvidenceSchema>;
 
@@ -232,6 +282,7 @@ export const readinessSchema = z.object({
     durableIdempotency: z.literal(true),
     signedFabricPermits: z.literal(true),
     authoritativeFabricReread: z.literal(true),
+    approvedWorkEvidenceReread: z.literal(true),
   }).strict(),
 }).strict();
 

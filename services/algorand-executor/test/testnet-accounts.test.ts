@@ -6,7 +6,7 @@ import algosdk from "algosdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  SELLER_ORGANIZATION_IDS,
+  DESTINATION_PROVIDER_ORGANIZATION_IDS,
   generateAccountSet,
   publicAddresses,
   readAccountFile,
@@ -17,7 +17,7 @@ import {
 let directory: string;
 
 beforeEach(async () => {
-  directory = await mkdtemp(join(tmpdir(), "anchor-testnet-accounts-"));
+  directory = await mkdtemp(join(tmpdir(), "optiwork-testnet-accounts-"));
 });
 
 afterEach(async () => {
@@ -30,11 +30,11 @@ describe("disposable TestNet account material", () => {
     expect(accounts.network).toBe("testnet");
     expect(accounts.genesisId).toBe("testnet-v1.0");
     const addresses = publicAddresses(accounts);
-    expect(Object.keys(addresses).sort()).toEqual(["ORG-SELL-001", "ORG-SELL-002", "ORG-SELL-003", "deployer", "originProviderTreasury"]);
+    expect(Object.keys(addresses).sort()).toEqual(["ORG-DEST-001", "ORG-DEST-002", "ORG-DEST-003", "deployer", "originProviderTreasury"]);
     expect(new Set(Object.values(addresses)).size).toBe(5);
     for (const address of Object.values(addresses)) expect(algosdk.isValidAddress(address)).toBe(true);
-    for (const organizationId of SELLER_ORGANIZATION_IDS) {
-      expect(accounts.sellers[organizationId].address).toBe(addresses[organizationId]);
+    for (const organizationId of DESTINATION_PROVIDER_ORGANIZATION_IDS) {
+      expect(accounts.destinationProviders[organizationId].address).toBe(addresses[organizationId]);
     }
   });
 

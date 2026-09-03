@@ -9,3 +9,6 @@ contracts/**/artifacts/
 wallet/
 generated-credentials/
 localnet-data/
+
+# Superseded by the workspace root lockfile.
+pnpm-lock.yaml

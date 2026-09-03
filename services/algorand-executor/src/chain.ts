@@ -63,6 +63,12 @@ export type PreparedTransactionReconciliation =
   | { status: "EXPIRED"; observedRound: string }
   | { status: "CONFIRMED"; observedRound: string; confirmedRound: string };
 
+/** Exactly the release facts the escrow application records in its box. */
+export type OnChainReleaseEvidence = Omit<
+  ReleaseEvidence,
+  "dealId" | "milestoneId" | "transactionId" | "confirmedRound" | "releaseBinding"
+>;
+
 export class PreparedTransactionExpiredError extends Error {
   constructor(readonly observedRound: string) {
     super("The prepared Algorand transaction expired without confirmation.");
@@ -75,7 +81,7 @@ export interface AlgorandChain {
   reconcile(prepared: PreparedTransaction, expected: PrepareInput): Promise<PreparedTransactionReconciliation>;
   submit(prepared: PreparedTransaction, expected: PrepareInput): Promise<{ confirmedRound: string }>;
   assertProjection(escrow: Escrow): Promise<void>;
-  getReleaseEvidence(escrow: Escrow, milestoneId: string): Promise<Omit<ReleaseEvidence, "dealId" | "milestoneId" | "transactionId" | "confirmedRound">>;
+  getReleaseEvidence(escrow: Escrow, milestoneId: string): Promise<OnChainReleaseEvidence>;
   readiness(): Promise<boolean>;
 }
 
@@ -217,8 +223,8 @@ export class RealAlgorandChain implements AlgorandChain {
   readonly #algod: algosdk.Algodv2;
   readonly #signer: algosdk.TransactionSigner;
   readonly #account: algosdk.Account;
-  readonly #buyerSigner: algosdk.TransactionSigner;
-  readonly #buyerAccount: algosdk.Account;
+  readonly #originTreasurySigner: algosdk.TransactionSigner;
+  readonly #originTreasuryAccount: algosdk.Account;
 
   constructor(private readonly config: ExecutorConfig) {
     this.#algod = new algosdk.Algodv2(
@@ -230,17 +236,17 @@ export class RealAlgorandChain implements AlgorandChain {
       sk: config.signerPrivateKey,
     };
     this.#signer = algosdk.makeBasicAccountTransactionSigner(this.#account);
-    this.#buyerAccount = {
+    this.#originTreasuryAccount = {
       addr: algosdk.Address.fromString(config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS),
       sk: config.originProviderTreasuryPrivateKey,
     };
-    this.#buyerSigner = algosdk.makeBasicAccountTransactionSigner(this.#buyerAccount);
+    this.#originTreasurySigner = algosdk.makeBasicAccountTransactionSigner(this.#originTreasuryAccount);
   }
 
   async prepare(input: PrepareInput): Promise<PreparedTransaction> {
     assertExpectedInput(input, this.config);
     if (input.binding.originProviderAddress !== this.config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS) {
-      throw conflict("The escrow buyer does not match the configured buyer treasury signer.");
+      throw conflict("The escrow originTreasury does not match the configured originTreasury treasury signer.");
     }
     if (input.action === "release") {
       if (!input.release || !input.fabricClaimTransactionId
@@ -278,13 +284,13 @@ export class RealAlgorandChain implements AlgorandChain {
         break;
       case "fund": {
         const funding = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
-          sender: this.#buyerAccount.addr,
+          sender: this.#originTreasuryAccount.addr,
           receiver: algosdk.getApplicationAddress(appId),
           amount: BigInt(input.binding.amount.amountMinor),
           assetIndex: this.config.ALGORAND_ASSET_ID,
           suggestedParams: safeParams(params, this.config),
         });
-        methodArgs.push({ txn: funding, signer: this.#buyerSigner });
+        methodArgs.push({ txn: funding, signer: this.#originTreasurySigner });
         break;
       }
       case "release": {
@@ -330,7 +336,7 @@ export class RealAlgorandChain implements AlgorandChain {
       boxes,
       appAccounts: accounts,
       appForeignAssets: assets,
-      lease: digestBytes(`anchor-executor:${input.idempotencyKey}`),
+      lease: digestBytes(`optiwork-executor:${input.idempotencyKey}`),
     });
     const group = atc.buildGroup();
     const txIds = group.map(({ txn }) => txn.txID());
@@ -484,7 +490,7 @@ export class RealAlgorandChain implements AlgorandChain {
         throw new Error("transaction fee mismatch");
       }
 
-      const expectedLease = digestBytes(`anchor-executor:${expected.idempotencyKey}`);
+      const expectedLease = digestBytes(`optiwork-executor:${expected.idempotencyKey}`);
       const expectedAccounts = expected.action === "release"
         ? [expected.binding.destinationProviderAddress]
         : expected.action === "refund" ? [expected.binding.originProviderAddress] : [];
@@ -561,20 +567,20 @@ export class RealAlgorandChain implements AlgorandChain {
     }
     const raw = RECORD_TYPE.decode(response.value);
     if (!Array.isArray(raw) || raw.length !== 12) throw unavailable("The on-chain escrow record is malformed.");
-    const [agreement, buyer, seller, asset, total, locked, released, refunded, currency, scale, state] = raw;
+    const [agreement, originTreasury, destinationProvider, asset, total, locked, released, refunded, currency, scale, state] = raw;
     const agreementBytes = abiByteArray(agreement);
     const stateName = typeof state === "bigint" ? STATE[Number(state)] : undefined;
-    const originProviderAddress = typeof buyer === "string"
-      ? buyer
-      : buyer instanceof algosdk.Address ? buyer.toString() : undefined;
-    const destinationProviderAddress = typeof seller === "string"
-      ? seller
-      : seller instanceof algosdk.Address ? seller.toString() : undefined;
+    const originProviderAddress = typeof originTreasury === "string"
+      ? originTreasury
+      : originTreasury instanceof algosdk.Address ? originTreasury.toString() : undefined;
+    const destinationProviderAddress = typeof destinationProvider === "string"
+      ? destinationProvider
+      : destinationProvider instanceof algosdk.Address ? destinationProvider.toString() : undefined;
     const mismatches = [
       !agreementBytes
         || Buffer.from(agreementBytes).toString("hex") !== escrow.agreementHash.slice(7) ? "agreement" : null,
-      originProviderAddress !== escrow.originProviderAddress ? "buyer" : null,
-      destinationProviderAddress !== escrow.destinationProviderAddress ? "seller" : null,
+      originProviderAddress !== escrow.originProviderAddress ? "originTreasury" : null,
+      destinationProviderAddress !== escrow.destinationProviderAddress ? "destinationProvider" : null,
       asset !== BigInt(escrow.assetId) ? "asset" : null,
       total !== BigInt(escrow.amount.amountMinor) ? "total" : null,
       locked !== BigInt(escrow.lockedMinor) ? "locked" : null,
@@ -589,10 +595,7 @@ export class RealAlgorandChain implements AlgorandChain {
     }
   }
 
-  async getReleaseEvidence(
-    escrow: Escrow,
-    milestoneId: string,
-  ): Promise<Omit<ReleaseEvidence, "dealId" | "milestoneId" | "transactionId" | "confirmedRound">> {
+  async getReleaseEvidence(escrow: Escrow, milestoneId: string): Promise<OnChainReleaseEvidence> {
     const dealKey = digestBytes(escrow.dealId);
     const milestoneKey = digestBytes(milestoneId);
     let response: Awaited<ReturnType<ReturnType<algosdk.Algodv2["getApplicationBoxByName"]>["do"]>>;
@@ -626,7 +629,7 @@ export class RealAlgorandChain implements AlgorandChain {
 
   async readiness(): Promise<boolean> {
     try {
-      const [params, app, asset, signer, buyer, holding, buyerHolding] = await Promise.all([
+      const [params, app, asset, signer, originTreasury, holding, originTreasuryHolding] = await Promise.all([
         this.#algod.getTransactionParams().do(),
         this.#algod.getApplicationByID(this.config.ALGORAND_APPLICATION_ID).do(),
         this.#algod.getAssetByID(this.config.ALGORAND_ASSET_ID).do(),
@@ -639,9 +642,9 @@ export class RealAlgorandChain implements AlgorandChain {
         && app.id === this.config.ALGORAND_APPLICATION_ID
         && asset.index === this.config.ALGORAND_ASSET_ID
         && signer.address.toString() === this.config.ALGORAND_SIGNER_ADDRESS
-        && buyer.address.toString() === this.config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS
+        && originTreasury.address.toString() === this.config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS
         && holding.assetHolding?.assetId === this.config.ALGORAND_ASSET_ID
-        && buyerHolding.assetHolding?.assetId === this.config.ALGORAND_ASSET_ID;
+        && originTreasuryHolding.assetHolding?.assetId === this.config.ALGORAND_ASSET_ID;
     } catch {
       return false;
     }

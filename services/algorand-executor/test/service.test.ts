@@ -4,12 +4,13 @@ import { preparedCommandBinding, type AlgorandChain, type PrepareInput, type Pre
 import { ExecutorService } from "../src/service.js";
 import { MemoryExecutorStore, type PreparedTransaction } from "../src/store.js";
 import { commandHash, releaseInputSchema, type CommandContext, type Escrow, type PermitClaims, type ReleaseInput } from "../src/types.js";
-import { testConfig } from "./helpers.js";
+import { approvingEvidenceReader, releaseInput, testConfig } from "./helpers.js";
 
 class FakeChain implements AlgorandChain {
   prepareCalls: PrepareInput[] = [];
   submitted: PreparedTransaction[] = [];
   releaseEvidenceBindingHash = `sha256:${"d".repeat(64)}`;
+  releaseEvidenceAuthorizationCommitment = `sha256:${"e".repeat(64)}`;
 
   async prepare(input: PrepareInput): Promise<PreparedTransaction> {
     this.prepareCalls.push(structuredClone(input));
@@ -37,7 +38,7 @@ class FakeChain implements AlgorandChain {
       amountMinor: "100",
       bindingHash: this.releaseEvidenceBindingHash,
       fenceGeneration: 1,
-      authorizationCommitment: `sha256:${"e".repeat(64)}`,
+      authorizationCommitment: this.releaseEvidenceAuthorizationCommitment,
       fabricClaimTransactionHash: `sha256:${"f".repeat(64)}`,
     };
   }
@@ -169,6 +170,7 @@ describe("durable executor lifecycle", () => {
       { verify: async () => { throw new Error("not used"); } },
       { verifyCurrent: async () => undefined, readiness: async () => false },
       new FakeChain(),
+      approvingEvidenceReader(),
     );
     await expect(service.readiness()).resolves.toBe(false);
   });
@@ -184,6 +186,7 @@ describe("durable executor lifecycle", () => {
       { verify: async () => currentClaims },
       { verifyCurrent: async () => undefined },
       chain,
+      approvingEvidenceReader(),
     );
     const createBody = {
       dealId: "DEAL-001", agreementHash: `sha256:${"c".repeat(64)}`,
@@ -207,14 +210,15 @@ describe("durable executor lifecycle", () => {
       destinationProviderAddress: escrow.destinationProviderAddress, assetId: escrow.assetId, amount: escrow.amount,
       network: escrow.network, genesisHash: escrow.genesisHash, applicationId: escrow.applicationId,
     };
-    const release: ReleaseInput = {
+    const release: ReleaseInput = releaseInput({
       escrowBinding: binding,
       milestoneId: "MS-001", amountMinor: "100", intentId: "INTENT-001",
       bindingHash: `sha256:${"d".repeat(64)}`, fenceGeneration: 1,
       leaseExpiresAt: new Date(Date.now() + 120_000).toISOString(),
-      authorizationCommitment: `sha256:${"e".repeat(64)}`,
       fabricClaimTransactionId: "FABRIC-RELEASE",
-    };
+      idempotencyKey: "RELEASE",
+    });
+    chain.releaseEvidenceAuthorizationCommitment = release.authorizationCommitment;
     const releaseCommand: CommandContext = {
       action: "release", method: "POST", path: "/escrows/DEAL-001/releases", idempotencyKey: "RELEASE", body: release,
     };
@@ -244,7 +248,7 @@ describe("durable executor lifecycle", () => {
     const store = new MemoryExecutorStore();
     const chain = new FakeChain();
     let currentClaims!: PermitClaims;
-    const service = new ExecutorService(config, store, { verify: async () => currentClaims }, { verifyCurrent: async () => undefined }, chain);
+    const service = new ExecutorService(config, store, { verify: async () => currentClaims }, { verifyCurrent: async () => undefined }, chain, approvingEvidenceReader());
     const createBody = {
       dealId: "DEAL-001", agreementHash: `sha256:${"f".repeat(64)}`,
       originProviderAddress: config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS, destinationProviderAddress: config.ALGORAND_SIGNER_ADDRESS,
@@ -262,12 +266,13 @@ describe("durable executor lifecycle", () => {
       destinationProviderAddress: escrow.destinationProviderAddress, assetId: escrow.assetId, amount: escrow.amount,
       network: escrow.network, genesisHash: escrow.genesisHash, applicationId: escrow.applicationId,
     };
-    const release: ReleaseInput = {
+    const release: ReleaseInput = releaseInput({
       escrowBinding: binding, milestoneId: "MS-001", amountMinor: "10", intentId: "INTENT-001",
       bindingHash: `sha256:${"1".repeat(64)}`, fenceGeneration: 1,
-      leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(), authorizationCommitment: `sha256:${"2".repeat(64)}`,
+      leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(),
       fabricClaimTransactionId: "FABRIC-RELEASE-SHORT",
-    };
+      idempotencyKey: "RELEASE-SHORT",
+    });
     const command: CommandContext = { action: "release", method: "POST", path: "/escrows/DEAL-001/releases", idempotencyKey: "RELEASE-SHORT", body: release };
     currentClaims = claims(command, release);
     await expect(service.mutate(command, "permit")).rejects.toThrow(/safety margin/u);
@@ -284,6 +289,7 @@ describe("durable executor lifecycle", () => {
       { verify: async (_permit, command) => claims(command, command.action === "release" ? releaseInputSchema.parse(command.body) : undefined) },
       { verifyCurrent: async () => undefined },
       chain,
+      approvingEvidenceReader(),
     );
     const createBody = {
       dealId: "DEAL-001", agreementHash: `sha256:${"7".repeat(64)}`,
@@ -298,12 +304,12 @@ describe("durable executor lifecycle", () => {
       destinationProviderAddress: current.destinationProviderAddress, assetId: current.assetId, amount: current.amount,
       network: current.network, genesisHash: current.genesisHash, applicationId: current.applicationId,
     };
-    const release = (milestoneId: string, amountMinor: string, idempotencyKey: string): ReleaseInput => ({
+    const release = (milestoneId: string, amountMinor: string, idempotencyKey: string): ReleaseInput => releaseInput({
       escrowBinding, milestoneId, amountMinor, intentId: `INTENT-${milestoneId}`,
       bindingHash: `sha256:${"8".repeat(64)}`, fenceGeneration: 1,
       leaseExpiresAt: new Date(Date.now() + 120_000).toISOString(),
-      authorizationCommitment: `sha256:${"9".repeat(64)}`,
       fabricClaimTransactionId: `FABRIC-${idempotencyKey}`,
+      idempotencyKey,
     });
     const firstBody = release("MS-001", "40", "SERIAL-REL-1");
     const secondBody = release("MS-002", "60", "SERIAL-REL-2");
@@ -325,7 +331,7 @@ describe("durable executor lifecycle", () => {
     const chain = new AmbiguousOnceChain();
     const verifier = { verify: async (_permit: string, command: CommandContext) => claims(command) };
     const fabric = { verifyCurrent: async () => undefined };
-    const service = new ExecutorService(config, store, verifier, fabric, chain);
+    const service = new ExecutorService(config, store, verifier, fabric, chain, approvingEvidenceReader());
     const createBody = {
       dealId: "DEAL-001", agreementHash: `sha256:${"6".repeat(64)}`,
       originProviderAddress: config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS, destinationProviderAddress: config.ALGORAND_SIGNER_ADDRESS,
@@ -342,7 +348,7 @@ describe("durable executor lifecycle", () => {
     expect(prepared).toMatchObject({ status: "PREPARED", dealId: "DEAL-001" });
 
     const restartedChain = new FakeChain();
-    const restarted = new ExecutorService(config, store, verifier, fabric, restartedChain);
+    const restarted = new ExecutorService(config, store, verifier, fabric, restartedChain, approvingEvidenceReader());
     await expect(restarted.mutate({ action: "refund", method: "POST", path: "/escrows/DEAL-001/refund", idempotencyKey: "RECOVER-ATTACK", body: null }, "permit"))
       .rejects.toThrow(/reconciled first/u);
     await expect(restarted.mutate(pause, "same-command-retry")).resolves.toMatchObject({ state: "PAUSED" });
@@ -375,6 +381,7 @@ describe("durable executor lifecycle", () => {
       } },
       { verifyCurrent: async () => { fabricCalls += 1; } },
       chain,
+      approvingEvidenceReader(),
     );
     await expect(service.mutate(command, "current-permit")).rejects.toThrow(/preparation interrupted/u);
     await expect(store.getCommand(command.idempotencyKey)).resolves.toMatchObject({ status: "PENDING" });
@@ -411,6 +418,7 @@ describe("durable executor lifecycle", () => {
         if (fabricCalls > 1) throw new Error("Fabric authorization changed");
       } },
       chain,
+      approvingEvidenceReader(),
     );
     await expect(service.mutate(command, "current-permit")).rejects.toThrow(/crashed after Algorand confirmation/u);
     await expect(store.getCommand(command.idempotencyKey)).resolves.toMatchObject({ status: "PREPARED" });
@@ -449,6 +457,7 @@ describe("durable executor lifecycle", () => {
       } },
       { verifyCurrent: async () => undefined },
       chain,
+      approvingEvidenceReader(),
     );
     await expect(service.mutate(command, "current-permit")).rejects.toThrow(/not confirmed/u);
     await expect(service.mutate(command, "expired-permit")).rejects.toThrow(/permit expired/u);
@@ -469,6 +478,7 @@ describe("durable executor lifecycle", () => {
       ) },
       { verifyCurrent: async () => undefined },
       chain,
+      approvingEvidenceReader(),
     );
     const createBody = {
       dealId: "DEAL-GENERATION", agreementHash: `sha256:${"a".repeat(64)}`,
@@ -484,13 +494,13 @@ describe("durable executor lifecycle", () => {
       network: escrow.network, genesisHash: escrow.genesisHash, applicationId: escrow.applicationId,
     };
     const release = (generation: number, idempotencyKey: string): { command: CommandContext; input: ReleaseInput } => {
-      const input: ReleaseInput = {
+      const input: ReleaseInput = releaseInput({
         escrowBinding, milestoneId: "MS-GENERATION", amountMinor: "25", intentId: "INTENT-GENERATION",
         bindingHash: `sha256:${"b".repeat(64)}`, fenceGeneration: generation,
         leaseExpiresAt: new Date(Date.now() + 120_000).toISOString(),
-        authorizationCommitment: `sha256:${String(generation).repeat(64)}`,
         fabricClaimTransactionId: `FABRIC-GENERATION-${generation}`,
-      };
+        idempotencyKey,
+      });
       return {
         input,
         command: { action: "release", method: "POST", path: "/escrows/DEAL-GENERATION/releases", idempotencyKey, body: input },
@@ -555,6 +565,7 @@ describe("durable executor lifecycle", () => {
         ) },
         { verifyCurrent: async () => undefined },
         chain,
+        approvingEvidenceReader(),
       );
       const createBody = {
         dealId: "DEAL-PENDING-GENERATION", agreementHash: `sha256:${"a".repeat(64)}`,
@@ -565,7 +576,7 @@ describe("durable executor lifecycle", () => {
       await service.mutate({ action: "fund", method: "POST", path: "/escrows/DEAL-PENDING-GENERATION/fund", idempotencyKey: "PENDING-FUND", body: null }, "permit");
       const escrow = await service.getEscrow("DEAL-PENDING-GENERATION");
       const release = (generation: number, idempotencyKey: string, leaseExpiresAt: string) => {
-        const input: ReleaseInput = {
+        const input: ReleaseInput = releaseInput({
           escrowBinding: {
             dealId: escrow.dealId, agreementHash: escrow.agreementHash, originProviderAddress: escrow.originProviderAddress,
             destinationProviderAddress: escrow.destinationProviderAddress, assetId: escrow.assetId, amount: escrow.amount,
@@ -573,9 +584,9 @@ describe("durable executor lifecycle", () => {
           },
           milestoneId: "MS-PENDING-GENERATION", amountMinor: "30", intentId: "INTENT-PENDING-GENERATION",
           bindingHash: `sha256:${"b".repeat(64)}`, fenceGeneration: generation, leaseExpiresAt,
-          authorizationCommitment: `sha256:${String(generation).repeat(64)}`,
           fabricClaimTransactionId: `FABRIC-PENDING-GENERATION-${generation}`,
-        };
+          idempotencyKey,
+        });
         return {
           input,
           command: {

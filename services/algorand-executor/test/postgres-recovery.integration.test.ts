@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { PostgresExecutorStore, type PreparedTransaction } from "../src/store.js";
 import type { PermitClaims, ReleaseInput } from "../src/types.js";
-import { testConfig } from "./helpers.js";
+import { releaseInput, testConfig } from "./helpers.js";
 
 const databaseUrl = process.env.ALGORAND_EXECUTOR_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -51,11 +51,12 @@ describeWithPostgres("executor PostgreSQL recovery migrations", () => {
         signedTransactionsBase64: ["QUJDRA=="],
         lastValidRound: "100",
       };
-      const releaseInput = (
+      const buildRelease = (
         generation: number,
+        key: string,
         targetDealId = dealId,
         leaseExpiresAt = "2030-01-01T00:00:00.000Z",
-      ): ReleaseInput => ({
+      ): ReleaseInput => releaseInput({
         escrowBinding: {
           dealId: targetDealId,
           agreementHash: `sha256:${"c".repeat(64)}`,
@@ -73,8 +74,8 @@ describeWithPostgres("executor PostgreSQL recovery migrations", () => {
         bindingHash: `sha256:${"d".repeat(64)}`,
         fenceGeneration: generation,
         leaseExpiresAt,
-        authorizationCommitment: `sha256:${generation === 1 ? "e".repeat(64) : "f".repeat(64)}`,
         fabricClaimTransactionId: `FABRIC-PG-CLAIM-${generation}`,
+        idempotencyKey: key,
       });
       const permit = (
         key: string,
@@ -100,7 +101,7 @@ describeWithPostgres("executor PostgreSQL recovery migrations", () => {
           path: `/ledger/deals/${targetDealId}/milestones/${milestoneId}/payment-intents/${intentId}`,
           dataHash: `sha256:${"1".repeat(64)}`,
         }],
-        releaseAuthorization: releaseInput(generation, targetDealId, leaseExpiresAt),
+        releaseAuthorization: buildRelease(generation, key, targetDealId, leaseExpiresAt),
       });
 
       await database.query(

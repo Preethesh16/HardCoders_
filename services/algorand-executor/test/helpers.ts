@@ -1,11 +1,25 @@
 import algosdk from "algosdk";
 
+import { sha256Text } from "../src/canonical.js";
 import { loadConfig, type ExecutorConfig } from "../src/config.js";
-import type { CommandContext, PermitClaims } from "../src/types.js";
+import {
+  workEvidenceHash as canonicalWorkEvidenceHash,
+  type FabricEvidenceReader,
+  type MockFabricEvidenceReader,
+  type WorkEvidence,
+} from "../src/security/fabric-evidence-reader.js";
+import {
+  escrowBindingCommitment,
+  releaseBindingCommitment,
+  releaseInputSchema,
+  type CommandContext,
+  type PermitClaims,
+  type ReleaseInput,
+} from "../src/types.js";
 
 export function testConfig(overrides: NodeJS.ProcessEnv = {}): ExecutorConfig {
   const executor = algosdk.generateAccount();
-  const buyer = algosdk.generateAccount();
+  const originTreasury = algosdk.generateAccount();
   return loadConfig({
     NODE_ENV: "test",
     UNRELATED_PROCESS_VARIABLE: "must-be-ignored",
@@ -36,8 +50,8 @@ export function testConfig(overrides: NodeJS.ProcessEnv = {}): ExecutorConfig {
     ALGORAND_ASSET_ID: "1042",
     ALGORAND_SIGNER_ADDRESS: executor.addr.toString(),
     ALGORAND_SIGNER_PRIVATE_KEY_BASE64: Buffer.from(executor.sk).toString("base64"),
-    ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: buyer.addr.toString(),
-    ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: Buffer.from(buyer.sk).toString("base64"),
+    ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: originTreasury.addr.toString(),
+    ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: Buffer.from(originTreasury.sk).toString("base64"),
     ALGORAND_MAX_VALIDITY_ROUNDS: "20",
     ...overrides,
   });
@@ -66,4 +80,89 @@ export function baseClaims(command: CommandContext, nowSeconds: number): PermitC
       dataHash: "sha256:" + "1".repeat(64),
     }],
   } as PermitClaims;
+}
+
+/**
+ * Builds a coherent release command body.
+ *
+ * A release is only valid when its authorization commitment is the canonical
+ * hash of the complete release binding, so tests must never hand-write that
+ * commitment. Individual hashes can still be overridden to prove a mismatch is
+ * rejected.
+ */
+export type ReleaseDraft = Omit<ReleaseInput, "authorizationCommitment" | "releaseBinding"> & {
+  readonly idempotencyKey: string;
+  readonly workEvidenceHash?: string;
+  readonly complianceResultHash?: string;
+  readonly fxQuoteHash?: string;
+};
+
+export function releaseInput(draft: ReleaseDraft): ReleaseInput {
+  const { idempotencyKey, workEvidenceHash, complianceResultHash, fxQuoteHash, ...rest } = draft;
+  const releaseBinding = {
+    escrowBindingHash: escrowBindingCommitment(rest.escrowBinding),
+    workEvidenceHash: workEvidenceHash ?? `sha256:${"1".repeat(64)}`,
+    fabricTxHash: sha256Text(rest.fabricClaimTransactionId),
+    complianceResultHash: complianceResultHash ?? `sha256:${"2".repeat(64)}`,
+    fxQuoteHash: fxQuoteHash ?? `sha256:${"3".repeat(64)}`,
+    generation: rest.fenceGeneration,
+    idempotencyKey,
+    expiresAt: rest.leaseExpiresAt,
+  };
+  return releaseInputSchema.parse({
+    ...rest,
+    releaseBinding,
+    authorizationCommitment: releaseBindingCommitment(releaseBinding),
+  });
+}
+
+/** Approves every re-read; suites that test rejection use MockFabricEvidenceReader. */
+export function approvingEvidenceReader(): FabricEvidenceReader {
+  return {
+    readApprovedEvidence: async () => ({
+      evidenceId: "EVIDENCE-TEST-001",
+      contractHash: `sha256:${"a".repeat(64)}`,
+      milestoneHash: `sha256:${"b".repeat(64)}`,
+      fileHash: `sha256:${"c".repeat(64)}`,
+      subjectRef: "SUBJECT-TEST-001",
+      version: 1,
+      submittedAt: new Date(0).toISOString(),
+      buyerDecision: "APPROVED" as const,
+      buyerDecisionHash: `sha256:${"d".repeat(64)}`,
+      decidedAt: new Date(0).toISOString(),
+      fabricTxId: "FABRIC-TEST-APPROVAL",
+    }),
+    readiness: async () => true,
+  };
+}
+
+/** A minimal approved Fabric work-evidence projection for a release test. */
+export function approvedEvidence(fabricTxId: string, overrides: Partial<WorkEvidence> = {}): WorkEvidence {
+  return {
+    evidenceId: `EVIDENCE-${fabricTxId}`,
+    contractHash: `sha256:${"a".repeat(64)}`,
+    milestoneHash: `sha256:${"b".repeat(64)}`,
+    fileHash: `sha256:${"c".repeat(64)}`,
+    subjectRef: "SUBJECT-DEMO-001",
+    version: 1,
+    submittedAt: "2026-09-01T00:00:00.000Z",
+    buyerDecision: "APPROVED",
+    buyerDecisionHash: `sha256:${"d".repeat(64)}`,
+    decidedAt: "2026-09-02T00:00:00.000Z",
+    fabricTxId,
+    ...overrides,
+  };
+}
+
+/** Seeds a mock reader and returns the hash a release permit must commit to. */
+export function seedApprovedEvidence(
+  reader: MockFabricEvidenceReader,
+  dealId: string,
+  milestoneId: string,
+  fabricTxId: string,
+  overrides: Partial<WorkEvidence> = {},
+): string {
+  const evidence = approvedEvidence(fabricTxId, overrides);
+  reader.set(dealId, milestoneId, evidence);
+  return canonicalWorkEvidenceHash(evidence);
 }

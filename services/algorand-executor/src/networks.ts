@@ -37,6 +37,43 @@ export const TESTNET_DISPENSER_URL = "https://bank.testnet.algorand.network/" as
 export type SupportedNetwork = "localnet" | "testnet";
 
 /**
+ * Circle's official zero-value USDC ASA on public Algorand TestNet.
+ *
+ * TestNet settlement must use this asset. The project never deploys its own
+ * TestNet stablecoin, so an operator cannot accidentally demonstrate against a
+ * self-minted token and present it as USDC.
+ */
+export const ALGORAND_TESTNET_USDC_ASSET_ID = 10_458_941n;
+
+/**
+ * LocalNet settlement asset. AlgoKit LocalNet mints a fresh chain on every
+ * reset, so the demo asset is created per environment and only its shape is
+ * pinned here: six decimals, matching USDC.
+ */
+export const LOCALNET_DEMO_ASSET = Object.freeze({
+  assetName: "OptiUSD-DEMO",
+  unitName: "OPTIUSD",
+  decimals: 6,
+  total: 100_000_000_000_000n,
+} as const);
+
+/** Both supported networks settle a six-decimal USD-denominated unit. */
+export const SETTLEMENT_ASSET_DECIMALS = 6;
+
+/**
+ * TestNet must settle in the official Circle test USDC ASA. Any other asset ID
+ * is refused before a signer or endpoint is ever used.
+ */
+export function assertTestnetSettlementAsset(assetId: bigint): void {
+  if (assetId !== ALGORAND_TESTNET_USDC_ASSET_ID) {
+    throw new Error(
+      `TestNet settlement requires the official Circle USDC ASA ${ALGORAND_TESTNET_USDC_ASSET_ID}, not ${assetId}. `
+      + "This project never deploys a custom TestNet settlement asset.",
+    );
+  }
+}
+
+/**
  * Rejects any genesis identity that belongs to a denied network. This runs for
  * every network selection, including `localnet`, because the guard's purpose is
  * to make a real-value chain unreachable regardless of the configured mode.
