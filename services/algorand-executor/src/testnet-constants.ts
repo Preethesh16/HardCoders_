@@ -10,10 +10,10 @@ export const DEFAULT_TESTNET_MANIFEST_PATH = "testnet/deployment-manifest.json";
  * Dummy TestAlgos the deployer must hold before deployment starts.
  *
  * Budget: 2 ALGO of application-account minimum balance for box storage,
- * 1.2 ALGO distributed to the buyer treasury and three sellers for their own
- * minimum balances and asset opt-ins, plus headroom for the deployer's own
- * minimum balance, the created asset, and transaction fees. A single official
- * dispenser grant covers this comfortably.
+ * 1.2 ALGO distributed to the origin provider treasury and three destination
+ * provider treasuries for their own minimum balances and USDC opt-ins, plus
+ * headroom for the deployer's own minimum balance and transaction fees. A
+ * single official dispenser grant covers this comfortably.
  */
 export const MINIMUM_DEPLOYER_FUNDING_ALGOS = 5;
 export const MINIMUM_DEPLOYER_FUNDING_MICROALGOS = BigInt(MINIMUM_DEPLOYER_FUNDING_ALGOS) * 1_000_000n;
@@ -27,10 +27,13 @@ export const DEFAULT_APP_FUNDING_MICROALGOS = 2_000_000n;
 /** Bounded confirmation window; TestNet is slower than LocalNet but not unbounded. */
 export const TESTNET_CONFIRMATION_ROUNDS = 20;
 
-/** Zero-value demonstration settlement asset parameters. */
-export const DEMO_ASSET_UNIT_NAME = "ANCHUSD";
-export const DEMO_ASSET_TOTAL = 10_000_000_000n;
-export const DEMO_ASSET_DECIMALS = 0;
+/**
+ * TestNet settles in Circle's official zero-value USDC ASA. The unit name and
+ * scale are recorded here only so the published manifest can state exactly
+ * which asset the demonstration used; nothing here creates an asset.
+ */
+export const TESTNET_SETTLEMENT_ASSET_UNIT_NAME = "USDC";
+export const TESTNET_SETTLEMENT_ASSET_DECIMALS = 6;
 
 /** Public explorer used for human verification of TestNet references. */
 export const TESTNET_EXPLORER_BASE = "https://lora.algokit.io/testnet";

@@ -89,6 +89,11 @@ export class HttpAuthoritativeFabricReader implements AuthoritativeFabricReader 
     }
   }
 
+  /** Shares this reader's cached workload identity with sibling Gateway clients. */
+  async bearerToken(): Promise<string> {
+    return this.accessToken();
+  }
+
   async verifyCurrent(claims: PermitClaims, command: CommandContext): Promise<void> {
     const dealId = command.action === "create"
       ? z.object({ dealId: z.string() }).parse(command.body).dealId

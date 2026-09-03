@@ -1,7 +1,7 @@
 import algosdk from "algosdk";
 import { z } from "zod";
 
-import { assertNotDeniedNetwork, assertTestnetIdentity } from "./networks.js";
+import { assertNotDeniedNetwork, assertTestnetIdentity, assertTestnetSettlementAsset } from "./networks.js";
 
 const canonicalUrl = z.string().url().transform((value, context) => {
   const parsed = new URL(value);
@@ -55,6 +55,14 @@ const envSchema = z.object({
   FABRIC_PERMIT_PUBLIC_JWK_JSON: z.string().min(1).max(16_384),
   FABRIC_PERMIT_MAX_AGE_SECONDS: integer(5, 300, 60),
   ALGORAND_RELEASE_SAFETY_MARGIN_SECONDS: integer(5, 600, 30),
+  // "mock" serves the offline demo and LocalNet with a deterministic in-process
+  // approved-evidence reader. It is refused on TestNet, where the real Fabric
+  // Gateway must be the only source of an approved work version.
+  FABRIC_EVIDENCE_MODE: z.enum(["gateway", "mock"]).default("gateway"),
+  FABRIC_EVIDENCE_FIXTURE_PATH: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.string().min(1).max(4_096).optional(),
+  ),
   ALGORAND_NETWORK: z.enum(["localnet", "testnet"]).default("localnet"),
   PUBLIC_TESTNET_DEMO: environmentBoolean,
   ALGORAND_ALGOD_URL: canonicalUrl,
@@ -69,7 +77,7 @@ const envSchema = z.object({
   ALGORAND_ASSET_ID: z.preprocess((value) => BigInt(String(value)), z.bigint().positive().max(BigInt(Number.MAX_SAFE_INTEGER))),
   ALGORAND_SIGNER_ADDRESS: z.string().refine((value) => algosdk.isValidAddress(value), "Invalid signer address."),
   ALGORAND_SIGNER_PRIVATE_KEY_BASE64: z.string().min(80).max(128).regex(/^[A-Za-z0-9+/]+={0,2}$/u),
-  ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: z.string().refine((value) => algosdk.isValidAddress(value), "Invalid buyer treasury address."),
+  ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: z.string().refine((value) => algosdk.isValidAddress(value), "Invalid origin provider treasury address."),
   ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: z.string().min(80).max(128).regex(/^[A-Za-z0-9+/]+={0,2}$/u),
   ALGORAND_MAX_VALIDITY_ROUNDS: integer(4, 1_000, 100),
 });
@@ -118,6 +126,12 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
   // shell metadata, and other variables outside this service's namespace.
   const parsed = envSchema.parse(environment);
 
+  if (parsed.FABRIC_EVIDENCE_MODE === "mock" && parsed.FABRIC_EVIDENCE_FIXTURE_PATH === undefined) {
+    throw new Error("FABRIC_EVIDENCE_MODE=mock requires FABRIC_EVIDENCE_FIXTURE_PATH.");
+  }
+  if (parsed.FABRIC_EVIDENCE_MODE === "gateway" && parsed.FABRIC_EVIDENCE_FIXTURE_PATH !== undefined) {
+    throw new Error("FABRIC_EVIDENCE_FIXTURE_PATH is only valid with FABRIC_EVIDENCE_MODE=mock.");
+  }
   if (parsed.ALGORAND_MAX_GROUP_FEE_MICROALGOS < parsed.ALGORAND_MAX_TRANSACTION_FEE_MICROALGOS) {
     throw new Error("ALGORAND_MAX_GROUP_FEE_MICROALGOS must be at least the per-transaction fee cap.");
   }
@@ -182,6 +196,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
     // Pin the exact public TestNet genesis identity. Transport checks run first
     // so their more specific messages are preserved for existing operators.
     assertTestnetIdentity(parsed.ALGORAND_GENESIS_HASH);
+    // TestNet settles only in Circle's official zero-value USDC ASA.
+    assertTestnetSettlementAsset(parsed.ALGORAND_ASSET_ID);
+    if (parsed.FABRIC_EVIDENCE_MODE !== "gateway") {
+      throw new Error("TestNet requires FABRIC_EVIDENCE_MODE=gateway; the mock evidence reader is LocalNet-only.");
+    }
   } else {
     const localUrls = [
       ["ALGORAND_ALGOD_URL", parsed.ALGORAND_ALGOD_URL],
@@ -231,13 +250,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
     "ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64",
   );
   if (parsed.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS === parsed.ALGORAND_SIGNER_ADDRESS) {
-    throw new Error("The buyer treasury and executor must use distinct Algorand accounts.");
+    throw new Error("The origin provider treasury and executor must use distinct Algorand accounts.");
   }
 
   const {
     FABRIC_PERMIT_PUBLIC_JWK_JSON: _jwkJson,
     ALGORAND_SIGNER_PRIVATE_KEY_BASE64: _signerKey,
-    ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: _buyerKey,
+    ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: _originTreasuryKey,
     FABRIC_GATEWAY_BEARER_TOKEN: _gatewayBearer,
     FABRIC_GATEWAY_OIDC_TOKEN_URL: _oidcTokenUrl,
     FABRIC_GATEWAY_OIDC_CLIENT_ID: _oidcClientId,

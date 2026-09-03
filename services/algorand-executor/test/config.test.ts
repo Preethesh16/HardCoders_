@@ -2,7 +2,10 @@ import algosdk from "algosdk";
 import { describe, expect, it } from "vitest";
 
 import { loadConfig } from "../src/config.js";
-import { ALGORAND_TESTNET_GENESIS_HASH as TESTNET_GENESIS_HASH } from "../src/networks.js";
+import {
+  ALGORAND_TESTNET_GENESIS_HASH as TESTNET_GENESIS_HASH,
+  ALGORAND_TESTNET_USDC_ASSET_ID as TESTNET_USDC_ASSET_ID,
+} from "../src/networks.js";
 import { testConfig } from "./helpers.js";
 
 const MAINNET_GENESIS_HASH = "wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=";
@@ -20,25 +23,25 @@ describe("executor configuration", () => {
   it("accepts complete loopback OIDC client credentials and rejects mixed or partial auth", () => {
     const oidc = testConfig({
       FABRIC_GATEWAY_BEARER_TOKEN: "",
-      FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://127.0.0.1:18080/realms/anchor/protocol/openid-connect/token",
-      FABRIC_GATEWAY_OIDC_CLIENT_ID: "anchor-algorand-executor",
+      FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://127.0.0.1:18080/realms/optiwork/protocol/openid-connect/token",
+      FABRIC_GATEWAY_OIDC_CLIENT_ID: "optiwork-algorand-executor",
       FABRIC_GATEWAY_OIDC_CLIENT_SECRET: "executor-client-secret-test-only-0000001",
     });
     expect(oidc.fabricGatewayAuth).toMatchObject({
       mode: "oidc",
-      clientId: "anchor-algorand-executor",
+      clientId: "optiwork-algorand-executor",
       refreshSkewSeconds: 30,
     });
     expect(oidc).not.toHaveProperty("FABRIC_GATEWAY_OIDC_CLIENT_SECRET");
 
     expect(() => testConfig({
-      FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://127.0.0.1:18080/realms/anchor/protocol/openid-connect/token",
-      FABRIC_GATEWAY_OIDC_CLIENT_ID: "anchor-algorand-executor",
+      FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://127.0.0.1:18080/realms/optiwork/protocol/openid-connect/token",
+      FABRIC_GATEWAY_OIDC_CLIENT_ID: "optiwork-algorand-executor",
       FABRIC_GATEWAY_OIDC_CLIENT_SECRET: "executor-client-secret-test-only-0000001",
     })).toThrow(/either FABRIC_GATEWAY_BEARER_TOKEN or Gateway OIDC/u);
     expect(() => testConfig({
       FABRIC_GATEWAY_BEARER_TOKEN: "",
-      FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://127.0.0.1:18080/realms/anchor/protocol/openid-connect/token",
+      FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://127.0.0.1:18080/realms/optiwork/protocol/openid-connect/token",
     })).toThrow(/requires token URL, client ID, and client secret together/u);
   });
 
@@ -46,7 +49,7 @@ describe("executor configuration", () => {
     expect(() => testConfig({
       ALGORAND_NETWORK: "testnet",
       ALGORAND_ALGOD_URL: "https://testnet-api.algonode.cloud",
-      FABRIC_GATEWAY_URL: "https://gateway.anchor.example",
+      FABRIC_GATEWAY_URL: "https://gateway.optiwork.example",
     })).toThrow(/OIDC client credentials/u);
   });
 
@@ -55,32 +58,34 @@ describe("executor configuration", () => {
       ALGORAND_NETWORK: "testnet",
       PUBLIC_TESTNET_DEMO: "true",
       ALGORAND_GENESIS_HASH: TESTNET_GENESIS_HASH,
+      ALGORAND_ASSET_ID: TESTNET_USDC_ASSET_ID.toString(),
       ALGORAND_ALGOD_URL: "https://testnet-api.algonode.cloud",
       FABRIC_GATEWAY_URL: "http://127.0.0.1:4200",
       FABRIC_GATEWAY_BEARER_TOKEN: "",
-      FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://127.0.0.1:18080/realms/anchor/protocol/openid-connect/token",
-      FABRIC_GATEWAY_OIDC_CLIENT_ID: "anchor-algorand-executor",
+      FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://127.0.0.1:18080/realms/optiwork/protocol/openid-connect/token",
+      FABRIC_GATEWAY_OIDC_CLIENT_ID: "optiwork-algorand-executor",
       FABRIC_GATEWAY_OIDC_CLIENT_SECRET: "executor-client-secret-test-only-0000001",
     } as const;
     expect(testConfig(loopbackDemo)).toMatchObject({ ALGORAND_NETWORK: "testnet", PUBLIC_TESTNET_DEMO: true });
     expect(() => testConfig({ ...loopbackDemo, PUBLIC_TESTNET_DEMO: "false" }))
       .toThrow(/explicitly enabled loopback demo Gateway/u);
-    expect(() => testConfig({ ...loopbackDemo, FABRIC_GATEWAY_URL: "http://gateway.anchor.example" }))
+    expect(() => testConfig({ ...loopbackDemo, FABRIC_GATEWAY_URL: "http://gateway.optiwork.example" }))
       .toThrow(/explicitly enabled loopback demo Gateway/u);
     expect(() => testConfig({
       ...loopbackDemo,
-      FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://identity.anchor.example/realms/anchor/protocol/openid-connect/token",
+      FABRIC_GATEWAY_OIDC_TOKEN_URL: "http://identity.optiwork.example/realms/optiwork/protocol/openid-connect/token",
     })).toThrow(/explicitly enabled loopback demo OIDC/u);
   });
 
   it("pins the exact public TestNet genesis and refuses MainNet on any network", () => {
     const testnetOidc = {
       ALGORAND_NETWORK: "testnet",
+      ALGORAND_ASSET_ID: TESTNET_USDC_ASSET_ID.toString(),
       ALGORAND_ALGOD_URL: "https://testnet-api.algonode.cloud",
-      FABRIC_GATEWAY_URL: "https://gateway.anchor.example",
+      FABRIC_GATEWAY_URL: "https://gateway.optiwork.example",
       FABRIC_GATEWAY_BEARER_TOKEN: "",
-      FABRIC_GATEWAY_OIDC_TOKEN_URL: "https://identity.anchor.example/realms/anchor/protocol/openid-connect/token",
-      FABRIC_GATEWAY_OIDC_CLIENT_ID: "anchor-algorand-executor",
+      FABRIC_GATEWAY_OIDC_TOKEN_URL: "https://identity.optiwork.example/realms/optiwork/protocol/openid-connect/token",
+      FABRIC_GATEWAY_OIDC_CLIENT_ID: "optiwork-algorand-executor",
       FABRIC_GATEWAY_OIDC_CLIENT_SECRET: "executor-client-secret-test-only-0000001",
     } as const;
 
@@ -100,20 +105,50 @@ describe("executor configuration", () => {
     }
   });
 
+  it("settles TestNet only in the official Circle USDC ASA and keeps the mock evidence reader local", () => {
+    const testnetOidc = {
+      ALGORAND_NETWORK: "testnet",
+      ALGORAND_GENESIS_HASH: TESTNET_GENESIS_HASH,
+      ALGORAND_ASSET_ID: TESTNET_USDC_ASSET_ID.toString(),
+      ALGORAND_ALGOD_URL: "https://testnet-api.algonode.cloud",
+      FABRIC_GATEWAY_URL: "https://gateway.optiwork.example",
+      FABRIC_GATEWAY_BEARER_TOKEN: "",
+      FABRIC_GATEWAY_OIDC_TOKEN_URL: "https://identity.optiwork.example/realms/optiwork/protocol/openid-connect/token",
+      FABRIC_GATEWAY_OIDC_CLIENT_ID: "optiwork-algorand-executor",
+      FABRIC_GATEWAY_OIDC_CLIENT_SECRET: "executor-client-secret-test-only-0000001",
+    } as const;
+    expect(testConfig(testnetOidc).ALGORAND_ASSET_ID).toBe(TESTNET_USDC_ASSET_ID);
+    expect(() => testConfig({ ...testnetOidc, ALGORAND_ASSET_ID: "770374285" }))
+      .toThrow(/official Circle USDC ASA 10458941/u);
+    expect(() => testConfig({
+      ...testnetOidc,
+      FABRIC_EVIDENCE_MODE: "mock",
+      FABRIC_EVIDENCE_FIXTURE_PATH: "/tmp/evidence.json",
+    })).toThrow(/mock evidence reader is LocalNet-only/u);
+    expect(() => testConfig({ FABRIC_EVIDENCE_MODE: "mock" }))
+      .toThrow(/requires FABRIC_EVIDENCE_FIXTURE_PATH/u);
+    expect(() => testConfig({ FABRIC_EVIDENCE_FIXTURE_PATH: "/tmp/evidence.json" }))
+      .toThrow(/only valid with FABRIC_EVIDENCE_MODE=mock/u);
+    expect(testConfig({
+      FABRIC_EVIDENCE_MODE: "mock",
+      FABRIC_EVIDENCE_FIXTURE_PATH: "/tmp/evidence.json",
+    }).FABRIC_EVIDENCE_FIXTURE_PATH).toBe("/tmp/evidence.json");
+  });
+
   it("accepts an optional indexer URL and holds it to the network transport rule", () => {
     expect(testConfig({ ALGORAND_INDEXER_URL: "http://127.0.0.1:8980" }).ALGORAND_INDEXER_URL?.protocol).toBe("http:");
     expect(testConfig({}).ALGORAND_INDEXER_URL).toBeUndefined();
-    expect(() => testConfig({ ALGORAND_INDEXER_URL: "http://indexer.anchor.example" }))
+    expect(() => testConfig({ ALGORAND_INDEXER_URL: "http://indexer.optiwork.example" }))
       .toThrow(/ALGORAND_INDEXER_URL permits HTTP only on loopback LocalNet/u);
     expect(() => testConfig({
       ALGORAND_NETWORK: "testnet",
       ALGORAND_GENESIS_HASH: TESTNET_GENESIS_HASH,
       ALGORAND_ALGOD_URL: "https://testnet-api.algonode.cloud",
       ALGORAND_INDEXER_URL: "http://testnet-idx.algonode.cloud",
-      FABRIC_GATEWAY_URL: "https://gateway.anchor.example",
+      FABRIC_GATEWAY_URL: "https://gateway.optiwork.example",
       FABRIC_GATEWAY_BEARER_TOKEN: "",
-      FABRIC_GATEWAY_OIDC_TOKEN_URL: "https://identity.anchor.example/realms/anchor/protocol/openid-connect/token",
-      FABRIC_GATEWAY_OIDC_CLIENT_ID: "anchor-algorand-executor",
+      FABRIC_GATEWAY_OIDC_TOKEN_URL: "https://identity.optiwork.example/realms/optiwork/protocol/openid-connect/token",
+      FABRIC_GATEWAY_OIDC_CLIENT_ID: "optiwork-algorand-executor",
       FABRIC_GATEWAY_OIDC_CLIENT_SECRET: "executor-client-secret-test-only-0000001",
     })).toThrow(/Testnet requires an HTTPS ALGORAND_INDEXER_URL/u);
   });
@@ -121,13 +156,13 @@ describe("executor configuration", () => {
   it("requires verified TLS for remote PostgreSQL and rejects URL-level connection options", () => {
     for (const mode of [undefined, "disable", "require"] as const) {
       expect(() => testConfig({
-        DATABASE_URL: "postgresql://executor:secret@db.anchor.example:5432/executor",
+        DATABASE_URL: "postgresql://executor:secret@db.optiwork.example:5432/executor",
         ...(mode === undefined ? { DATABASE_SSL_MODE: undefined } : { DATABASE_SSL_MODE: mode }),
       })).toThrow(/non-loopback DATABASE_URL requires DATABASE_SSL_MODE=verify-full/u);
     }
 
     expect(testConfig({
-      DATABASE_URL: "postgresql://executor:secret@db.anchor.example:5432/executor",
+      DATABASE_URL: "postgresql://executor:secret@db.optiwork.example:5432/executor",
       DATABASE_SSL_MODE: "verify-full",
     }).DATABASE_SSL_MODE).toBe("verify-full");
 
@@ -139,7 +174,7 @@ describe("executor configuration", () => {
     }
   });
 
-  it("requires distinct matching executor and buyer treasury keys", () => {
+  it("requires distinct matching executor and originTreasury treasury keys", () => {
     const one = algosdk.generateAccount();
     expect(() => testConfig({
       ALGORAND_SIGNER_ADDRESS: one.addr.toString(),
@@ -157,7 +192,7 @@ describe("executor configuration", () => {
   });
 });
 
-function configEnvironment(executor: algosdk.Account, buyer: algosdk.Account): NodeJS.ProcessEnv {
+function configEnvironment(executor: algosdk.Account, originTreasury: algosdk.Account): NodeJS.ProcessEnv {
   return {
     EXECUTOR_BEARER_TOKEN: "executor-transport-token-test-only-0000000001",
     DATABASE_URL: "postgresql://executor:executor@127.0.0.1:5432/executor",
@@ -172,7 +207,7 @@ function configEnvironment(executor: algosdk.Account, buyer: algosdk.Account): N
     ALGORAND_ASSET_ID: "1",
     ALGORAND_SIGNER_ADDRESS: executor.addr.toString(),
     ALGORAND_SIGNER_PRIVATE_KEY_BASE64: Buffer.from(executor.sk).toString("base64"),
-    ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: buyer.addr.toString(),
-    ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: Buffer.from(buyer.sk).toString("base64"),
+    ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: originTreasury.addr.toString(),
+    ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: Buffer.from(originTreasury.sk).toString("base64"),
   };
 }

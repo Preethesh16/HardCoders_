@@ -40,7 +40,7 @@ function paramsHandler(config: ExecutorConfig, minFee: number): RequestListener 
       "consensus-version": "test-consensus",
       fee: minFee,
       "genesis-hash": config.ALGORAND_GENESIS_HASH,
-      "genesis-id": "anchor-security-test-v1",
+      "genesis-id": "optiwork-security-test-v1",
       "last-round": 100,
       "min-fee": minFee,
     }));

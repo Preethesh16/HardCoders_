@@ -30,6 +30,7 @@ import { z } from "zod";
 import {
   ALGORAND_TESTNET_GENESIS_HASH,
   ALGORAND_TESTNET_GENESIS_ID,
+  ALGORAND_TESTNET_USDC_ASSET_ID,
   TESTNET_DISPENSER_URL,
   TESTNET_FUNDS_LABEL,
   assertTestnetIdentity,
@@ -38,20 +39,19 @@ import {
   DEFAULT_APP_FUNDING_MICROALGOS,
   DEFAULT_TESTNET_ACCOUNTS_PATH,
   DEFAULT_TESTNET_MANIFEST_PATH,
-  DEMO_ASSET_DECIMALS,
-  DEMO_ASSET_TOTAL,
-  DEMO_ASSET_UNIT_NAME,
   MINIMUM_DEPLOYER_FUNDING_ALGOS,
   MINIMUM_DEPLOYER_FUNDING_MICROALGOS,
   PARTICIPANT_FUNDING_MICROALGOS,
   TESTNET_CONFIRMATION_ROUNDS,
+  TESTNET_SETTLEMENT_ASSET_DECIMALS,
+  TESTNET_SETTLEMENT_ASSET_UNIT_NAME,
   explorerAccountUrl,
   explorerApplicationUrl,
   explorerAssetUrl,
   explorerTransactionUrl,
 } from "./testnet-constants.js";
 import {
-  SELLER_ORGANIZATION_IDS,
+  DESTINATION_PROVIDER_ORGANIZATION_IDS,
   publicAddresses,
   readAccountFile,
   toAlgosdkAccount,
@@ -125,8 +125,8 @@ const accounts = await readAccountFile(accountsPath);
 const addresses = publicAddresses(accounts);
 const deployer = toAlgosdkAccount(accounts.deployer, "deployer");
 const originProviderTreasury = toAlgosdkAccount(accounts.originProviderTreasury, "originProviderTreasury");
-const sellers = SELLER_ORGANIZATION_IDS.map(
-  (organizationId) => [organizationId, toAlgosdkAccount(accounts.sellers[organizationId], organizationId)] as const,
+const destinationProviders = DESTINATION_PROVIDER_ORGANIZATION_IDS.map(
+  (organizationId) => [organizationId, toAlgosdkAccount(accounts.destinationProviders[organizationId], organizationId)] as const,
 );
 
 const algod = new algosdk.Algodv2(
@@ -159,17 +159,17 @@ if (deployerBalance < MINIMUM_DEPLOYER_FUNDING_MICROALGOS) {
 }
 
 const algorand = AlgorandClient.fromClients({ algod }).setDefaultValidityWindow(100);
-for (const account of [deployer, originProviderTreasury, ...sellers.map(([, account]) => account)]) {
+for (const account of [deployer, originProviderTreasury, ...destinationProviders.map(([, account]) => account)]) {
   algorand.setSigner(account.addr, algosdk.makeBasicAccountTransactionSigner(account));
 }
 const deployerSigner = algosdk.makeBasicAccountTransactionSigner(deployer);
-const buyerSigner = algosdk.makeBasicAccountTransactionSigner(originProviderTreasury);
+const originTreasurySigner = algosdk.makeBasicAccountTransactionSigner(originProviderTreasury);
 
 // Distribute dummy TestAlgos so only one address ever needs dispenser funding.
 const distributionTransactionIds: Record<string, string> = {};
 for (const [name, account] of [
   ["originProviderTreasury", originProviderTreasury] as const,
-  ...sellers.map(([organizationId, account]) => [organizationId, account] as const),
+  ...destinationProviders.map(([organizationId, account]) => [organizationId, account] as const),
 ]) {
   const existing = BigInt((await algod.accountInformation(account.addr).do()).amount);
   if (existing >= PARTICIPANT_FUNDING_MICROALGOS) continue;
@@ -184,31 +184,36 @@ for (const [name, account] of [
   distributionTransactionIds[name] = confirmedTransactionId(payment, `${name} funding`);
 }
 
-// Zero-value demonstration settlement asset.
-const assetCreate = await algorand.send.assetCreate({
-  sender: originProviderTreasury.addr,
-  signer: buyerSigner,
-  total: DEMO_ASSET_TOTAL,
-  decimals: DEMO_ASSET_DECIMALS,
-  assetName: "Anchor Demo USD",
-  unitName: DEMO_ASSET_UNIT_NAME,
-  defaultFrozen: false,
-  maxRoundsToWaitForConfirmation: TESTNET_CONFIRMATION_ROUNDS,
-  suppressLog: true,
-});
-const assetId = assetCreate.assetId;
-const assetCreateTransactionId = confirmedTransactionId(assetCreate, "demonstration asset creation");
-
-const sellerOptInTransactionIds: Record<string, string> = {};
-for (const [organizationId, seller] of sellers) {
+// TestNet settles in Circle's official zero-value USDC ASA. This deployer never
+// creates a settlement asset: it verifies the pinned ASA exists and matches the
+// six-decimal shape the escrow application and the FX ledger both assume.
+const assetId = ALGORAND_TESTNET_USDC_ASSET_ID;
+const settlementAsset = await algod.getAssetByID(assetId).do();
+if (settlementAsset.params?.decimals !== TESTNET_SETTLEMENT_ASSET_DECIMALS
+  || settlementAsset.params.unitName !== TESTNET_SETTLEMENT_ASSET_UNIT_NAME) {
+  throw new Error(
+    `TestNet ASA ${assetId} is not the expected ${TESTNET_SETTLEMENT_ASSET_UNIT_NAME} `
+    + `asset with ${TESTNET_SETTLEMENT_ASSET_DECIMALS} decimals.`,
+  );
+}
+// Every provider treasury must hold the ASA before it can send or receive it.
+// Circle's TestNet dispenser, not this deployer, supplies the USDC balance.
+const assetOptInTransactionIds: Record<string, string> = {};
+for (const [name, account, signer] of [
+  ["originProviderTreasury", originProviderTreasury, originTreasurySigner] as const,
+  ...destinationProviders.map(([organizationId, account]) =>
+    [organizationId, account, algosdk.makeBasicAccountTransactionSigner(account)] as const),
+]) {
+  const holdings = await algod.accountInformation(account.addr).do();
+  if (holdings.assets?.some((holding) => holding.assetId === assetId)) continue;
   const optedIn = await algorand.send.assetOptIn({
-    sender: seller.addr,
-    signer: algosdk.makeBasicAccountTransactionSigner(seller),
+    sender: account.addr,
+    signer,
     assetId,
     maxRoundsToWaitForConfirmation: TESTNET_CONFIRMATION_ROUNDS,
     suppressLog: true,
   });
-  sellerOptInTransactionIds[organizationId] = confirmedTransactionId(optedIn, `${organizationId} asset opt-in`);
+  assetOptInTransactionIds[name] = confirmedTransactionId(optedIn, `${name} asset opt-in`);
 }
 
 const appSpec = await readFile(
@@ -266,14 +271,14 @@ const manifest = {
   applicationId,
   applicationAddress: created.result.appAddress.toString(),
   assetId: assetId.toString(),
-  assetUnitName: DEMO_ASSET_UNIT_NAME,
-  assetValueStatement: "Zero-value demonstration settlement asset. Not redeemable, not a security, no monetary value.",
+  assetUnitName: TESTNET_SETTLEMENT_ASSET_UNIT_NAME,
+  assetSource: "Circle official Algorand TestNet USDC ASA. Zero monetary value; never deployed by this project.",
+  assetValueStatement: "Zero-value TestNet settlement asset. Not redeemable, not a security, no monetary value.",
   publicAddresses: addresses,
   applicationFundingMicroAlgos: environment.ALGORAND_DEPLOY_APP_FUNDING_MICROALGOS.toString(),
   transactions: {
     participantFunding: distributionTransactionIds,
-    assetCreate: assetCreateTransactionId,
-    sellerAssetOptIns: sellerOptInTransactionIds,
+    settlementAssetOptIns: assetOptInTransactionIds,
     applicationCreate: createTransactionId,
     applicationFunding: fundingTransactionId,
     applicationAssetOptIn: optInTransactionId,
@@ -282,7 +287,6 @@ const manifest = {
     applicationCreate: created.result.confirmation?.confirmedRound?.toString() ?? null,
     applicationFunding: funded.confirmations?.at(-1)?.confirmedRound?.toString() ?? null,
     applicationAssetOptIn: optedIn.confirmations?.at(-1)?.confirmedRound?.toString() ?? null,
-    assetCreate: assetCreate.confirmation?.confirmedRound?.toString() ?? null,
   },
   explorer: {
     application: explorerApplicationUrl(applicationId),
@@ -290,7 +294,6 @@ const manifest = {
     applicationAccount: explorerAccountUrl(created.result.appAddress.toString()),
     deployerAccount: explorerAccountUrl(accounts.deployer.address),
     applicationCreateTransaction: explorerTransactionUrl(createTransactionId),
-    assetCreateTransaction: explorerTransactionUrl(assetCreateTransactionId),
   },
 };
 

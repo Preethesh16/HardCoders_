@@ -314,11 +314,11 @@ export class PostgresExecutorStore implements ExecutorStore {
         : config.DATABASE_SSL_MODE === "verify-full" ? { ssl: { rejectUnauthorized: true } }
           : { ssl: { rejectUnauthorized: false } }),
     } as const;
-    this.#pool = new pg.Pool({ ...connection, max: 10, application_name: "anchor-algorand-executor" });
+    this.#pool = new pg.Pool({ ...connection, max: 10, application_name: "optiwork-algorand-executor" });
     // Advisory locks use a separate pool so a full set of per-deal lock
     // sessions can never starve the data queries required to finish and release
     // those same locks.
-    this.#lockPool = new pg.Pool({ ...connection, max: 10, application_name: "anchor-algorand-deal-lock" });
+    this.#lockPool = new pg.Pool({ ...connection, max: 10, application_name: "optiwork-algorand-deal-lock" });
   }
 
   async initialize(): Promise<void> {
@@ -432,7 +432,7 @@ export class PostgresExecutorStore implements ExecutorStore {
     let releaseWithError = false;
     try {
       await client.query("SELECT set_config('statement_timeout', $1, false)", [String(this.config.DATABASE_DEAL_LOCK_TIMEOUT_MS)]);
-      await client.query("SELECT pg_advisory_lock(hashtextextended('anchor-algorand:' || $1, 0))", [dealId]);
+      await client.query("SELECT pg_advisory_lock(hashtextextended('optiwork-algorand:' || $1, 0))", [dealId]);
       locked = true;
       await client.query("SELECT set_config('statement_timeout', '10000', false)");
       return await work();
@@ -442,7 +442,7 @@ export class PostgresExecutorStore implements ExecutorStore {
     } finally {
       if (locked) {
         try {
-          await client.query("SELECT pg_advisory_unlock(hashtextextended('anchor-algorand:' || $1, 0))", [dealId]);
+          await client.query("SELECT pg_advisory_unlock(hashtextextended('optiwork-algorand:' || $1, 0))", [dealId]);
         } catch {
           releaseWithError = true;
         }

@@ -40,7 +40,7 @@ function mutationHeaders(request: FastifyRequest): { idempotencyKey: string; per
   const key = idempotencyKeySchema.parse(header(request, "idempotency-key"));
   const correlation = header(request, "x-correlation-id");
   if (!idempotencyKeySchema.safeParse(correlation).success) throw new ExecutorError("SCHEMA_INVALID", "The correlation ID is invalid.", 422);
-  const permit = header(request, "x-anchor-fabric-permit");
+  const permit = header(request, "x-optiwork-fabric-permit");
   return { idempotencyKey: key, permit };
 }
 
@@ -60,9 +60,9 @@ export async function buildApp(config: ExecutorConfig, service: ExecutorService)
       redact: {
         paths: [
           "req.headers.authorization",
-          "req.headers.x-anchor-fabric-permit",
+          "req.headers.x-optiwork-fabric-permit",
           "request.headers.authorization",
-          "request.headers.x-anchor-fabric-permit",
+          "request.headers.x-optiwork-fabric-permit",
         ],
         censor: "[REDACTED]",
       },
@@ -118,6 +118,7 @@ export async function buildApp(config: ExecutorConfig, service: ExecutorService)
         durableIdempotency: true,
         signedFabricPermits: true,
         authoritativeFabricReread: true,
+        approvedWorkEvidenceReread: true,
       },
     }));
   });

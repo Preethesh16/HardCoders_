@@ -1,6 +1,7 @@
 {
+  "supersededNote": "Historical evidence of the pre-Circle-USDC TestNet deployment. OptiWork now settles TestNet exclusively in Circle's official zero-value USDC ASA 10458941 and never deploys a custom TestNet asset. Kept for provenance only; the deployer writes deployment-manifest.json.",
   "schemaVersion": "1.0",
-  "label": "ALGORAND TESTNET — DUMMY FUNDS",
+  "label": "ALGORAND TESTNET \u2014 DUMMY FUNDS",
   "network": "testnet",
   "genesisId": "testnet-v1.0",
   "genesisHash": "SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=",

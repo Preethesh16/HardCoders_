@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { commandHash, type CommandContext, type PermitClaims, type ReleaseInput } from "../src/types.js";
 import { Ed25519FabricPermitVerifier, FABRIC_PERMIT_TYPE } from "../src/security/permit.js";
-import { testConfig } from "./helpers.js";
+import { releaseInput, testConfig } from "./helpers.js";
 
 const now = Date.parse("2026-08-28T00:00:00.000Z");
 
@@ -37,7 +37,7 @@ function createCommand(config: ReturnType<typeof testConfig>): CommandContext {
 }
 
 function release(config: ReturnType<typeof testConfig>, leaseSeconds: number): { command: CommandContext; claims: PermitClaims } {
-  const body: ReleaseInput = {
+  const body: ReleaseInput = releaseInput({
     escrowBinding: {
       ...(createCommand(config).body as Record<string, unknown>),
       network: "localnet",
@@ -47,9 +47,9 @@ function release(config: ReturnType<typeof testConfig>, leaseSeconds: number): {
     milestoneId: "MS-001", amountMinor: "100", intentId: "INTENT-001",
     bindingHash: `sha256:${"b".repeat(64)}`, fenceGeneration: 1,
     leaseExpiresAt: new Date(now + leaseSeconds * 1_000).toISOString(),
-    authorizationCommitment: `sha256:${"c".repeat(64)}`,
     fabricClaimTransactionId: "FABRIC-CLAIM-001",
-  };
+    idempotencyKey: `RELEASE-${leaseSeconds}`,
+  });
   const command: CommandContext = {
     action: "release", method: "POST", path: "/escrows/DEAL-001/releases", idempotencyKey: `RELEASE-${leaseSeconds}`, body,
   };
@@ -86,6 +86,34 @@ describe("signed Fabric action permits", () => {
     const compact = await sign(claims);
     await expect(verifier.verify(compact, command)).resolves.toMatchObject({ action: "create" });
     await expect(verifier.verify(compact, { ...command, idempotencyKey: "CREATE-ATTACK" })).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it("rejects an expired Fabric release lease and a substituted release binding", async () => {
+    const { config, verifier, sign } = await signer();
+    const expired = release(config, -1);
+    await expect(verifier.verify(await sign(expired.claims), expired.command)).rejects.toThrow(/lease has expired/u);
+
+    // A coherent authorization for a *different* compliance decision must not
+    // authorize the command body the caller actually submitted.
+    const valid = release(config, 120);
+    const submitted = valid.command.body as ReleaseInput;
+    const substituted = {
+      ...valid.claims,
+      releaseAuthorization: releaseInput({
+        escrowBinding: submitted.escrowBinding,
+        milestoneId: submitted.milestoneId,
+        amountMinor: submitted.amountMinor,
+        intentId: submitted.intentId,
+        bindingHash: submitted.bindingHash,
+        fenceGeneration: submitted.fenceGeneration,
+        leaseExpiresAt: submitted.leaseExpiresAt,
+        fabricClaimTransactionId: submitted.fabricClaimTransactionId,
+        idempotencyKey: valid.command.idempotencyKey,
+        complianceResultHash: `sha256:${"9".repeat(64)}`,
+      }),
+    } as PermitClaims;
+    await expect(verifier.verify(await sign(substituted), valid.command))
+      .rejects.toThrow(/complete release authorization/u);
   });
 
   it("enforces permit expiry strictly before the Fabric lease safety margin", async () => {
