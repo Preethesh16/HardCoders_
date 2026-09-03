@@ -75,7 +75,8 @@ export function parseMajor(value: string, currency: string, scale: number): Mone
   if (!match) throw new TypeError(`Not a decimal amount: ${value}`);
   const fraction = match[2] ?? '';
   if (fraction.length > scale) throw new RangeError(`More decimal places than scale ${scale} allows.`);
-  return money(`${match[1]}${fraction.padEnd(scale, '0')}`, currency, scale);
+  // BigInt normalises the leading zeros that "0.07" at scale 6 would produce.
+  return money(BigInt(`${match[1]}${fraction.padEnd(scale, '0')}`), currency, scale);
 }
 
 /** Builds a scaled rate from a decimal string, keeping every supplied digit. */
