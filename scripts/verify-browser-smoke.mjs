@@ -7,6 +7,7 @@ const chrome = process.argv[2];
 if (!chrome) throw new Error('usage: node scripts/verify-browser-smoke.mjs <chrome-binary>');
 
 const origin = new URL(process.env.OPTIWORK_WEB_URL ?? 'http://127.0.0.1:3000');
+const productOrigin = new URL(process.env.ANCHOR_PRODUCT_URL ?? 'http://127.0.0.1:4175');
 const profile = await mkdtemp(join(tmpdir(), 'anchor-browser-smoke-'));
 const processHandle = spawn(chrome, [
   '--headless=new',
@@ -83,15 +84,21 @@ try {
     }
     throw new Error(message);
   };
-  const navigate = async (path) => {
+  const navigate = async (path, expectedRole) => {
     const url = new URL(path, origin).href;
     const result = await command('Page.navigate', { url });
     if (result.errorText) throw new Error(`Navigation to ${path} failed: ${result.errorText}`);
     await waitFor(
-      `location.href === ${JSON.stringify(url)} && document.readyState === 'complete'`,
+      `location.origin === ${JSON.stringify(productOrigin.origin)} && document.readyState === 'complete'`,
       `Navigation to ${path} did not complete.`,
     );
-    const page = await evaluate('({ title: document.title, text: document.body?.innerText ?? "" })');
+    if (expectedRole) {
+      await waitFor(
+        `document.querySelector('#loginWorld')?.classList.contains('open') && document.querySelector('#selectedRoleName')?.textContent === ${JSON.stringify(expectedRole)}`,
+        `${path} did not open the ${expectedRole.toLowerCase()} pixel portal.`,
+      );
+    }
+    const page = await evaluate('({ title: document.title, text: document.body?.innerText ?? "", url: location.href })');
     if (typeof page?.title !== 'string' || typeof page?.text !== 'string' || page.text.length < 80) {
       throw new Error(`Navigation to ${path} rendered no meaningful page.`);
     }
@@ -103,32 +110,17 @@ try {
 
   await command('Page.enable');
   await command('Runtime.enable');
-  const overview = await navigate('/');
-  if (!/Run the demonstration|Re-read the demonstration state/u.test(overview.text)) {
-    throw new Error('The landing page has no demonstration action.');
-  }
-  const clicked = await evaluate(`(() => {
-    const button = [...document.querySelectorAll('button')]
-      .find((candidate) => /Run the demonstration|Re-read the demonstration state/u.test(candidate.textContent ?? ''));
-    if (!(button instanceof HTMLButtonElement)) return false;
-    button.click();
-    return true;
-  })()`);
-  if (!clicked) throw new Error('The browser could not click the demonstration action.');
-  await waitFor(
-    `/Both journeys settled/u.test(document.body?.innerText ?? '')`,
-    'The landing-page action did not render the two completed journeys.',
-    120_000,
-  );
-
-  for (const path of ['/company', '/freelancer', '/supplier', '/provider', '/admin']) {
-    await navigate(path);
-  }
+  const landing = await navigate('/');
+  if (!/Anchor|WORK WITHOUT BORDERS/u.test(landing.text)) throw new Error('The canonical Anchor experience did not render.');
+  const company = await navigate('/company', 'COMPANY');
+  if (!/WELCOME[\s\S]*COMPANY/u.test(company.text)) throw new Error('The company login did not render.');
+  const freelancer = await navigate('/freelancer', 'FREELANCER');
+  if (!/WELCOME[\s\S]*FREELANCER/u.test(freelancer.text)) throw new Error('The freelancer login did not render.');
 
   process.stdout.write(`${JSON.stringify({
     status: 'passed',
-    clickedDemoAction: true,
-    routes: ['/', '/company', '/freelancer', '/supplier', '/provider', '/admin'],
+    canonicalExperience: productOrigin.href,
+    compatibilityRoutes: ['/', '/company', '/freelancer'],
   }, null, 2)}\n`);
 } finally {
   socket?.close();

@@ -3,7 +3,10 @@
 // as observable background stages, while party tokens and signing material stay
 // on the server.
 
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+
 const API_BASE_URL = process.env.OPTIWORK_API_BASE_URL ?? "http://127.0.0.1:4000";
+const STATE_FILE = process.env.ANCHOR_WORKFLOW_STATE_FILE ?? "/tmp/anchor-workflow-state.json";
 const DEFAULT_PLN = { amountMinor: "1200000", currency: "PLN", scale: 2 };
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const OPERATOR = Buffer.from(JSON.stringify({
@@ -42,7 +45,24 @@ const COMPETING_PROPOSALS = [
   }
 ];
 
-let run = null;
+function loadPersistedRun() {
+  try {
+    const candidate = JSON.parse(readFileSync(STATE_FILE, "utf8"));
+    if (candidate && typeof candidate === "object" && typeof candidate.startedAt === "string" && typeof candidate.nonce === "string") return candidate;
+  } catch {
+    // A missing or invalid local cursor must never prevent the real services from starting.
+  }
+  return null;
+}
+
+function persistRun() {
+  if (!run) return;
+  const temporary = `${STATE_FILE}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(run)}\n`, { encoding: "utf8", mode: 0o600 });
+  renameSync(temporary, STATE_FILE);
+}
+
+let run = loadPersistedRun();
 let parties = null;
 let automationPromise = null;
 let validationPromise = null;
@@ -57,7 +77,10 @@ function freshRun() {
 }
 
 function stageSet(group, id, status, detail = "", facts = []) {
-  if (run?.[group]) run[group].stages[id] = { status, detail, facts, updatedAt: new Date().toISOString() };
+  if (run?.[group]) {
+    run[group].stages[id] = { status, detail, facts, updatedAt: new Date().toISOString() };
+    persistRun();
+  }
 }
 
 async function loadParties({ refresh = false } = {}) {
@@ -408,22 +431,29 @@ export function stepList() { return ACTIONS.map((action, index) => ({ index, ...
 export function resetRun() {
   run = freshRun();
   automationPromise = validationPromise = releasePromise = null;
+  persistRun();
   return { ok: true, startedAt: run.startedAt };
 }
 
 export async function runAction(id, input = {}) {
-  if (!run) run = freshRun();
+  if (!run) {
+    run = freshRun();
+    persistRun();
+  }
   const action = ACTIONS.find(item => item.id === id);
   const execute = EXECUTORS[id];
   if (!action || !execute) return { ok: false, id, error: `Unknown workflow action ${id}.` };
   if (run.actions[id]?.status === "DONE") return { ok: true, id, replay: true, facts: run.actions[id].facts };
   run.actions[id] = { status: "RUNNING", startedAt: new Date().toISOString() };
+  persistRun();
   try {
     const facts = await execute(input);
     run.actions[id] = { status: "DONE", facts, completedAt: new Date().toISOString() };
+    persistRun();
     return { ok: true, id, label: action.label, actor: action.actor, facts };
   } catch (error) {
     run.actions[id] = { status: "FAILED", error: String(error.message ?? error), failedAt: new Date().toISOString() };
+    persistRun();
     return { ok: false, id, label: action.label, actor: action.actor, error: String(error.message ?? error) };
   }
 }
@@ -445,6 +475,7 @@ export async function submissionAccess() {
 
 export function currentRun() {
   if (!run) return null;
+  persistRun();
   return {
     startedAt: run.startedAt, phase: run.phase, results: run.results, actions: run.actions,
     screening: run.screening, automation: run.automation, deliveryAutomation: run.deliveryAutomation

@@ -1,5 +1,5 @@
 // Static file server + a thin same-origin proxy onto @optiwork/api's demo
-// endpoints, for the OptiWork landing page.
+// endpoints, for the Anchor landing page.
 //
 // The proxy exists for the same reason apps/web/lib/api.ts is server-only:
 // the API's demo bearer principal must never reach the browser (see that
@@ -79,7 +79,7 @@ async function proxyToApi(req, res, path, init = {}) {
   } catch (error) {
     res.writeHead(502, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
-      error: { message: `The OptiWork API is not reachable at ${API_BASE_URL}. Start it with "pnpm --filter @optiwork/api dev".` }
+      error: { message: `The Anchor API is not reachable at ${API_BASE_URL}. Start it with "pnpm --filter @optiwork/api dev".` }
     }));
   }
 }
@@ -131,6 +131,10 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (requestPath === "/api/workflow/reset" && req.method === "POST") {
+    if (req.headers["x-anchor-role"] !== "COMPANY") {
+      sendJson(res, 403, { ok: false, error: "Only the Company portal can start a new shared deal." });
+      return;
+    }
     sendJson(res, 200, resetRun());
     return;
   }
@@ -188,5 +192,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  process.stdout.write(`OptiWork marketing site listening on http://${HOST}:${PORT}\n`);
+  process.stdout.write(`Anchor product experience listening on http://${HOST}:${PORT}\n`);
 });

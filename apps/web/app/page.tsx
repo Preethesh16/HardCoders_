@@ -72,7 +72,13 @@ export default async function Overview() {
                 href="/company"
                 className="inline-flex items-center rounded-lg border border-ink-300 px-4 py-2.5 text-sm font-medium text-ink-700 transition-colors hover:bg-ink-100"
               >
-                Open the company dashboard
+                Open the buyer dashboard
+              </Link>
+              <Link
+                href="/freelancer"
+                className="inline-flex items-center rounded-lg border border-ink-300 px-4 py-2.5 text-sm font-medium text-ink-700 transition-colors hover:bg-ink-100"
+              >
+                Open the seller dashboard
               </Link>
               <Badge tone="good">Both journeys settled</Badge>
             </>

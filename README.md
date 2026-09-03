@@ -115,8 +115,7 @@ independent proposals and selects one freelancer; the selected freelancer
 accepts the private agreement and uploads the real deliverable. Only seven
 human decisions are exposed. Screening, official-source review, compliance,
 FX, escrow funding, work validation and release advance automatically and stay
-visible as non-clickable progress. The five evaluator dashboards remain
-available at [http://127.0.0.1:3000](http://127.0.0.1:3000).
+visible as non-clickable progress inside the same pixel-art Anchor experience.
 
 ### Full cryptographic proof run
 
@@ -135,41 +134,47 @@ corepack pnpm local:e2e
 
 The command starts isolated resources, deploys `OptiUSD-DEMO` and the escrow,
 executes both HTTP journeys, verifies both ledgers, checks cross-organization
-authorization and privacy boundaries, smoke-tests all five dashboards, then
+authorization and privacy boundaries, smoke-tests the buyer and seller views, then
 opens the integrated portal in a real headless browser and completes its
 seven-action role-aware workflow—including private agreement hash verification
 for both parties and an arbitrary binary deliverable round-trip. It leaves the product experience running at
-[http://127.0.0.1:4175](http://127.0.0.1:4175) and the evaluator dashboards at
-[http://127.0.0.1:3000](http://127.0.0.1:3000).
+[http://127.0.0.1:4175](http://127.0.0.1:4175). Legacy `:3000` dashboard URLs
+redirect into this same product instead of exposing a second visual system.
 See the [LocalNet runbook](docs/LOCALNET_RUNBOOK.md) for ports, lifecycle
 commands, generated artifacts and troubleshooting.
 
-The app executes both corridors end to end and exposes five role-specific views:
+The product has two marketplace roles. Infrastructure proof is embedded in
+their transaction context instead of presented as additional people:
 
-- **Polish company** — applicant selection, bilateral contract approval, FX, compliance and escrow proof.
-- **Indian freelancer** — agreed terms, submission versions, buyer decision and INR wallet credit.
-- **India → UK supplier** — import-document commitments, outward policy checks and GBP payout.
-- **Provider operations** — escrow state, isolated treasuries, confirmed transactions and reconciliation.
-- **Administrator & audit** — separate books, decision hashes, citations and the ordered payment timeline.
+- **Buyer / company** — applicant selection, bilateral contract approval, FX, compliance, escrow and reconciliation proof.
+- **Seller / freelancer** — agreed terms, submission versions, buyer decision, escrow proof and local-currency credit.
+
+Provider settlement, compliance, evidence recording and audit are automated
+Anchor services. They do not log in, choose work or appear as user roles.
 
 ### 90-second evaluator walkthrough
 
-1. Open `:4175` in two tabs: enter one as **Company** and the other as **Freelancer**. Both poll the same persisted deal.
+1. Open `:4175` in two tabs: enter one as **Company** and the other as **Freelancer**. Both poll the same shared deal cursor; its business records remain in PostgreSQL/MinIO and the cursor survives UI-service restarts.
 2. Company publishes the work; freelancer applies; the agent shortlists; then the company explicitly assigns the applicant.
 3. Both parties approve the exact contract hash. Company runs live FX/compliance and funds the real LocalNet ARC-4 escrow.
 4. Freelancer uploads the actual deliverable. Company grants review access, runs advisory validation, approves on Fabric and releases escrow.
-5. Inspect the right-hand proof panel, then open `:3000/provider` or `:3000/admin` for the complete books, rules, transactions and reconciliation trail.
+5. Inspect the contextual service proof in the same deal room; there is no separate provider or administrator persona.
+
+To repeat that exact two-browser journey automatically against the running real
+services, run `pnpm test:browser:roles`. This intentionally starts a new shared
+deal, drives both role forms (including a real file upload), and fails unless
+Fabric approval and Algorand release both complete.
 
 ## Product tour
 
 <table>
   <tr>
     <td width="50%"><img src="docs/assets/readme/company-dashboard.png" alt="Polish company dashboard with contract, FX, compliance and escrow details"></td>
-    <td width="50%"><img src="docs/assets/readme/provider-operations.png" alt="Provider operations dashboard with separate books, treasuries and reconciliation"></td>
+    <td width="50%"><img src="docs/assets/readme/product-experience.png" alt="Buyer and seller deal room with contextual platform proof"></td>
   </tr>
   <tr>
     <td align="center"><strong>Company view</strong><br/>Contract, exact FX legs, cited compliance and release proof.</td>
-    <td align="center"><strong>Provider view</strong><br/>Escrows, separate treasuries, confirmed settlement and reconciliation.</td>
+    <td align="center"><strong>Buyer + seller experience</strong><br/>Human decisions with automatic settlement and evidence services in context.</td>
   </tr>
 </table>
 
@@ -183,7 +188,7 @@ Anchor is intentionally a **modular monolith plus two isolated blockchain gatewa
 | API | Node.js 24, TypeScript 5.9, Fastify 5, TypeBox | Marketplace, identity, corridor, compliance, FX and payment orchestration |
 | Business data | PostgreSQL 17, Drizzle ORM, pgvector | Workflow, versioned decisions, exact-money books and reconciliation |
 | Private files | MinIO locally, S3-compatible storage | Opaque object keys and short-lived authorized access |
-| Authentication | Keycloak OIDC | Company, freelancer, supplier, provider and administrator roles |
+| Authentication | Keycloak OIDC | Buyer/company and seller/freelancer roles; platform services use internal identities |
 | Work trust | Hyperledger Fabric 2.5, Go chaincode, TypeScript Gateway | Evidence commitments, ownership-aware decisions, history and event checkpoints |
 | Settlement | Algorand ARC-4, Algorand TypeScript / Puya, AlgoKit | Create, fund, pause, release, refund and complete provider escrow |
 | FX | Frankfurter adapter + deterministic fixtures | PLN→USD→INR and INR→USD→GBP quotes with explicit fees and expiry |
@@ -285,7 +290,7 @@ Test ALGO and TestNet USDC have no monetary value.
 | Integrated company/freelancer deal room and seven human decisions | ✅ Role-specific controls plus automatic PostgreSQL, MinIO, Fabric and Algorand stages |
 | Multi-applicant hiring and private agreement | ✅ Three independent proposals, advisory ranking, human selection, party-only MinIO document and stable hashes |
 | Live decision support | ✅ OpenAI advisory agents, Frankfurter reference FX and seven official regulation-source observations, each with visible fallback provenance |
-| Five evaluator dashboards and two-corridor browser demonstration | ✅ Runs locally with deterministic AI/FX fixtures |
+| Buyer and seller proof views plus two-corridor demonstration | ✅ Platform-service evidence is embedded without inventing extra user roles |
 | Marketplace, contracts, credentials, compliance, FX, books and timelines | ✅ Implemented, runtime-validated and tested |
 | PostgreSQL and MinIO adapters | ✅ Real local acceptance profile verified |
 | Keycloak OIDC adapter and realm | ✅ Implemented; production OIDC deployment deferred |

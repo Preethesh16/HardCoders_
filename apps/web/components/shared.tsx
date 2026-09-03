@@ -13,7 +13,7 @@ export function NotRunYet({ reason }: { reason?: string }) {
     <Card>
       <CardHeader
         title="The demonstration has not run yet"
-        description="Start it from the overview to populate every dashboard with real workflow output."
+        description="Start it from the overview to populate the buyer and seller views with real workflow output."
       />
       <CardBody>
         {reason ? <p className="mb-4 text-sm text-stop-500">{reason}</p> : null}
@@ -240,5 +240,100 @@ export function ReconciliationPanel({ record }: { record: Record<string, any> | 
       </Table>
       <p className="text-xs text-ink-500">{record['detail'] as string}</p>
     </div>
+  );
+}
+
+/**
+ * Read-only evidence produced by Anchor's infrastructure. These are automated
+ * services supporting the buyer and seller, not additional marketplace users.
+ */
+export function PlatformServicesProof({
+  state,
+  journey,
+  viewer,
+}: {
+  state: DemoState;
+  journey: JourneyView;
+  viewer: 'buyer' | 'seller';
+}) {
+  const submission = [...journey.submissions].reverse()[0];
+  const release = journey.events.find((event) => event.kind === 'USDC_RELEASED');
+  const paymentBook = journey.payment['bookId'] as string;
+  const book = state.books.find((candidate) => candidate.bookId === paymentBook);
+  const services = [
+    {
+      name: 'Compliance service',
+      purpose: 'Checks the corridor and commits the exact versioned decision used for this payment.',
+      state: journey.compliance?.['outcome'] as string | undefined,
+      facts: [
+        ['Rules', journey.compliance?.['rulesVersion']],
+        ['Decision', journey.compliance?.['canonicalHash'] ? shortHash(journey.compliance['canonicalHash'] as string, 12) : undefined],
+      ],
+    },
+    {
+      name: 'Fabric evidence service',
+      purpose: 'Records the private deliverable hash and buyer decision; it never stores the file itself.',
+      state: submission?.['buyerDecision'] as string | undefined,
+      facts: [
+        ['File hash', submission?.['fileHash'] ? shortHash(submission['fileHash'] as string, 12) : undefined],
+        ['Fabric tx', submission?.['fabricTxId']],
+      ],
+    },
+    {
+      name: 'Algorand escrow service',
+      purpose: 'Locks and releases provider settlement assets backstage; neither party receives a crypto key.',
+      state: journey.binding?.['state'] as string | undefined,
+      facts: [
+        ['Network', journey.binding?.['network']],
+        ['Release tx', release?.detail['transactionId'] ? shortHash(release.detail['transactionId'] as string, 12) : undefined],
+      ],
+    },
+    {
+      name: 'Accounting & reconciliation',
+      purpose: 'Confirms the settlement result against the business record and keeps the corridor book balanced.',
+      state: journey.reconciliation?.['status'] as string | undefined,
+      facts: [
+        ['Book', paymentBook],
+        ['Balanced', book ? (book.balanced ? 'YES' : 'NO') : undefined],
+      ],
+    },
+  ];
+
+  return (
+    <section id="platform-services" className="scroll-mt-6">
+      <Card>
+        <CardHeader
+          title="Anchor platform services"
+          description={`Automatic infrastructure supporting this ${viewer} journey—not separate people, accounts or user dashboards.`}
+        />
+        <CardBody>
+          <div className="grid gap-4 md:grid-cols-2">
+            {services.map((service) => (
+              <article key={service.name} className="rounded-lg border border-ink-200 bg-ink-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-ink-800">{service.name}</h3>
+                  <Badge tone={service.state ? stateTone(service.state) : 'neutral'}>
+                    {service.state ? titleCase(service.state) : 'Pending'}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-ink-600">{service.purpose}</p>
+                <dl className="mt-3 space-y-1.5">
+                  {service.facts.map(([label, value]) => (
+                    <div key={label} className="flex items-start justify-between gap-4 text-xs">
+                      <dt className="text-ink-400">{label}</dt>
+                      <dd className="max-w-[70%] break-all text-right font-mono text-ink-700">{value ?? '—'}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </article>
+            ))}
+          </div>
+          <p className="mt-4 text-xs text-ink-500">
+            This evidence is shown in context so the contracting parties can verify what Anchor did. Signing keys,
+            treasury controls and platform-wide tenant data remain server-side.
+          </p>
+        </CardBody>
+      </Card>
+    </section>
   );
 }

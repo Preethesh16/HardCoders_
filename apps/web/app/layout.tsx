@@ -11,11 +11,8 @@ export const metadata: Metadata = {
 
 const VIEWS = [
   ['/', 'Overview'],
-  ['/company', 'Polish company'],
-  ['/freelancer', 'Indian freelancer'],
-  ['/supplier', 'India → UK supplier'],
-  ['/provider', 'Provider operations'],
-  ['/admin', 'Administrator & audit'],
+  ['/company', 'Buyer · Company'],
+  ['/freelancer', 'Seller · Freelancer'],
 ] as const;
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

@@ -1,6 +1,6 @@
 import { fetchDemoState, journeyFor } from '@/lib/api';
 import { Badge, Card, CardBody, CardHeader, DemoNotice, Field, Stat, stateTone } from '@/components/ui';
-import { EscrowPanel, FabricPanel, NotRunYet, TimelinePanel } from '@/components/shared';
+import { EscrowPanel, FabricPanel, NotRunYet, PlatformServicesProof, TimelinePanel } from '@/components/shared';
 import { formatInstant, formatMoney, shortHash, titleCase } from '@/lib/util';
 
 export const dynamic = 'force-dynamic';
@@ -99,6 +99,8 @@ export default async function FreelancerDashboard() {
         <CardHeader title="Complete timeline" />
         <CardBody><TimelinePanel events={journey.events} /></CardBody>
       </Card>
+
+      <PlatformServicesProof state={state.data} journey={journey} viewer="seller" />
 
       <DemoNotice />
     </div>

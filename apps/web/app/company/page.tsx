@@ -6,6 +6,7 @@ import {
   EscrowPanel,
   FabricPanel,
   NotRunYet,
+  PlatformServicesProof,
   QuotePanel,
   ReconciliationPanel,
   TimelinePanel,
@@ -136,6 +137,8 @@ export default async function CompanyDashboard() {
           <TimelinePanel events={journey.events} />
         </CardBody>
       </Card>
+
+      <PlatformServicesProof state={state.data} journey={journey} viewer="buyer" />
 
       <DemoNotice />
     </div>

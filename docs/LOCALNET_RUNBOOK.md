@@ -59,18 +59,22 @@ The command performs these operations in order:
 11. scans Fabric projections, Algorand boxes/transactions, permit claims and
     scoped service logs for personal, signing and raw-file data; and
 12. opens a real headless Chrome session, clicks the dashboard demonstration,
-    smoke-tests `/`, `/company`, `/freelancer`, `/supplier`, `/provider` and
-    `/admin`, then signs into the integrated role portal and completes all 14
+    smoke-tests the buyer and seller views at `/company` and `/freelancer`,
+    then signs into the integrated role portal and completes all 14
     role-aware deal-room stages when Chrome or Chromium is installed.
 
 Successful completion leaves the services running for browser inspection.
+The integrated portal keeps its shared deal cursor in an owner-only local file,
+so restarting only the marketing/UI container does not silently discard a job
+that the other role is using. Only the Company portal exposes the explicit
+**Start new deal / Reset current deal** control.
 
 ## Local endpoints
 
 | Component | Endpoint |
 |---|---|
 | Integrated product experience | `http://127.0.0.1:4175` |
-| Web application | `http://127.0.0.1:3000` |
+| Legacy web redirects | `http://127.0.0.1:3000` → canonical pixel experience |
 | API | `http://127.0.0.1:4000` |
 | Fabric Gateway | `http://127.0.0.1:4200` |
 | Algorand executor | `http://127.0.0.1:4301` |

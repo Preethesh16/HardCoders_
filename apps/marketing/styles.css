@@ -104,6 +104,7 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
 .workflow-controls{display:flex;gap:10px;align-items:center;flex:none}
 .workflow-controls button{padding:14px 16px;background:var(--acid);color:#07100d;border:3px solid #07100d;box-shadow:4px 4px 0 #07100d;font:6px/1.6 "Press Start 2P",monospace;cursor:pointer;white-space:nowrap}
 .workflow-controls #workflowReset{background:#29473b;color:#cfe3d6}
+.workflow-controls #workflowReset[hidden],#portalWorkflow #workflowReset[hidden]{display:none}
 .workflow-controls button:hover{transform:translate(2px,2px);box-shadow:2px 2px 0 #07100d}
 .workflow-controls button:disabled{opacity:.5;cursor:not-allowed;transform:none}
 .workflow-status{padding:14px 16px;margin-bottom:16px;background:#0d211b;border:3px solid #07100d;font:7px "Press Start 2P",monospace;color:var(--acid);line-height:1.7}

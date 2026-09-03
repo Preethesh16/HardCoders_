@@ -76,7 +76,7 @@ try {
     if (!clicked) throw new Error(`Could not click ${selector}.`);
   };
   const api = async (path, body = {}) => {
-    const result = await evaluate(`(async () => { const response = await fetch(${JSON.stringify(path)}, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(${JSON.stringify(body)}) }); return { status: response.status, body: await response.json().catch(() => ({})) }; })()`);
+    const result = await evaluate(`(async () => { const response = await fetch(${JSON.stringify(path)}, { method: 'POST', headers: { 'content-type': 'application/json', 'x-anchor-role': ${JSON.stringify(path === '/api/workflow/reset' ? 'COMPANY' : 'TEST')} }, body: JSON.stringify(${JSON.stringify(body)}) }); return { status: response.status, body: await response.json().catch(() => ({})) }; })()`);
     if (result.status !== 200) throw new Error(`${path} failed: ${JSON.stringify(result)}`);
     return result.body;
   };
@@ -89,7 +89,7 @@ try {
   if (navigation.errorText) throw new Error(`Navigation failed: ${navigation.errorText}`);
   await waitFor(`location.href === ${JSON.stringify(url)} && document.readyState === 'complete'`, 'The product experience did not load.');
   const landing = await evaluate('({ title: document.title, text: document.body?.innerText ?? "" })');
-  if (!/OptiWork/u.test(landing?.title ?? '') || !/WORK WITHOUT\s+BORDERS/iu.test(landing?.text ?? '')) throw new Error('The landing page did not render.');
+  if (!/Anchor/u.test(landing?.title ?? '') || !/WORK WITHOUT\s+BORDERS/iu.test(landing?.text ?? '')) throw new Error('The landing page did not render.');
 
   await click('[data-open-demo]');
   await waitFor('document.querySelector("#demoModal")?.classList.contains("open")', 'Role selection did not open.');

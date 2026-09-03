@@ -134,9 +134,9 @@ e2e() {
   if [[ -n "${browser}" ]]; then
     node "${ROOT}/scripts/verify-browser-smoke.mjs" "${browser}"
     node "${ROOT}/scripts/verify-marketing-browser-smoke.mjs" "${browser}"
-    log 'browser smoke passed the five dashboards and the integrated role-aware deal room'
+    log 'browser smoke passed the canonical Anchor pixel experience and both role deep links'
   fi
-  log 'real LocalNet E2E passed; the experience is at http://127.0.0.1:4175 and dashboards at http://127.0.0.1:3000'
+  log 'real LocalNet E2E passed; the canonical Anchor experience is at http://127.0.0.1:4175'
 }
 
 down() {

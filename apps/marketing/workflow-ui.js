@@ -39,9 +39,10 @@
   }
 
   async function request(path, options = {}) {
+    const { headers = {}, ...requestOptions } = options;
     const response = await fetch(path, {
-      headers: { accept: "application/json", ...(options.body ? { "content-type": "application/json" } : {}) },
-      ...options
+      ...requestOptions,
+      headers: { accept: "application/json", "x-anchor-role": role, ...(options.body ? { "content-type": "application/json" } : {}), ...headers }
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : body?.error?.message ?? `Request failed (${response.status})`);
@@ -285,6 +286,9 @@
     $("#workspaceTitle").innerHTML = company ? "HIRE WITH<br>PROOF BUILT IN." : "FIND WORK.<br>GET PAID LOCALLY.";
     $("#workspaceIntro").textContent = company ? "Publish a real brief, compare multiple proposals, define the agreement and release only against approved evidence." : "Discover verified work, submit your own terms, review the private agreement and deliver into secured escrow.";
     $("#workspaceRailTitle").textContent = company ? "COMPANY JOURNEY" : "YOUR JOURNEY";
+    const resetButton = $("#workflowReset");
+    resetButton.hidden = !company || !model.run;
+    resetButton.textContent = model.run?.phase === "COMPLETED" ? "START NEW DEAL" : "RESET CURRENT DEAL";
     $("#workspaceAction").innerHTML = company ? renderCompany() : renderFreelancer();
     renderRail();
     renderSnapshot();
@@ -337,16 +341,12 @@
 
   async function refresh({ follow = false } = {}) {
     model = await request("/api/workspace/state");
-    if (!model.run) {
-      await request("/api/workflow/reset", { method: "POST" });
-      model = await request("/api/workspace/state");
-    }
     if (!follow && document.activeElement?.closest("[data-workspace-form]")) return;
     render();
   }
 
   async function reset() {
-    if (busy || !confirm("Start a fresh deal? Existing ledger records remain auditable.")) return;
+    if (role !== "COMPANY" || busy || !confirm("Start a new deal? This clears the shared live workspace for both Company and Freelancer. Existing ledger records remain auditable.")) return;
     await request("/api/workflow/reset", { method: "POST" });
     await refresh({ follow: true });
     setStatus("FRESH WORKSPACE READY · NO BLOCKCHAIN ACTIONS YET_", "success");
