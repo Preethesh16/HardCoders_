@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.0",
+  "label": "ALGORAND TESTNET — DUMMY FUNDS",
+  "network": "testnet",
+  "genesisId": "testnet-v1.0",
+  "genesisHash": "SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=",
+  "algodUrl": "https://testnet-api.algonode.cloud",
+  "deployedAt": "2026-08-30T03:59:05.852Z",
+  "applicationId": "770374298",
+  "applicationAddress": "3VQJGAD5SU3ZMGMSY2R4OVQPEX3ED6PCJWUSHAZ3MXE5YPOSE3HOHB2ITU",
+  "assetId": "770374285",
+  "assetUnitName": "ANCHUSD",
+  "assetValueStatement": "Zero-value demonstration settlement asset. Not redeemable, not a security, no monetary value.",
+  "publicAddresses": {
+    "deployer": "O47BFSO4NQEPB6MRNGTENYBTUHHAJEVXFFIPM5DCHOMMNIJZ2H4ZGSHAW4",
+    "originProviderTreasury": "SWGTY35P3XKJCAEKTX6IEJOIZM3WAIP7V5DKJD4JNA5ZB7BOWGPNCBQ3FQ",
+    "ORG-SELL-001": "U2HCJTY365U7NIAZLNUT3HC36HREM5BG6664VSYVHLK2STTORZMLYVATHM",
+    "ORG-SELL-002": "7CWY65GHPJFWOV6XT73PNBUIZQNLH2MEMJGPFLBOYYU2WIAQGWOYND3ED4",
+    "ORG-SELL-003": "IES332LB6G25EQYU35UYXSTAFRGMIEOEY4VRB7H6EVQQABWHOP6GVHKDWQ"
+  },
+  "applicationFundingMicroAlgos": "2000000",
+  "transactions": {
+    "participantFunding": {
+      "originProviderTreasury": "33WBCYCD6KH63J65OPRA7QMN35UVJMTLTAASNAVSKPK4O3224XRQ",
+      "ORG-SELL-001": "ZF6NKELR6AN7ZTA6MRUGDIQ7V6W4T22CXY6XZBNRLMKRPEQNQ6ZA",
+      "ORG-SELL-002": "TIO4O6M2S6CUIKUITQ7QNZMZ2KB56BAO7WI4KMVXXWRDHDPXCYFA",
+      "ORG-SELL-003": "56IVHJAVY2WGWLWENRHLTGDO3YULQX4KVXCVZ2MHIL25NR4GEGEQ"
+    },
+    "assetCreate": "V2O7F25S4AZ57ORQ222MQP6OC7FMTJXMZIHUL6KV2FSU4ZTPVVFA",
+    "sellerAssetOptIns": {
+      "ORG-SELL-001": "UAF2TSPO4H5R47M5ZME3RVQN6AX5CJB3ISNSPWDA2T462GQFXWGA",
+      "ORG-SELL-002": "IM2TYOGZ7HYBOVVDTPMSQ2KCRH4TM3UHPPIKI2MU6SGOAW5DLGYA",
+      "ORG-SELL-003": "UZYBAHOBNSQFEGN3UV5RXEXPHMY2D7HHYTQARDXWK5QLUIQRUFBA"
+    },
+    "applicationCreate": "XSPGKJTEFLWICNWUMCDLFJAR54I5YZPK6I723I3OHLKIM6YO5TTQ",
+    "applicationFunding": "QLB3FB7GI6XVDQ6Z5IX6PSW5F4WSVVCTMSIOZ4AXMKYPIQ7R5LVQ",
+    "applicationAssetOptIn": "LHGPOBM2SJHPN6SQZJX3SPMUDLRZ6QQKCVPQ4CCIZHFTCQW3LTOQ"
+  },
+  "confirmedRounds": {
+    "applicationCreate": "66804635",
+    "applicationFunding": "66804637",
+    "applicationAssetOptIn": "66804639",
+    "assetCreate": "66804627"
+  },
+  "explorer": {
+    "application": "https://lora.algokit.io/testnet/application/770374298",
+    "asset": "https://lora.algokit.io/testnet/asset/770374285",
+    "applicationAccount": "https://lora.algokit.io/testnet/account/3VQJGAD5SU3ZMGMSY2R4OVQPEX3ED6PCJWUSHAZ3MXE5YPOSE3HOHB2ITU",
+    "deployerAccount": "https://lora.algokit.io/testnet/account/O47BFSO4NQEPB6MRNGTENYBTUHHAJEVXFFIPM5DCHOMMNIJZ2H4ZGSHAW4",
+    "applicationCreateTransaction": "https://lora.algokit.io/testnet/transaction/XSPGKJTEFLWICNWUMCDLFJAR54I5YZPK6I723I3OHLKIM6YO5TTQ",
+    "assetCreateTransaction": "https://lora.algokit.io/testnet/transaction/V2O7F25S4AZ57ORQ222MQP6OC7FMTJXMZIHUL6KV2FSU4ZTPVVFA"
+  }
+}
