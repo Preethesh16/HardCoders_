@@ -45,7 +45,7 @@ export default async function RemittanceAdvice({ params }: { params: Promise<{ p
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stop-500">Demonstration only</p>
             <h1 className="mt-2 text-xl font-semibold tracking-tight text-ink-800">Remittance advice</h1>
             <p className="mt-1 text-sm text-ink-500">
-              Issued by the OptiWork simulated provider network. Not a bank document.
+              Issued by the Anchor simulated provider network. Not a bank document.
             </p>
           </div>
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink-800 text-sm font-bold text-ink-50">

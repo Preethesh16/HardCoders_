@@ -4,7 +4,7 @@ import Link from 'next/link';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'OptiWork — cross-border work and auditable settlement',
+  title: 'Anchor — cross-border work and auditable settlement',
   description:
     'A demonstration of verified cross-border work: corridor rules, FX, escrow settlement and a complete audit trail.',
 };
@@ -33,7 +33,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink-800 text-sm font-bold text-ink-50">
                 O
               </span>
-              <span className="text-sm font-semibold tracking-tight text-ink-800">OptiWork</span>
+              <span className="text-sm font-semibold tracking-tight text-ink-800">Anchor</span>
             </Link>
             <nav className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm">
               {VIEWS.map(([href, label]) => (

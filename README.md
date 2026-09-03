@@ -1,123 +1,269 @@
-# OptiWork
+<div align="center">
 
-A cross-border marketplace where the financial logic is visible. A Polish
-company pays an Indian freelancer, and an Indian company pays a United Kingdom
-supplier from a completely separate set of books. Both journeys run across three
-ledgers, and every decision along the way is recorded with the rule, the rate
-and the hash that produced it.
+# Anchor
 
-**This is a demonstration.** It is not a licensed remittance, payment, KYC, tax
-or legal service. Every settlement asset is a zero-value test token, every fiat
-balance is simulated, and no end user ever receives cryptocurrency or manages a
-blockchain wallet.
+### Hire globally. Settle with proof.
 
-Start with [the architecture plan](docs/ARCHITECTURE_PLAN.md).
+**An auditable cross-border work marketplace that connects hiring, work approval, compliance, FX, escrow and payout—without making workers touch crypto.**
+
+[![Node.js 24](https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![TypeScript 5.9](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Hyperledger Fabric 2.5](https://img.shields.io/badge/Hyperledger_Fabric-2.5-2F3134?logo=hyperledger&logoColor=white)](https://www.hyperledger.org/projects/fabric)
+[![Algorand ARC-4](https://img.shields.io/badge/Algorand-ARC--4-000000?logo=algorand&logoColor=white)](https://developer.algorand.org/)
+[![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+
+</div>
+
+![Anchor overview showing the completed Poland to India and India to United Kingdom journeys](docs/assets/readme/overview.png)
+
+> **The core insight:** one ledger should not be forced to prove everything. Fabric proves **what work was approved**. Algorand proves **that settlement happened**. PostgreSQL proves **who, how much and why**.
+
+## The 30-second pitch
+
+Global work is easy to start and painfully hard to finish. Hiring, identity, contracts, work acceptance, regulatory checks, FX, settlement and payout usually live in disconnected systems. When something goes wrong, every party has a different version of the truth.
+
+Anchor turns that fragmented process into one explainable pipeline. A company pays in its local currency, a freelancer or supplier receives local currency, and licensed-provider simulation accounts handle the settlement layer. End users never see a wallet, hold a token or manage a blockchain key.
+
+The working demonstration completes two deliberately different journeys:
+
+| Journey | Business case | Book | Demonstration result |
+|---|---|---:|---|
+| 🇵🇱 Poland → 🇮🇳 India | Freelancer payment after approved work | `INWARD` | `12,000 PLN → 2,985 USDC → 247,466.93 INR` |
+| 🇮🇳 India → 🇬🇧 United Kingdom | Supplier payment with import evidence | `OUTWARD` | `800,000 INR → 9,567.92 USDC → 7,537.10 GBP` |
+
+The sample amounts above use deterministic demo FX fixtures. Every token and fiat balance in this repository is a zero-value simulation.
+
+## Why Anchor is different
+
+Most payment demos put a transfer on-chain and stop. Anchor tackles the harder question: **what evidence should authorize that transfer, who is allowed to approve it, and how can an auditor reconstruct the decision later?**
+
+| Evaluation lens | What Anchor demonstrates |
+|---|---|
+| **Innovation** | A purpose-built three-ledger trust model instead of “put everything on a blockchain.” |
+| **Technical depth** | Fabric chaincode, an ARC-4 escrow, isolated signing, cryptographic release permits, exact-money FX and double-entry accounting. |
+| **Real-world relevance** | Local-currency user experience, corridor-specific rules, evidence-controlled release and separate inward/outward books. |
+| **Responsible AI** | AI can shortlist, draft and explain; it cannot verify identity, change compliance, approve work or release funds. |
+| **Auditability** | Every material outcome is tied to a rule version, quote hash, evidence hash, actor and ordered timeline event. |
+| **Demo readiness** | One command launches the app; one button runs both journeys through the same domain services used by the HTTP API. |
 
 ## Three ledgers, one workflow
 
-| Ledger | Holds | Never holds |
+| Boundary | Owns | Explicitly does **not** own |
 |---|---|---|
-| Hyperledger Fabric | Work-evidence commitments, versions, buyer decisions | Names, files, contract text, payment state, wallet addresses |
-| Algorand | Provider-to-provider escrow in zero-value test USDC | End-user identity, invoices, work files, regulatory text |
-| PostgreSQL 17 | Marketplace, corridor policy, FX quotes, compliance decisions, double-entry books, reconciliation, audit | Raw signing keys |
+| **Hyperledger Fabric** | Work-evidence hash, version, timestamp, seller identity reference and buyer approval/revision decision | Names, files, contract text, FX, payment state, wallet addresses |
+| **Algorand** | Hashed payment identity, provider addresses, escrow amount and release/refund state | End-user identity, invoices, resumés, work files, regulatory text |
+| **PostgreSQL** | Marketplace state, credentials, corridor policy, FX snapshots, compliance decisions, fiat balances, timeline and reconciliation | Raw blockchain signing keys |
+| **MinIO / S3** | Private resumés, invoices, identity evidence and deliverables behind short-lived signed URLs | Public access and ledger state |
 
-## Run the demonstration
+```mermaid
+flowchart LR
+    U[Company / freelancer / supplier] --> W[Next.js dashboards]
+    W --> A[Fastify orchestration API]
 
-Node.js 24 and pnpm. Nothing else — no database, no object store, no identity
-provider, no paid API key.
+    A --> P[(PostgreSQL<br/>workflow + accounting)]
+    A --> O[(MinIO / S3<br/>private files)]
+    A --> F[Fabric Gateway]
+    F --> H[(Hyperledger Fabric<br/>approved-work proof)]
 
-```sh
+    H --> R[Short-lived signed<br/>release permit]
+    A --> R
+    R --> E[Isolated Algorand executor]
+    E --> H
+    E --> G[(Algorand ARC-4<br/>provider escrow)]
+    G --> A
+    A --> P
+
+    AI[Advisory AI<br/>rank · draft · explain] -. no authority .-> A
+```
+
+## The release path: proof before payout
+
+1. The seller uploads a deliverable to private object storage; Anchor computes its SHA-256 commitment.
+2. Fabric records the exact evidence ID, file hash, milestone version and seller reference—never the file or personal data.
+3. Only the contract's buyer organization can approve that exact version or request a revision.
+4. Compliance and FX engines produce versioned, canonical commitments using integer minor units—never floating-point money.
+5. The Fabric Gateway issues a short-lived Ed25519 permit binding the escrow, approved evidence, Fabric transaction, compliance result, FX quote, generation and idempotency key.
+6. The isolated executor re-reads the authoritative Fabric evidence before signing an Algorand transaction.
+7. Signed bytes are persisted **before** broadcast, so an ambiguous network response can be reconciled without creating or signing a second transfer.
+8. Only after settlement confirmation does the destination provider post the beneficiary's simulated local-currency credit.
+
+This makes a database flag such as `APPROVED=true` insufficient to move money. The release must still match the cryptographic evidence and every bound decision that produced it.
+
+## Run the complete judge demo
+
+### Prerequisites
+
+- Node.js `24.x`
+- pnpm via Corepack
+
+No database, blockchain node, paid API, faucet or secret is required for the default demonstration.
+
+```bash
+git clone https://github.com/Preethesh16/HardCoders_.git
+cd HardCoders_
 corepack pnpm install
 corepack pnpm demo
 ```
 
-Then open <http://127.0.0.1:3000> and press **Run the demonstration**. The API
-executes both journeys through the same services the HTTP routes use, and the
-five dashboards render the real result:
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000), then click **Run the demonstration**.
 
-- **Polish company** — job, applications, bilateral contract approval, corridor
-  decision, FX quote and fees, escrow state, remittance advice.
-- **Indian freelancer** — contract terms, submitted versions, buyer decisions,
-  simulated INR wallet credit.
-- **India → UK supplier** — the outward book, Form A2 and import-document
-  commitments, and the proof that the two books never net.
-- **Provider operations** — escrow state per deal, treasury balances, confirmed
-  settlement transactions with explorer links, reconciliation.
-- **Administrator & audit** — every book, every compliance decision with its
-  version, and the complete ordered event record per payment.
+The app executes both corridors end to end and exposes five role-specific views:
 
-### With real infrastructure
+- **Polish company** — applicant selection, bilateral contract approval, FX, compliance and escrow proof.
+- **Indian freelancer** — agreed terms, submission versions, buyer decision and INR wallet credit.
+- **India → UK supplier** — import-document commitments, outward policy checks and GBP payout.
+- **Provider operations** — escrow state, isolated treasuries, confirmed transactions and reconciliation.
+- **Administrator & audit** — separate books, decision hashes, citations and the ordered payment timeline.
 
-```sh
-cp infra/.env.example infra/.env
-corepack pnpm infra:up          # PostgreSQL 17 + pgvector, MinIO, Keycloak, API, web
+### 90-second evaluator walkthrough
+
+1. Click **Run the demonstration** and confirm both journeys show `COMPLETED`.
+2. Open **Polish company** and follow PLN funding → two-leg FX → approved Fabric evidence → Algorand escrow.
+3. Open **Provider operations** and verify the `INWARD` and `OUTWARD` books, accounts and treasuries never net.
+4. Open **Administrator & audit** and inspect the rule versions, hashes, actors and reconciliation status.
+5. Refresh the demo: idempotency returns the recorded outcome instead of duplicating a payment.
+
+## Product tour
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/readme/company-dashboard.png" alt="Polish company dashboard with contract, FX, compliance and escrow details"></td>
+    <td width="50%"><img src="docs/assets/readme/provider-operations.png" alt="Provider operations dashboard with separate books, treasuries and reconciliation"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Company view</strong><br/>Contract, exact FX legs, cited compliance and release proof.</td>
+    <td align="center"><strong>Provider view</strong><br/>Escrows, separate treasuries, confirmed settlement and reconciliation.</td>
+  </tr>
+</table>
+
+## Architecture and technology
+
+Anchor is intentionally a **modular monolith plus two isolated blockchain gateways**. That keeps the business workflow easy to reason about while preserving hard security boundaries around ledger access and signing. No Kafka, Kubernetes or microservice sprawl is needed for the prototype.
+
+| Layer | Technology | Responsibility |
+|---|---|---|
+| Web | Next.js 16, React 19, Tailwind CSS 4 | Server-rendered role dashboards; no browser-side blockchain keys |
+| API | Node.js 24, TypeScript 5.9, Fastify 5, TypeBox | Marketplace, identity, corridor, compliance, FX and payment orchestration |
+| Business data | PostgreSQL 17, Drizzle ORM, pgvector | Workflow, versioned decisions, exact-money books and reconciliation |
+| Private files | MinIO locally, S3-compatible storage | Opaque object keys and short-lived authorized access |
+| Authentication | Keycloak OIDC | Company, freelancer, supplier, provider and administrator roles |
+| Work trust | Hyperledger Fabric 2.5, Go chaincode, TypeScript Gateway | Evidence commitments, ownership-aware decisions, history and event checkpoints |
+| Settlement | Algorand ARC-4, Algorand TypeScript / Puya, AlgoKit | Create, fund, pause, release, refund and complete provider escrow |
+| FX | Frankfurter adapter + deterministic fixtures | PLN→USD→INR and INR→USD→GBP quotes with explicit fees and expiry |
+| AI | OpenAI Responses API + recorded fallback | Advisory scoring, drafting, explanation and validation recommendations |
+
+## Security and correctness invariants
+
+- **No end-user crypto custody.** Only isolated provider/executor accounts interact with Algorand.
+- **No PII on public or consortium ledgers.** Names, emails, passports, resumés and raw document identifiers are rejected from ledger and AI trace boundaries.
+- **Ownership at the trust boundary.** Seller and buyer organizations are bound to evidence; an authenticated user from another tenant cannot read or decide it.
+- **Idempotency on every mutation.** Exact retries return the recorded response; reusing a key with different input is a conflict.
+- **Exact money only.** Amounts are integer minor units with explicit currency and scale; rounding is deterministic and tested.
+- **Inward/outward isolation.** A journal line cannot reference an account from another book or direction, enforced in domain logic and SQL constraints.
+- **Fail-closed expiry.** Credentials, FX quotes and release permits cannot be used after expiration.
+- **Replay-resistant settlement.** One generation and one idempotency key authorize one escrow action.
+- **MainNet refusal.** The executor validates the genesis hash and rejects Algorand MainNet configuration.
+- **Human authority stays human.** AI never selects a winning applicant by itself and has no call path to approval, compliance mutation or signing.
+
+## API surface
+
+The API exposes real workflow commands rather than a single scripted endpoint. Representative routes:
+
+```text
+POST /v1/jobs
+POST /v1/jobs/:id/applications
+POST /v1/applications/:id/evaluate
+POST /v1/contracts/:id/approve
+
+POST /v1/credentials/verify
+POST /v1/corridors/resolve
+POST /v1/fx/quotes
+
+POST /v1/contracts/:id/submissions
+POST /v1/submissions/:id/approve
+GET  /v1/submissions/:id/access
+
+POST /v1/payments
+POST /v1/payments/:id/fund
+POST /v1/payments/:id/release
+POST /v1/payments/:id/refund
+GET  /v1/payments/:id/timeline
+
+POST /v1/supplier-payments
+POST /v1/payments/:id/reconcile
 ```
 
-Profiles let you start a subset: `--profile data`, `--profile app`,
-`--profile settlement`. This Compose profile uses the evidence mock by default.
-The Fabric Gateway and Go chaincode are implemented and tested in this repo,
-but a CA/peer/orderer test network must be started separately before selecting
-`FABRIC_MODE=gateway`; it is not hidden behind the default demo command.
-
-## Current implementation status
-
-The API exposes the marketplace, credentials, corridor/FX/compliance,
-submission, payment, supplier-payment, timeline and reconciliation routes. The
-web app renders company, freelancer, supplier, provider and audit dashboards.
-The offline demo runs both corridors end to end. The Fabric Gateway and
-Algorand executor now share one release contract, covered by a live
-cross-service integration test. Public TestNet and a real Fabric deployment are
-opt-in environment profiles, not prerequisites for the offline demonstration.
-
-## Layout
-
-```
-apps/api                  Fastify 5 + TypeBox API, Drizzle schema and migrations
-apps/web                  Next.js 16 / React 19 dashboards
-packages/contracts        Shared TypeBox schemas
-packages/domain           Shared money, corridor, state-machine and ledger rules
-services/algorand-executor  Isolated signing boundary and ARC-4 escrow
-blockchain/fabric         Evidence-only Go chaincode
-infra                     Docker Compose profiles, Keycloak realm, Dockerfiles
-docs                      Architecture, ADRs, provenance, integration notes
-```
-
-## Guarantees the tests hold
-
-- **Money is never a float.** Every amount is an exact integer of minor units
-  carried as a string, with its currency and scale. Rounding is half-up and
-  stated.
-- **Inward and outward never net.** A journal line cannot reference an account
-  in another book or direction — enforced in code and again by composite
-  foreign keys in SQL.
-- **Every mutation is idempotent.** An `Idempotency-Key` is mandatory, an exact
-  replay returns the recorded response, and a reused key with a different
-  request is a conflict.
-- **Compliance is versioned configuration**, not conditionals in a handler. The
-  RBI per-unit cap applies to both Indian directions; the import buyer
-  due-diligence threshold applies only to outward payments.
-- **A release is bound to everything it depends on** — the escrow, the exact
-  approved Fabric work version, the Fabric approval transaction, the compliance
-  decision, the FX quote, a one-time generation, the idempotency key and an
-  expiry — and the executor re-reads Fabric itself before it signs.
-- **No personal data reaches a ledger, a log or an AI trace.** The timeline and
-  the AI adapter refuse a prohibited field rather than redacting it.
+Every mutation requires authentication and an `Idempotency-Key`. Demo-only walkthrough and principal routes do not exist outside the demo profile.
 
 ## Verification
 
-```sh
-corepack pnpm lint
-corepack pnpm typecheck
-corepack pnpm test
-corepack pnpm build
+```bash
+corepack pnpm verify
+cd blockchain/fabric/chaincode && go test ./...
 ```
 
-The Algorand executor also has network-dependent suites that are excluded from
-the default run: `pnpm --filter @optiwork/algorand-executor test:localnet`
-(AlgoKit LocalNet) and `test:testnet` (public TestNet, opt-in).
+The automated suite covers:
 
-## Secrets
+- both complete corridors, revision/refund paths and unsupported or expired inputs;
+- cross-tenant read/decision rejection and evidence version ownership;
+- canonical hashing, credential verification, exact FX and cap boundaries;
+- double-entry balance and hard inward/outward book isolation;
+- Fabric Gateway ↔ Algorand executor permit compatibility;
+- altered evidence, expired permits, provider substitution and duplicate release rejection;
+- persisted-signed-transaction recovery and ambiguous broadcast reconciliation;
+- ARC-4 create, fund, partial release, pause/resume, refund and completion behavior;
+- Algorand LocalNet and public TestNet lifecycle suites as explicit opt-in tests.
 
-No key, token, mnemonic or password is committed. `.env` files are ignored;
-`.env.example` files document every variable by name. The demonstration works
-with none of them set.
+```bash
+corepack pnpm --filter @optiwork/algorand-executor test:localnet
+corepack pnpm --filter @optiwork/algorand-executor test:testnet
+```
+
+## Implementation status
+
+| Capability | Status |
+|---|---|
+| Two-corridor browser demonstration | ✅ Runs locally with deterministic adapters |
+| Marketplace, contracts, credentials, compliance, FX, books and timelines | ✅ Implemented and tested |
+| PostgreSQL, MinIO and Keycloak adapters | ✅ Compose profiles available |
+| Fabric evidence chaincode and Gateway | ✅ Implemented and tested |
+| ARC-4 escrow and isolated Algorand executor | ✅ Implemented and tested |
+| Fabric-to-executor release contract | ✅ Cross-service integration tested |
+| Fully automated all-real Fabric + Algorand LocalNet journey | 🚧 Integration profile in progress |
+| Public TestNet deployment and production OIDC hardening | ⏭️ Explicitly deferred |
+
+The default judge path is deliberately deterministic and free. Real-network suites are opt-in so a reviewer is never blocked by Docker capacity, faucets or an unavailable public service.
+
+## Repository map
+
+```text
+apps/api                    Fastify API, workflow services, Drizzle schema and migrations
+apps/web                    Next.js dashboards and remittance advice
+packages/contracts          Shared TypeBox boundary schemas
+packages/domain             Money, corridor, state-machine and ledger invariants
+services/fabric-gateway     Fabric access, identity mapping, permits and checkpoints
+services/algorand-executor  Isolated signing, command journal and reconciliation
+blockchain/fabric           Evidence-only Go chaincode
+infra                       Compose profiles, Keycloak realm and container builds
+docs                        Architecture plan, ADRs and third-party provenance
+```
+
+## Design documents
+
+- [Consolidated architecture plan](docs/ARCHITECTURE_PLAN.md)
+- [ADR 001 — Three-ledger boundaries](docs/architecture/adr-001-three-ledger-boundaries.md)
+- [ADR 002 — Algorand settlement](docs/architecture/adr-002-algorand-settlement.md)
+- [ADR 003 — Fabric for work evidence only](docs/architecture/adr-003-fabric-work-evidence-only.md)
+- [Third-party provenance](docs/THIRD_PARTY_PROVENANCE.md)
+
+## Scope and disclaimer
+
+Anchor is a technical demonstration—not a licensed remittance, payment, KYC, tax-filing or legal-compliance service. Regulatory documents and remittance advice are visibly watermarked. Test assets have no monetary value. The policy engine demonstrates source-versioned controls; a real deployment would still require licensed providers, jurisdiction-specific legal review, operational controls and production security assessment.
+
+---
+
+<div align="center">
+
+**Anchor does not ask you to trust a dashboard. It lets every party verify the evidence, the decision and the settlement.**
+
+</div>
