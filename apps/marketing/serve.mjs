@@ -1,7 +1,12 @@
-// Zero-dependency static file server for the OptiWork landing page.
-// Node is already this repo's one hard requirement, so this avoids adding a
-// devDependency (or relying on python3, which nothing else here needs) just
-// to serve five static files locally.
+// Static file server + a thin same-origin proxy onto @optiwork/api's demo
+// endpoints, for the OptiWork landing page.
+//
+// The proxy exists for the same reason apps/web/lib/api.ts is server-only:
+// the API's demo bearer principal must never reach the browser (see that
+// file's own comment). apps/marketing has no framework server the way
+// apps/web does, so this gives it one, purely to keep that boundary intact
+// while letting the pixel-art portal render real demo data same-origin (no
+// CORS, no token in client JS).
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
@@ -9,6 +14,7 @@ import { extname, join, normalize } from "node:path";
 const ROOT = new URL(".", import.meta.url).pathname;
 const PORT = Number(process.env.PORT ?? 4175);
 const HOST = process.env.HOST ?? "127.0.0.1";
+const API_BASE_URL = process.env.OPTIWORK_API_BASE_URL ?? "http://127.0.0.1:4000";
 
 const CONTENT_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -18,8 +24,54 @@ const CONTENT_TYPES = {
   ".svg": "image/svg+xml"
 };
 
+// Same demo-only principal apps/web/lib/api.ts builds. It is an identity
+// assertion, not a credential — the demo profile's verifier isn't even
+// constructed, so it grants nothing outside this local, offline profile.
+const DEMO_OPERATOR = Buffer.from(JSON.stringify({
+  subject: "USER-PLATFORM-ADMIN",
+  organizationId: "ORG-OPTIWORK-ADMIN",
+  roles: ["platform_admin", "audit_service", "compliance_service"],
+  displayName: "Platform administrator"
+}), "utf8").toString("base64url");
+
+async function proxyToApi(req, res, path, init = {}) {
+  try {
+    const upstream = await fetch(new URL(path, API_BASE_URL), {
+      ...init,
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${DEMO_OPERATOR}`,
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+        ...init.headers
+      }
+    });
+    const body = await upstream.text();
+    res.writeHead(upstream.status, { "Content-Type": "application/json" });
+    res.end(body);
+  } catch (error) {
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      error: { message: `The OptiWork API is not reachable at ${API_BASE_URL}. Start it with "pnpm --filter @optiwork/api dev".` }
+    }));
+  }
+}
+
 const server = createServer(async (req, res) => {
   const requestPath = new URL(req.url, `http://${HOST}`).pathname;
+
+  if (requestPath === "/api/state" && req.method === "GET") {
+    await proxyToApi(req, res, "/v1/demo/state");
+    return;
+  }
+  if (requestPath === "/api/run" && req.method === "POST") {
+    await proxyToApi(req, res, "/v1/demo/walkthrough", {
+      method: "POST",
+      headers: { "idempotency-key": "optiwork-demo-walkthrough-0001" },
+      body: JSON.stringify({})
+    });
+    return;
+  }
+
   const safePath = normalize(requestPath === "/" ? "/index.html" : requestPath).replace(/^(\.\.[/\\])+/, "");
   const filePath = join(ROOT, safePath);
   if (!filePath.startsWith(ROOT)) {
