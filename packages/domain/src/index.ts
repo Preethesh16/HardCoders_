@@ -1,5 +1,4 @@
 export * from './canonical.js';
-export * from './compliance.js';
 export * from './corridor.js';
 export * from './fx.js';
 export * from './identity.js';

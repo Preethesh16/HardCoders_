@@ -36,7 +36,7 @@ import {
 import type { Select } from '../db/store.js';
 import { requireOwnership, requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import { bookIdFor, resolve } from '../corridor/service.js';
-import { evaluate, type ComplianceDecision } from '../compliance/engine.js';
+import { assertComplianceDecision, evaluate, type ComplianceDecision } from '../compliance/engine.js';
 import { buildQuote, assertQuoteCurrent, SETTLEMENT_SCALE, totalFeesMinor, type FxQuoteRecord } from '../fx/quote.js';
 import { convertMoney, money, parseRate, type Money } from '../money.js';
 import { providersForBook, providerCapabilitiesSatisfied, type CorridorProviders } from './providers.js';
@@ -635,10 +635,11 @@ export class PaymentService {
       citations: complianceRow.citations,
       policyVersion: complianceRow.policyVersion,
       rulesVersion: complianceRow.rulesVersion,
-      evaluatedAt: complianceRow.evaluatedAt,
+      evaluatedAt: new Date(complianceRow.evaluatedAt).toISOString(),
       inrEquivalent: complianceRow.inrEquivalent,
       canonicalHash: complianceRow.canonicalHash,
     };
+    assertComplianceDecision(compliance);
     return {
       payment,
       quote: quoteRow.quote as unknown as FxQuoteRecord,

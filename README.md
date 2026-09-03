@@ -11,6 +11,7 @@
 [![Hyperledger Fabric 2.5](https://img.shields.io/badge/Hyperledger_Fabric-2.5-2F3134?logo=hyperledger&logoColor=white)](https://www.hyperledger.org/projects/fabric)
 [![Algorand ARC-4](https://img.shields.io/badge/Algorand-ARC--4-000000?logo=algorand&logoColor=white)](https://developer.algorand.org/)
 [![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Verify](https://github.com/Preethesh16/HardCoders_/actions/workflows/verify.yml/badge.svg)](https://github.com/Preethesh16/HardCoders_/actions/workflows/verify.yml)
 
 </div>
 
@@ -233,6 +234,7 @@ The automated suite covers:
 - both complete corridors, revision/refund paths and unsupported or expired inputs;
 - cross-tenant read/decision rejection and evidence version ownership;
 - canonical hashing, credential verification, exact FX and cap boundaries;
+- one shared, runtime-validated compliance decision contract whose stored hash is rechecked on hydration;
 - double-entry balance and hard inward/outward book isolation;
 - Fabric Gateway ↔ Algorand executor permit compatibility;
 - altered evidence, expired permits, provider substitution and duplicate release rejection;
@@ -250,7 +252,7 @@ corepack pnpm --filter @optiwork/algorand-executor test:testnet
 | Capability | Status |
 |---|---|
 | Two-corridor browser demonstration | ✅ Runs locally with deterministic adapters |
-| Marketplace, contracts, credentials, compliance, FX, books and timelines | ✅ Implemented and tested |
+| Marketplace, contracts, credentials, compliance, FX, books and timelines | ✅ Implemented, runtime-validated and tested |
 | PostgreSQL and MinIO adapters | ✅ Real local acceptance profile verified |
 | Keycloak OIDC adapter and realm | ✅ Implemented; production OIDC deployment deferred |
 | Fabric evidence chaincode and Gateway | ✅ Implemented and tested |

@@ -129,17 +129,6 @@ export const ReleaseAuthorizationSchema = Type.Object({
 }, { additionalProperties: false });
 
 export const ComplianceOutcomeSchema = Type.Union([Type.Literal('PASSED'), Type.Literal('MANUAL_REVIEW'), Type.Literal('BLOCKED')]);
-export const ComplianceResultSchema = Type.Object({
-  id: IdentifierSchema,
-  corridorId: IdentifierSchema,
-  outcome: ComplianceOutcomeSchema,
-  reasons: Type.Array(Type.String({ minLength: 1, maxLength: 512 })),
-  requiredDocuments: Type.Array(IdentifierSchema, { uniqueItems: true }),
-  policyVersion: IdentifierSchema,
-  evaluatedAt: IsoTimestampSchema,
-  canonicalHash: Sha256Schema,
-}, { additionalProperties: false });
-
 export const RuleCitationSchema = Type.Object({
   sourceUri: Type.String({ format: 'uri' }),
   sourceVersion: Type.String({ minLength: 1, maxLength: 128 }),
@@ -224,7 +213,6 @@ export type AlgorandNetwork = Static<typeof AlgorandNetworkSchema>;
 export type EscrowBinding = Static<typeof EscrowBindingSchema>;
 export type ReleaseAuthorization = Static<typeof ReleaseAuthorizationSchema>;
 export type ComplianceOutcome = Static<typeof ComplianceOutcomeSchema>;
-export type ComplianceResult = Static<typeof ComplianceResultSchema>;
 export type ComplianceDecision = Static<typeof ComplianceDecisionSchema>;
 export type PaymentState = Static<typeof PaymentStateSchema>;
 export type WorkContractState = Static<typeof WorkContractStateSchema>;

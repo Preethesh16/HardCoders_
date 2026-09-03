@@ -1,4 +1,4 @@
-# OptiWork consolidated cross-border architecture
+# Anchor consolidated cross-border architecture
 
 ## Decision summary
 
@@ -82,6 +82,11 @@ unlabelled and unlinkable without that mapping.
 `CorridorPolicy` is an ordered origin/destination pair with direction, status,
 provider requirements, INR cap, due-diligence rules, required documents,
 purpose codes and source/effective-version metadata.
+
+`ComplianceDecision` has one shared TypeBox schema and one production evaluator.
+The API validates each new and PostgreSQL-hydrated decision at runtime, restores
+database timestamps to canonical ISO form and recomputes its commitment before
+the decision can participate in a release.
 
 `FxQuote` contains the funding, USD settlement and payout amounts; both FX
 legs; fees; provider; issue/expiry timestamps; and a canonical hash. Blockchain
