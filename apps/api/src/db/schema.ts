@@ -62,6 +62,13 @@ export const memberships = pgTable('memberships', {
   uniqueIndex('memberships_user_org_role_idx').on(table.userId, table.organizationId, table.role),
 ]);
 
+/**
+ * A credential is a signed document, so every field the signature covers is
+ * stored verbatim as text. `issuedAt` and `expiresAt` are deliberately *not*
+ * `timestamptz`: a database that reformats them - PostgreSQL renders
+ * `2026-09-02T09:00:00.000Z` as `2026-09-02 09:00:00+00` - would change the
+ * canonical bytes and silently invalidate every signature on read.
+ */
 export const credentials = pgTable('credentials', {
   id: id(),
   organizationId: ref('organization_id').notNull(),
@@ -71,8 +78,8 @@ export const credentials = pgTable('credentials', {
   subjectType: varchar('subject_type', { length: 16 }).notNull(),
   country: varchar('country', { length: 2 }).notNull(),
   assuranceLevel: varchar('assurance_level', { length: 16 }).notNull(),
-  issuedAt: instant('issued_at').notNull(),
-  expiresAt: instant('expires_at').notNull(),
+  issuedAt: varchar('issued_at', { length: 40 }).notNull(),
+  expiresAt: varchar('expires_at', { length: 40 }).notNull(),
   signature: text('signature').notNull(),
   issuerPublicKeyPem: text('issuer_public_key_pem').notNull(),
   createdAt: instant('created_at').notNull(),

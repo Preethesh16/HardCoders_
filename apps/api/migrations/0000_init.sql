@@ -86,8 +86,8 @@ CREATE TABLE "credentials" (
 	"subject_type" varchar(16) NOT NULL,
 	"country" varchar(2) NOT NULL,
 	"assurance_level" varchar(16) NOT NULL,
-	"issued_at" timestamp with time zone NOT NULL,
-	"expires_at" timestamp with time zone NOT NULL,
+	"issued_at" varchar(40) NOT NULL,
+	"expires_at" varchar(40) NOT NULL,
 	"signature" text NOT NULL,
 	"issuer_public_key_pem" text NOT NULL,
 	"created_at" timestamp with time zone NOT NULL

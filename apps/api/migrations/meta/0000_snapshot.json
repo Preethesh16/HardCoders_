@@ -1,5 +1,5 @@
 {
-  "id": "9ea4e914-d6d6-4ef1-b02f-0b26f295b0c0",
+  "id": "83391749-daa5-4b89-a761-46fb755d5e2f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -618,13 +618,13 @@
         },
         "issued_at": {
           "name": "issued_at",
-          "type": "timestamp with time zone",
+          "type": "varchar(40)",
           "primaryKey": false,
           "notNull": true
         },
         "expires_at": {
           "name": "expires_at",
-          "type": "timestamp with time zone",
+          "type": "varchar(40)",
           "primaryKey": false,
           "notNull": true
         },
