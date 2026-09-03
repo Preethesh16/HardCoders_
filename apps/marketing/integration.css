@@ -1,5 +1,5 @@
 /* Live-stack launcher. Layered over the landing page, borrows the page tokens. */
-.live-launcher{position:fixed;right:20px;bottom:20px;z-index:120;font-family:var(--mono);display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.live-launcher{position:fixed;right:20px;bottom:20px;z-index:120;font-family:var(--mono);display:flex;flex-direction:column;align-items:flex-end;gap:10px;max-height:calc(100vh - 40px)}
 .live-toggle{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--ink);color:var(--paper);border:0;cursor:pointer;font-size:11px;letter-spacing:.12em;box-shadow:4px 4px 0 rgba(17,21,16,.25)}
 .live-toggle:hover{background:#1c2419}
 .live-toggle i{width:8px;height:8px;background:var(--acid);border-radius:50%;animation:live-pulse 1.8s infinite}
@@ -11,9 +11,11 @@
 .live-panel header span{font-size:11px;letter-spacing:.14em;font-weight:500}
 .live-panel header small{font-size:9px;letter-spacing:.1em;opacity:.55}
 
-.live-apps{display:flex;flex-direction:column}
+.live-apps{display:flex;flex-direction:column;max-height:min(46vh,380px);overflow-y:auto}
 .live-apps a{display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;background:none;border:0;border-bottom:1px solid var(--line);cursor:pointer;text-align:left}
 .live-apps a:hover{background:var(--acid)}
+.live-apps a[data-live-app="overview"]{background:rgba(217,255,69,.16)}
+.live-apps a[data-live-app="overview"] b{color:#4f6b1a}
 .live-apps a span{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
 .live-apps a b{font-size:11px;letter-spacing:.08em;font-weight:500}
 .live-apps a small{font-size:9px;opacity:.55;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

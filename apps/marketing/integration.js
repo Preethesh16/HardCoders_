@@ -5,10 +5,18 @@
 // (default dev port 3000) serving every role from its own route, so a page
 // served from apps/marketing cannot tell "running" from "refused" across
 // origins — a dot that guesses wrong is worse than no dot.
+//
+// Links use "localhost", not "127.0.0.1": Next's dev server only self-allows
+// the origin it printed at startup ("Local: http://localhost:3000") for
+// Server Actions. Opening these via 127.0.0.1 fails with "Invalid Server
+// Actions request." even though the same server answers on both addresses.
 const LIVE_APPS = Object.freeze({
-  company: { app: "COMPANY DASHBOARD", note: "Jobs, contracts, corridor decisions, remittance advice", url: "http://127.0.0.1:3000/company" },
-  freelancer: { app: "FREELANCER DASHBOARD", note: "Contract terms, submitted versions, wallet credit", url: "http://127.0.0.1:3000/freelancer" },
-  admin: { app: "ADMIN & AUDIT", note: "Every book, every compliance decision, full event record", url: "http://127.0.0.1:3000/admin" }
+  overview: { app: "OVERVIEW · RUN THE DEMO", note: "Start here — runs both journeys, then populates every dashboard", url: "http://localhost:3000/" },
+  company: { app: "COMPANY DASHBOARD", note: "Jobs, contracts, corridor decisions, remittance advice", url: "http://localhost:3000/company" },
+  freelancer: { app: "FREELANCER DASHBOARD", note: "Contract terms, submitted versions, wallet credit", url: "http://localhost:3000/freelancer" },
+  supplier: { app: "SUPPLIER PAYMENT", note: "India → UK outward book, Form A2, import documents", url: "http://localhost:3000/supplier" },
+  provider: { app: "PROVIDER OPERATIONS", note: "Escrow state, treasury balances, settlement, reconciliation", url: "http://localhost:3000/provider" },
+  admin: { app: "ADMIN & AUDIT", note: "Every book, every compliance decision, full event record", url: "http://localhost:3000/admin" }
 });
 
 function currentRoleKey() {
@@ -29,7 +37,7 @@ launcher.innerHTML = `
     <i></i><span>LIVE APPS</span><b>▲</b>
   </button>
   <div class="live-panel" id="livePanel" hidden>
-    <header><span>RUNNING LOCALLY</span><small>DEMO MODE · MOCK LEDGER · NO REAL MONEY</small></header>
+    <header><span>ALL 5 DASHBOARDS · RUNNING LOCALLY</span><small>Real @optiwork/api + @optiwork/web, demo profile: mock Fabric &amp; Algorand, in-memory Postgres</small></header>
     <div class="live-apps">
       ${Object.entries(LIVE_APPS).map(([key, app]) => `
         <a href="${app.url}" target="_blank" rel="noopener" data-live-app="${key}">
@@ -37,7 +45,7 @@ launcher.innerHTML = `
           <em>↗</em>
         </a>`).join("")}
     </div>
-    <footer>Everything above this panel is the design prototype.</footer>
+    <footer>Everything above this panel is the design prototype. Press "Run the demonstration" on Overview to populate every dashboard.</footer>
   </div>`;
 document.body.appendChild(launcher);
 
