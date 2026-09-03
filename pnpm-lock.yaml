@@ -143,6 +143,9 @@ importers:
       '@optiwork/contracts':
         specifier: workspace:*
         version: link:../contracts
+      json-canonicalize:
+        specifier: 2.0.0
+        version: 2.0.0
     devDependencies:
       '@types/node':
         specifier: 24.13.3

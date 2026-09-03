@@ -1,32 +1,56 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sha256 } from "../src/canonical.js";
+import { workEvidenceHash } from "../src/security/fabric-evidence-reader.js";
 import { HttpAuthoritativeFabricReader } from "../src/security/gateway-reader.js";
 import type { CommandContext, PermitClaims } from "../src/types.js";
-import { baseClaims, testConfig } from "./helpers.js";
+import { approvedEvidence, baseClaims, releaseInput, testConfig } from "./helpers.js";
 
-const authorizationPath = "/ledger/deals/DEAL-001/algorand-authorization";
-const authorization = {
-  schemaVersion: "1.0",
-  dealId: "DEAL-001",
-  lifecycleStatus: "ACTIVE",
-  fabricTxId: "FABRIC-AUTH-001",
-};
+const fabricTxId = "FABRIC-AUTH-001";
+const evidence = approvedEvidence(fabricTxId);
+const authorizationPath = `/v1/evidence/${evidence.evidenceId}/projection`;
 
 function commandAndClaims(): { command: CommandContext; claims: PermitClaims } {
+  const config = testConfig();
+  const body = releaseInput({
+    evidenceId: evidence.evidenceId,
+    escrowBinding: {
+      dealId: "DEAL-001",
+      agreementHash: `sha256:${"a".repeat(64)}`,
+      originProviderAddress: config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS,
+      destinationProviderAddress: config.ALGORAND_SIGNER_ADDRESS,
+      assetId: Number(config.ALGORAND_ASSET_ID),
+      amount: { amountMinor: "100", currency: "USD", scale: 6 },
+      network: "localnet",
+      genesisHash: config.ALGORAND_GENESIS_HASH,
+      applicationId: config.ALGORAND_APPLICATION_ID.toString(),
+    },
+    milestoneId: "MS-001",
+    amountMinor: "100",
+    intentId: "INTENT-001",
+    bindingHash: `sha256:${"b".repeat(64)}`,
+    fenceGeneration: 1,
+    leaseExpiresAt: new Date(Date.now() + 120_000).toISOString(),
+    fabricClaimTransactionId: fabricTxId,
+    idempotencyKey: "EXECUTOR-RELEASE-001",
+    workEvidenceHash: workEvidenceHash(evidence),
+  });
   const command: CommandContext = {
-    action: "pause",
+    action: "release",
     method: "POST",
-    path: "/escrows/DEAL-001/pause",
-    idempotencyKey: "EXECUTOR-PAUSE-001",
-    body: null,
+    path: "/escrows/DEAL-001/releases",
+    idempotencyKey: "EXECUTOR-RELEASE-001",
+    body,
   };
   return {
     command,
     claims: {
       ...baseClaims(command, Math.floor(Date.now() / 1_000)),
-      authoritativeReads: [{ path: authorizationPath, dataHash: sha256(authorization) }],
-    },
+      action: "release",
+      fabricTransactionId: fabricTxId,
+      authoritativeReads: [{ path: authorizationPath, dataHash: sha256(evidence) }],
+      releaseAuthorization: body,
+    } as PermitClaims,
   };
 }
 
@@ -70,7 +94,7 @@ describe("authoritative Fabric Gateway OIDC", () => {
       }
       fabricRequests += 1;
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer oidc-access-token-0000000000000001");
-      return json({ success: true, data: authorization, error: null });
+      return json({ success: true, data: evidence, error: null });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -106,7 +130,7 @@ describe("authoritative Fabric Gateway OIDC", () => {
       }
       expect(authorizationHeader).toBe("Bearer oidc-fresh-access-token-00000001");
       refreshedFabricRequests += 1;
-      return json({ success: true, data: authorization, error: null });
+      return json({ success: true, data: evidence, error: null });
     });
     vi.stubGlobal("fetch", fetchMock);
 

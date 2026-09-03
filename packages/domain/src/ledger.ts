@@ -25,6 +25,11 @@ export interface JournalEntry {
   readonly hash: `sha256:${string}`;
 }
 
+export interface SignedLedgerBalance {
+  readonly signedMinor: string;
+  readonly amount: MoneyDto;
+}
+
 export class DoubleEntryLedger {
   readonly #accounts = new Map<string, LedgerAccount>();
   readonly #entries = new Map<string, JournalEntry>();
@@ -60,7 +65,7 @@ export class DoubleEntryLedger {
     return structuredClone(entry);
   }
 
-  balance(accountId: string): MoneyDto {
+  balance(accountId: string): SignedLedgerBalance {
     const account = this.#accounts.get(accountId);
     if (!account) throw new Error(`Unknown account ${accountId}.`);
     let signed = 0n;
@@ -69,6 +74,13 @@ export class DoubleEntryLedger {
         if (line.accountId === accountId) signed += line.side === 'CREDIT' ? BigInt(line.amountMinor) : -BigInt(line.amountMinor);
       }
     }
-    return { amountMinor: (signed < 0n ? -signed : signed).toString(), currency: account.currency, scale: account.scale };
+    return {
+      signedMinor: signed.toString(),
+      amount: {
+        amountMinor: (signed < 0n ? -signed : signed).toString(),
+        currency: account.currency,
+        scale: account.scale,
+      },
+    };
   }
 }

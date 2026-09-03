@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -34,6 +35,12 @@ func validateSubmission(evidence *WorkEvidence) error {
 	if err := validateIdentifier(evidence.SellerIdentityRef, "sellerIdentityRef"); err != nil {
 		return err
 	}
+	if err := validateIdentifier(evidence.BuyerOrganizationRef, "buyerOrganizationRef"); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(evidence.BuyerOrganizationRef, "buyer:") {
+		return errors.New("buyerOrganizationRef is invalid")
+	}
 	for name, value := range map[string]string{
 		"contractHash":  evidence.ContractHash,
 		"milestoneHash": evidence.MilestoneHash,
@@ -56,6 +63,7 @@ func applyDecision(
 	evidence *WorkEvidence,
 	decision, expectedFileHash string,
 	expectedVersion uint64,
+	buyerOrganizationRef string,
 	decisionHash string,
 ) error {
 	if evidence.BuyerDecision != decisionPending {
@@ -67,11 +75,25 @@ func applyDecision(
 	if expectedVersion != evidence.Version {
 		return errors.New("expected version does not match current evidence")
 	}
+	if buyerOrganizationRef != evidence.BuyerOrganizationRef {
+		return errors.New("buyer organization is not authorized for this evidence")
+	}
 	if decision != decisionApproved && decision != decisionRevisionRequired && decision != decisionDisputed {
 		return errors.New("unsupported buyer decision")
 	}
 	if err := validateHash(decisionHash, "buyerDecisionHash"); err != nil {
 		return err
+	}
+	expectedDecisionHash := hashParts(
+		"optiwork.fabric.buyer-decision.v1",
+		evidence.EvidenceID,
+		evidence.FileHash,
+		fmt.Sprint(evidence.Version),
+		decision,
+		buyerOrganizationRef,
+	)
+	if decisionHash != expectedDecisionHash {
+		return errors.New("buyerDecisionHash does not bind the current evidence decision")
 	}
 	evidence.BuyerDecision = decision
 	evidence.BuyerDecisionHash = decisionHash

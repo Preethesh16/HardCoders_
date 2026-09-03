@@ -7,6 +7,8 @@ export interface ComplianceInput {
   readonly amountInInrMinor: string;
   readonly originCredential: VerifiableCredential;
   readonly destinationCredential: VerifiableCredential;
+  /** Credential IDs whose signatures were verified against trusted issuer keys. */
+  readonly verifiedCredentialIds: readonly string[];
   readonly providedDocuments: readonly string[];
   readonly evaluatedAt?: Date;
 }
@@ -15,12 +17,16 @@ export function evaluateCompliance(input: ComplianceInput): ComplianceResult {
   const evaluatedAt = input.evaluatedAt ?? new Date();
   const reasons: string[] = [];
   const requiredDocuments = new Set(input.policy.requiredDocuments);
-  let outcome: ComplianceResult['outcome'] = input.policy.status === 'MANUAL_REVIEW' ? 'MANUAL_REVIEW' : 'PASSED';
+  let outcome: ComplianceResult['outcome'] = input.policy.status === 'BLOCKED'
+    ? 'BLOCKED'
+    : input.policy.status === 'MANUAL_REVIEW' ? 'MANUAL_REVIEW' : 'PASSED';
 
   for (const credential of [input.originCredential, input.destinationCredential]) {
-    if (credential.status !== 'ACTIVE' || Date.parse(credential.expiresAt) <= evaluatedAt.getTime()) {
+    if (!input.verifiedCredentialIds.includes(credential.id)
+      || credential.status !== 'ACTIVE'
+      || Date.parse(credential.expiresAt) <= evaluatedAt.getTime()) {
       outcome = 'BLOCKED';
-      reasons.push(`Credential ${credential.id} is not active at evaluation time.`);
+      reasons.push(`Credential ${credential.id} is not signature-verified, active and unexpired at evaluation time.`);
     }
   }
   if (input.originCredential.country !== input.policy.originCountry || input.destinationCredential.country !== input.policy.destinationCountry) {
@@ -29,11 +35,21 @@ export function evaluateCompliance(input: ComplianceInput): ComplianceResult {
   }
 
   const inrAmount = BigInt(input.amountInInrMinor);
-  if (input.policy.transactionCap && inrAmount > BigInt(input.policy.transactionCap.amountMinor)) {
-    outcome = 'BLOCKED';
-    reasons.push('Payment exceeds the configured RBI per-unit cap.');
+  if (input.policy.transactionCap) {
+    if (input.policy.transactionCap.currency !== 'INR' || input.policy.transactionCap.scale !== 2) {
+      outcome = 'BLOCKED';
+      reasons.push('The configured RBI cap is not denominated in INR minor units.');
+    } else if (inrAmount > BigInt(input.policy.transactionCap.amountMinor)) {
+      outcome = 'BLOCKED';
+      reasons.push('Payment exceeds the configured RBI per-unit cap.');
+    }
   }
   for (const rule of input.policy.dueDiligenceRules) {
+    if (rule.threshold.currency !== 'INR' || rule.threshold.scale !== 2) {
+      outcome = 'BLOCKED';
+      reasons.push(`${rule.code} has an invalid non-INR threshold denomination.`);
+      continue;
+    }
     if (inrAmount > BigInt(rule.threshold.amountMinor)) {
       for (const document of rule.requiredDocuments) requiredDocuments.add(document);
       if (rule.appliesTo === 'BUYER' && input.originCredential.assuranceLevel !== 'ENHANCED') {

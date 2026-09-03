@@ -110,6 +110,7 @@ function release(
   milestoneId = MILESTONE,
 ): { input: ReleaseInput; command: CommandContext } {
   const input = releaseInput({
+    evidenceId: `EVIDENCE-${FABRIC_TX}`,
     escrowBinding,
     milestoneId,
     amountMinor,
@@ -140,6 +141,7 @@ describe("release authorization binding", () => {
       network: "localnet" as const, genesisHash: "x".repeat(24), applicationId: "1",
     };
     const parsed = releaseInputSchema.safeParse({
+      evidenceId: "EVIDENCE-TEST-001",
       escrowBinding: binding,
       milestoneId: MILESTONE, amountMinor: "1", intentId: "INTENT-1",
       bindingHash: `sha256:${"d".repeat(64)}`, fenceGeneration: 1,

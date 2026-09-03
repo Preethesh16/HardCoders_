@@ -90,7 +90,8 @@ export function baseClaims(command: CommandContext, nowSeconds: number): PermitC
  * commitment. Individual hashes can still be overridden to prove a mismatch is
  * rejected.
  */
-export type ReleaseDraft = Omit<ReleaseInput, "authorizationCommitment" | "releaseBinding"> & {
+export type ReleaseDraft = Omit<ReleaseInput, "authorizationCommitment" | "releaseBinding" | "evidenceId"> & {
+  readonly evidenceId?: string;
   readonly idempotencyKey: string;
   readonly workEvidenceHash?: string;
   readonly complianceResultHash?: string;
@@ -98,7 +99,7 @@ export type ReleaseDraft = Omit<ReleaseInput, "authorizationCommitment" | "relea
 };
 
 export function releaseInput(draft: ReleaseDraft): ReleaseInput {
-  const { idempotencyKey, workEvidenceHash, complianceResultHash, fxQuoteHash, ...rest } = draft;
+  const { idempotencyKey, evidenceId, workEvidenceHash, complianceResultHash, fxQuoteHash, ...rest } = draft;
   const releaseBinding = {
     escrowBindingHash: escrowBindingCommitment(rest.escrowBinding),
     workEvidenceHash: workEvidenceHash ?? `sha256:${"1".repeat(64)}`,
@@ -110,6 +111,7 @@ export function releaseInput(draft: ReleaseDraft): ReleaseInput {
     expiresAt: rest.leaseExpiresAt,
   };
   return releaseInputSchema.parse({
+    evidenceId: evidenceId ?? "EVIDENCE-TEST-001",
     ...rest,
     releaseBinding,
     authorizationCommitment: releaseBindingCommitment(releaseBinding),

@@ -14,7 +14,12 @@ import { DemoTokenVerifier, OidcTokenVerifier, type TokenVerifier } from './auth
 import { createObjectStore, type ObjectStore } from './storage/object-store.js';
 import { createAiAdapter, type AiAdapter } from './ai/adapter.js';
 import { MockFabricEvidenceReader, type FabricEvidenceReader } from './fabric/evidence-reader.js';
-import { SimulatedEscrowExecutor, HttpEscrowExecutor, type EscrowExecutor } from './algorand/executor-client.js';
+import {
+  HttpEscrowExecutor,
+  HttpFabricPermitProvider,
+  SimulatedEscrowExecutor,
+  type EscrowExecutor,
+} from './algorand/executor-client.js';
 import { FixtureRateSource, FrankfurterRateSource, type FxRateSource } from './fx/rates.js';
 import { IdempotencyStore } from './idempotency/store.js';
 import { Ledger } from './ledger/books.js';
@@ -61,21 +66,6 @@ function createDataStore(config: ApiConfig): DataStore {
   return new PostgresDataStore(drizzle(pool), async () => { await pool.end(); });
 }
 
-/**
- * The permit provider for the real executor.
- *
- * Minting a signed Fabric permit is the Fabric Gateway workstream's
- * responsibility. Until that service exists this fails closed rather than
- * fabricating an authorization, so the `executor` mode can never be run
- * half-configured.
- */
-async function unavailablePermit(): Promise<string> {
-  throw new Error(
-    'A signed Fabric release permit is required for executor mode. '
-    + 'Configure the Fabric Gateway; see docs/CLAUDE_INTEGRATION_NOTES.md.',
-  );
-}
-
 export function createContext(config: ApiConfig, overrides: ContextOverrides = {}): AppContext {
   const store = overrides.store ?? createDataStore(config);
   const clock = overrides.clock ?? systemClock;
@@ -83,9 +73,20 @@ export function createContext(config: ApiConfig, overrides: ContextOverrides = {
 
   const auth = overrides.auth
     ?? (config.auth.mode === 'oidc' ? new OidcTokenVerifier(config.auth) : new DemoTokenVerifier());
+  const permitProvider = config.algorand.mode === 'executor'
+    ? new HttpFabricPermitProvider({
+      baseUrl: config.fabric.gatewayUrl!,
+      ...(config.fabric.gatewayToken === undefined ? {} : { bearerToken: config.fabric.gatewayToken }),
+      timeoutMs: config.fabric.gatewayTimeoutMs,
+    })
+    : undefined;
   const escrow = overrides.escrow
     ?? (config.algorand.mode === 'executor'
-      ? new HttpEscrowExecutor(config.algorand.executorUrl!, config.algorand.executorToken!, unavailablePermit)
+      ? new HttpEscrowExecutor(
+        config.algorand.executorUrl!,
+        config.algorand.executorToken!,
+        permitProvider!.issue.bind(permitProvider),
+      )
       : new SimulatedEscrowExecutor(() => clock.now()));
   const rates = overrides.rates
     ?? (config.fx.mode === 'frankfurter' ? new FrankfurterRateSource(config.fx.baseUrl) : new FixtureRateSource());

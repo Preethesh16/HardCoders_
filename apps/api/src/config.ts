@@ -51,6 +51,8 @@ export interface ApiConfig {
   readonly fabric: {
     readonly mode: 'gateway' | 'mock';
     readonly gatewayUrl?: string;
+    readonly gatewayToken?: string;
+    readonly gatewayTimeoutMs: number;
     readonly evidenceFixturePath?: string;
   };
 }
@@ -106,7 +108,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
 
   const storageMode = choice(env, 'STORAGE_MODE', ['s3', 'memory'] as const, profile === 'demo' ? 'memory' : 's3');
-  const fabricMode = choice(env, 'FABRIC_MODE', ['gateway', 'mock'] as const, profile === 'testnet' ? 'gateway' : 'mock');
+  const fabricMode = choice(env, 'FABRIC_MODE', ['gateway', 'mock'] as const, profile === 'demo' ? 'mock' : 'gateway');
+  const fabricGatewayUrl = text(env, 'FABRIC_GATEWAY_URL');
+  const fabricGatewayToken = text(env, 'FABRIC_GATEWAY_TOKEN');
+  if ((fabricMode === 'gateway' || algorandMode === 'executor') && fabricGatewayUrl === undefined) {
+    throw new Error('Fabric Gateway URL is required for gateway or executor mode.');
+  }
 
   return {
     profile,
@@ -150,7 +157,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     },
     fabric: {
       mode: fabricMode,
-      ...(text(env, 'FABRIC_GATEWAY_URL') === undefined ? {} : { gatewayUrl: text(env, 'FABRIC_GATEWAY_URL')! }),
+      ...(fabricGatewayUrl === undefined ? {} : { gatewayUrl: fabricGatewayUrl }),
+      ...(fabricGatewayToken === undefined ? {} : { gatewayToken: fabricGatewayToken }),
+      gatewayTimeoutMs: integer(env, 'FABRIC_GATEWAY_TIMEOUT_MS', 4_000, 250, 30_000),
       ...(text(env, 'FABRIC_EVIDENCE_FIXTURE_PATH') === undefined
         ? {}
         : { evidenceFixturePath: text(env, 'FABRIC_EVIDENCE_FIXTURE_PATH')! }),

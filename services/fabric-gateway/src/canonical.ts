@@ -19,3 +19,16 @@ export function opaqueSellerIdentityRef(actor: AuthenticatedActor): string {
     .digest('hex');
   return `seller:${digest}`;
 }
+
+export function opaqueBuyerOrganizationRef(organizationId: string): string {
+  const digest = createHash('sha256')
+    .update('optiwork.fabric.buyer-organization-ref.v1\0', 'utf8')
+    .update(organizationId, 'utf8')
+    .digest('hex');
+  return `buyer:${digest}`;
+}
+
+/** Matches the NUL-delimited Go chaincode commitment exactly. */
+export function hashParts(...parts: string[]): `sha256:${string}` {
+  return sha256(parts.join('\0'));
+}

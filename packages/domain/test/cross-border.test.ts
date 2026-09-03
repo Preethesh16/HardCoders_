@@ -61,8 +61,10 @@ describe('cross-border domain', () => {
 
   it('verifies Ed25519 credentials and detects tampering', () => {
     const signed = credential('company-pl', 'PL', 'COMPANY');
+    expect(signed.value.issuerDid).toMatch(/^did:key:z6Mk/u);
     expect(verifyCredential(signed.value, signed.publicKeyPem, now)).toBe(true);
     expect(verifyCredential({ ...signed.value, country: 'DE' }, signed.publicKeyPem, now)).toBe(false);
+    expect(verifyCredential(signed.value, createDemoIssuer().publicKeyPem, now)).toBe(false);
   });
 
   it('applies the import due-diligence threshold only to the outward corridor', () => {
@@ -74,6 +76,7 @@ describe('cross-border domain', () => {
       amountInInrMinor: '26000000',
       originCredential: indianBuyer,
       destinationCredential: ukSupplier,
+      verifiedCredentialIds: [indianBuyer.id, ukSupplier.id],
       providedDocuments: ['INVOICE', 'FORM_A2_DEMO', 'TAX_REVIEW_DEMO', 'IMPORT_EVIDENCE'],
       evaluatedAt: now,
     });
@@ -88,6 +91,7 @@ describe('cross-border domain', () => {
       amountInInrMinor: '26000000',
       originCredential: company,
       destinationCredential: freelancer,
+      verifiedCredentialIds: [company.id, freelancer.id],
       providedDocuments: ['INVOICE', 'SERVICE_EXPORT_DECLARATION'],
       evaluatedAt: now,
     });

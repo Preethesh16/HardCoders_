@@ -234,6 +234,7 @@ export class ExecutorService {
   /** Re-reads the approved Fabric work evidence bound by a release permit. */
   private async assertApprovedWorkEvidence(release: ReleaseInput): Promise<void> {
     await this.workEvidence.readApprovedEvidence({
+      evidenceId: release.evidenceId,
       dealId: release.escrowBinding.dealId,
       milestoneId: release.milestoneId,
       workEvidenceHash: release.releaseBinding.workEvidenceHash,

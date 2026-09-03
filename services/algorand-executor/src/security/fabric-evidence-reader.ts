@@ -43,6 +43,7 @@ export const workEvidenceSchema = z.object({
 export type WorkEvidence = z.infer<typeof workEvidenceSchema>;
 
 export type FabricEvidenceQuery = {
+  readonly evidenceId: string;
   readonly dealId: string;
   readonly milestoneId: string;
   /** Canonical hash the signed release permit committed to. */
@@ -77,6 +78,9 @@ export function assertApprovedEvidence(evidence: WorkEvidence, query: FabricEvid
   }
   if (workEvidenceHash(evidence) !== query.workEvidenceHash) {
     throw forbidden("The Fabric work evidence changed after the release permit was signed.");
+  }
+  if (evidence.evidenceId !== query.evidenceId) {
+    throw forbidden("The Fabric work evidence identifier does not match the signed release.");
   }
   if (fabricTransactionHash(evidence.fabricTxId) !== query.fabricTxHash) {
     throw forbidden("The Fabric approval transaction does not match the signed release permit.");
@@ -192,8 +196,7 @@ export class HttpFabricEvidenceReader implements FabricEvidenceReader {
   ) {}
 
   async readApprovedEvidence(query: FabricEvidenceQuery): Promise<WorkEvidence> {
-    const path = `/ledger/deals/${encodeURIComponent(query.dealId)}`
-      + `/milestones/${encodeURIComponent(query.milestoneId)}/work-evidence`;
+    const path = `/v1/evidence/${encodeURIComponent(query.evidenceId)}/projection`;
     const target = new URL(this.config.FABRIC_GATEWAY_URL);
     target.pathname = `${target.pathname.replace(/\/$/u, "")}${path}`;
     let response: Response;

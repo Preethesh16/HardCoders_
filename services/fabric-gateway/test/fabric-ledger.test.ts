@@ -27,6 +27,7 @@ const evidence: LedgerWorkEvidence = {
   milestoneHash: hash('b'),
   fileHash: hash('c'),
   sellerIdentityRef: `seller:${'d'.repeat(64)}`,
+  buyerOrganizationRef: `buyer:${'f'.repeat(64)}`,
   version: 1,
   submittedAt: '2026-09-03T10:00:00.000Z',
   buyerDecision: 'PENDING',
@@ -71,6 +72,7 @@ describe('real Fabric adapter safety', () => {
       contractHash: evidence.contractHash,
       milestoneHash: evidence.milestoneHash,
       fileHash: evidence.fileHash,
+      buyerOrganizationRef: evidence.buyerOrganizationRef,
       version: 1,
     })).resolves.toMatchObject({ evidenceId: evidence.evidenceId });
     expect(submitAsync).toHaveBeenCalledTimes(1);
@@ -94,6 +96,7 @@ describe('real Fabric adapter safety', () => {
       contractHash: evidence.contractHash,
       milestoneHash: evidence.milestoneHash,
       fileHash: evidence.fileHash,
+      buyerOrganizationRef: evidence.buyerOrganizationRef,
       version: 1,
     })).resolves.toEqual(evidence);
     expect(evaluate).toHaveBeenCalledWith('GetCommandResult', {

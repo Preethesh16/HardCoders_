@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { canonicalHash, opaqueSellerIdentityRef } from '../canonical.js';
+import { hashParts, opaqueBuyerOrganizationRef, opaqueSellerIdentityRef } from '../canonical.js';
 import { AppError } from '../errors.js';
 import type {
   AuthenticatedActor,
@@ -27,6 +27,15 @@ function requireBuyer(actor: AuthenticatedActor): void {
   if (actor.role !== 'company_member') throw new AppError('FORBIDDEN');
 }
 
+function authorizeRead(actor: AuthenticatedActor, evidence: LedgerWorkEvidence): void {
+  if (['payments_service', 'audit_service', 'platform_admin'].includes(actor.role)) return;
+  if ((actor.role === 'freelancer' || actor.role === 'supplier')
+    && opaqueSellerIdentityRef(actor) === evidence.sellerIdentityRef) return;
+  if (actor.role === 'company_member'
+    && opaqueBuyerOrganizationRef(actor.organizationId) === evidence.buyerOrganizationRef) return;
+  throw new AppError('FORBIDDEN');
+}
+
 export class MemoryEvidenceLedger implements EvidenceLedger {
   readonly #evidence = new Map<string, LedgerWorkEvidence>();
   readonly #history = new Map<string, WorkEvidenceHistoryEntry[]>();
@@ -48,6 +57,12 @@ export class MemoryEvidenceLedger implements EvidenceLedger {
       && (existing.buyerDecision !== 'REVISION_REQUIRED' || input.version !== existing.version + 1)) {
       throw new AppError('STATE_CONFLICT');
     }
+    const sellerIdentityRef = opaqueSellerIdentityRef(actor);
+    if (existing !== undefined
+      && (existing.sellerIdentityRef !== sellerIdentityRef
+        || existing.buyerOrganizationRef !== input.buyerOrganizationRef)) {
+      throw new AppError('FORBIDDEN');
+    }
     const submittedAt = this.#now().toISOString();
     const fabricTxId = transactionId();
     const evidence: LedgerWorkEvidence = {
@@ -56,7 +71,8 @@ export class MemoryEvidenceLedger implements EvidenceLedger {
       contractHash: input.contractHash,
       milestoneHash: input.milestoneHash,
       fileHash: input.fileHash,
-      sellerIdentityRef: opaqueSellerIdentityRef(actor),
+      sellerIdentityRef,
+      buyerOrganizationRef: input.buyerOrganizationRef,
       version: input.version,
       submittedAt,
       buyerDecision: 'PENDING',
@@ -75,20 +91,18 @@ export class MemoryEvidenceLedger implements EvidenceLedger {
     requireBuyer(actor);
     const current = this.#evidence.get(input.evidenceId);
     if (current === undefined) throw new AppError('RESOURCE_NOT_FOUND');
+    if (opaqueBuyerOrganizationRef(actor.organizationId) !== current.buyerOrganizationRef) {
+      throw new AppError('FORBIDDEN');
+    }
     if (current.buyerDecision !== 'PENDING'
       || current.fileHash !== input.expectedFileHash
       || current.version !== input.expectedVersion) throw new AppError('STATE_CONFLICT');
     const decidedAt = this.#now().toISOString();
     const fabricTxId = transactionId();
-    const buyerDecisionHash = canonicalHash({
-      schemaVersion: '1.0',
-      evidenceId: current.evidenceId,
-      fileHash: current.fileHash,
-      version: current.version,
-      decision: input.decision,
-      buyerIdentityRef: canonicalHash({ organizationId: actor.organizationId, subject: actor.subject }),
-      decidedAt,
-    });
+    const buyerDecisionHash = hashParts(
+      'optiwork.fabric.buyer-decision.v1', current.evidenceId, current.fileHash,
+      String(current.version), input.decision, current.buyerOrganizationRef,
+    );
     const decided: LedgerWorkEvidence = {
       ...current,
       buyerDecision: input.decision,
@@ -101,18 +115,22 @@ export class MemoryEvidenceLedger implements EvidenceLedger {
     return structuredClone(decided);
   }
 
-  public async get(_actor: AuthenticatedActor, evidenceId: string): Promise<LedgerWorkEvidence> {
+  public async get(actor: AuthenticatedActor, evidenceId: string): Promise<LedgerWorkEvidence> {
     const evidence = this.#evidence.get(evidenceId);
     if (evidence === undefined) throw new AppError('RESOURCE_NOT_FOUND');
+    authorizeRead(actor, evidence);
     return structuredClone(evidence);
   }
 
   public async history(
-    _actor: AuthenticatedActor,
+    actor: AuthenticatedActor,
     evidenceId: string,
   ): Promise<readonly WorkEvidenceHistoryEntry[]> {
     const entries = this.#history.get(evidenceId);
     if (entries === undefined) throw new AppError('RESOURCE_NOT_FOUND');
+    const latest = this.#evidence.get(evidenceId);
+    if (latest === undefined) throw new AppError('RESOURCE_NOT_FOUND');
+    authorizeRead(actor, latest);
     const result = structuredClone(entries);
     if (result.length > MAX_HISTORY_ENTRIES
       || Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_HISTORY_RESPONSE_BYTES) {

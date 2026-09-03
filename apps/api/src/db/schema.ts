@@ -197,6 +197,13 @@ export const complianceResults = pgTable('compliance_results', {
   corridorId: ref('corridor_id').notNull(),
   outcome: varchar('outcome', { length: 16 }).notNull(),
   reasons: jsonb('reasons').$type<string[]>().notNull(),
+  appliedRules: jsonb('applied_rules').$type<string[]>().notNull(),
+  citations: jsonb('citations').$type<Array<{
+    sourceUri: string; sourceVersion: string; section: string; quote: string;
+  }>>().notNull(),
+  inrEquivalent: jsonb('inr_equivalent').$type<{
+    amountMinor: string; currency: string; scale: number;
+  }>().notNull(),
   policyVersion: varchar('policy_version', { length: 128 }).notNull(),
   rulesVersion: varchar('rules_version', { length: 128 }).notNull(),
   evaluatedAt: instant('evaluated_at').notNull(),
@@ -208,6 +215,10 @@ export const requiredDocuments = pgTable('required_documents', {
   complianceResultId: ref('compliance_result_id').notNull(),
   code: varchar('code', { length: 64 }).notNull(),
   satisfied: boolean('satisfied').notNull(),
+  reason: text('reason').notNull(),
+  citation: jsonb('citation').$type<{
+    sourceUri: string; sourceVersion: string; section: string; quote: string;
+  }>().notNull(),
   documentHashId: ref('document_hash_id'),
 }, (table) => [uniqueIndex('required_documents_code_idx').on(table.complianceResultId, table.code)]);
 

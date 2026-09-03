@@ -14,7 +14,7 @@ import { conflict, notFound, unprocessable } from '../errors.js';
 import { documentHashes, uploadedObjects, workContracts, workSubmissions } from '../db/schema.js';
 import { requireOwnership, requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import { ALLOWED_CONTENT_TYPES, MAX_OBJECT_BYTES, objectKeyFor } from '../storage/object-store.js';
-import { workEvidenceHash } from '../fabric/evidence-reader.js';
+import { buyerOrganizationRef, workEvidenceHash } from '../fabric/evidence-reader.js';
 import type { Select } from '../db/store.js';
 import { sha256Text } from '../runtime.js';
 
@@ -102,6 +102,7 @@ export class SubmissionService {
       milestoneHash: contract.milestoneHash,
       fileHash: stored.sha256,
       subjectRef,
+      buyerOrganizationRef: buyerOrganizationRef(contract.buyerOrganizationId),
       version,
       submittedAt: now,
     });

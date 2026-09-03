@@ -56,7 +56,7 @@ func reader(ctx contractapi.TransactionContextInterface) error {
 
 func (s *SmartContract) SubmitWorkEvidence(
 	ctx contractapi.TransactionContextInterface,
-	evidenceID, contractHash, milestoneHash, fileHash, sellerIdentityRef string,
+	evidenceID, contractHash, milestoneHash, fileHash, sellerIdentityRef, buyerOrganizationRef string,
 	version uint64,
 	idempotencyKey string,
 ) (*WorkEvidence, error) {
@@ -67,7 +67,7 @@ func (s *SmartContract) SubmitWorkEvidence(
 	if err := validateIdentifier(idempotencyKey, "idempotencyKey"); err != nil {
 		return nil, err
 	}
-	fingerprint := hashParts(evidenceID, contractHash, milestoneHash, fileHash, sellerIdentityRef, fmt.Sprint(version))
+	fingerprint := hashParts(evidenceID, contractHash, milestoneHash, fileHash, sellerIdentityRef, buyerOrganizationRef, fmt.Sprint(version))
 	if replay, err := readReplay(ctx, commandKey(identity, "submit", idempotencyKey), fingerprint); err != nil || replay != nil {
 		return replay, err
 	}
@@ -80,6 +80,9 @@ func (s *SmartContract) SubmitWorkEvidence(
 		if existing.BuyerDecision != decisionRevisionRequired || version != existing.Version+1 {
 			return nil, errors.New("a new version requires a revision decision and sequential version")
 		}
+		if existing.SellerIdentityRef != sellerIdentityRef || existing.BuyerOrganizationRef != buyerOrganizationRef {
+			return nil, errors.New("evidence ownership cannot change across revisions")
+		}
 	}
 	occurredAt, err := timestamp(ctx)
 	if err != nil {
@@ -88,7 +91,8 @@ func (s *SmartContract) SubmitWorkEvidence(
 	evidence := &WorkEvidence{
 		SchemaVersion: "1.0", EvidenceID: evidenceID, ContractHash: contractHash,
 		MilestoneHash: milestoneHash, FileHash: fileHash, SellerIdentityRef: sellerIdentityRef,
-		Version: version, SubmittedAt: occurredAt, BuyerDecision: decisionPending,
+		BuyerOrganizationRef: buyerOrganizationRef,
+		Version:              version, SubmittedAt: occurredAt, BuyerDecision: decisionPending,
 		FabricTxID: ctx.GetStub().GetTxID(), AggregateVersion: version,
 	}
 	if err := validateSubmission(evidence); err != nil {
@@ -110,7 +114,7 @@ func (s *SmartContract) DecideWorkEvidence(
 	ctx contractapi.TransactionContextInterface,
 	evidenceID, decision, expectedFileHash string,
 	expectedVersion uint64,
-	buyerDecisionHash, idempotencyKey string,
+	buyerOrganizationRef, buyerDecisionHash, idempotencyKey string,
 ) (*WorkEvidence, error) {
 	identity, err := actor(ctx, "buyer")
 	if err != nil {
@@ -119,7 +123,7 @@ func (s *SmartContract) DecideWorkEvidence(
 	if err := validateIdentifier(idempotencyKey, "idempotencyKey"); err != nil {
 		return nil, err
 	}
-	fingerprint := hashParts(evidenceID, decision, expectedFileHash, fmt.Sprint(expectedVersion), buyerDecisionHash)
+	fingerprint := hashParts(evidenceID, decision, expectedFileHash, fmt.Sprint(expectedVersion), buyerOrganizationRef, buyerDecisionHash)
 	if replay, err := readReplay(ctx, commandKey(identity, "decide", idempotencyKey), fingerprint); err != nil || replay != nil {
 		return replay, err
 	}
@@ -127,7 +131,7 @@ func (s *SmartContract) DecideWorkEvidence(
 	if err != nil {
 		return nil, err
 	}
-	if err := applyDecision(evidence, decision, expectedFileHash, expectedVersion, buyerDecisionHash); err != nil {
+	if err := applyDecision(evidence, decision, expectedFileHash, expectedVersion, buyerOrganizationRef, buyerDecisionHash); err != nil {
 		return nil, err
 	}
 	evidence.DecidedAt, err = timestamp(ctx)

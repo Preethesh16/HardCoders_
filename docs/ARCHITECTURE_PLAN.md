@@ -58,7 +58,7 @@ committed.
 | Settlement | Algorand ARC-4, Algorand TypeScript/Puya, AlgoKit | Provider-to-provider test-USDC escrow. |
 | FX | Frankfurter reference adapter with fixtures | PLN/USD and USD/INR legs with expiry and fixed-point math. |
 | AI | OpenAI Responses API with fixture fallback | Explainable shortlist, drafting and advisory analysis. |
-| Runtime | Docker Compose; Algorand LocalNet and Fabric test network | Free offline demo, with TestNet as the public proof mode. |
+| Runtime | Docker Compose; Algorand LocalNet; separately started Fabric test network | Free offline demo, with TestNet as the public proof mode. |
 
 Algorand TestNet uses Circle's zero-value USDC ASA `10458941`, scale six.
 LocalNet creates a zero-value `OptiUSD-DEMO` ASA. Mainnet is rejected by
@@ -142,8 +142,9 @@ India import/outward requests, not to the inward freelancer payment.
 
 - `demo`: in-process adapters, deterministic FX/AI fixtures and no external
   infrastructure; used by tests and the one-command UI demo.
-- `local`: PostgreSQL, MinIO, Keycloak, Fabric and AlgoKit LocalNet in Docker;
-  zero monetary value and no public dependency.
+- `local`: PostgreSQL, MinIO and Keycloak in Docker, with AlgoKit LocalNet and
+  the Fabric test network started by their own tooling; zero monetary value and
+  no public dependency. The default Compose demo keeps both ledgers simulated.
 - `testnet`: the same app with isolated provider keys, Algorand TestNet, official
   test USDC and explorer links. Fabric remains permissioned and local/hosted.
 

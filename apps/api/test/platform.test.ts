@@ -309,6 +309,7 @@ describe('simulated escrow lifecycle', () => {
       ...overrides,
     };
     return {
+      evidenceId: 'EVID-UNIT-001',
       escrowBinding: binding,
       milestoneId: 'MS-UNIT-001',
       amountMinor,

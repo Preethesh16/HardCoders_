@@ -140,6 +140,37 @@ export const ComplianceResultSchema = Type.Object({
   canonicalHash: Sha256Schema,
 }, { additionalProperties: false });
 
+export const RuleCitationSchema = Type.Object({
+  sourceUri: Type.String({ format: 'uri' }),
+  sourceVersion: Type.String({ minLength: 1, maxLength: 128 }),
+  section: Type.String({ minLength: 1, maxLength: 256 }),
+  quote: Type.String({ minLength: 1, maxLength: 1024 }),
+}, { additionalProperties: false });
+
+export const RequiredDocumentDecisionSchema = Type.Object({
+  code: IdentifierSchema,
+  satisfied: Type.Boolean(),
+  reason: Type.String({ minLength: 1, maxLength: 1024 }),
+  citation: RuleCitationSchema,
+}, { additionalProperties: false });
+
+/** Exact rich decision committed by the API and persisted in PostgreSQL. */
+export const ComplianceDecisionSchema = Type.Object({
+  id: IdentifierSchema,
+  corridorId: IdentifierSchema,
+  bookId: IdentifierSchema,
+  outcome: ComplianceOutcomeSchema,
+  reasons: Type.Array(Type.String({ minLength: 1, maxLength: 1024 })),
+  requiredDocuments: Type.Array(RequiredDocumentDecisionSchema),
+  appliedRules: Type.Array(IdentifierSchema, { uniqueItems: true }),
+  citations: Type.Array(RuleCitationSchema),
+  policyVersion: Type.String({ minLength: 1, maxLength: 128 }),
+  rulesVersion: Type.String({ minLength: 1, maxLength: 128 }),
+  evaluatedAt: IsoTimestampSchema,
+  inrEquivalent: MoneySchema,
+  canonicalHash: Sha256Schema,
+}, { additionalProperties: false });
+
 export const PaymentStateSchema = Type.Union([
   Type.Literal('DRAFT'), Type.Literal('COMPLIANCE_PENDING'), Type.Literal('MANUAL_REVIEW'),
   Type.Literal('QUOTED'), Type.Literal('FIAT_FUNDED'), Type.Literal('ESCROW_CREATED'),
@@ -194,6 +225,7 @@ export type EscrowBinding = Static<typeof EscrowBindingSchema>;
 export type ReleaseAuthorization = Static<typeof ReleaseAuthorizationSchema>;
 export type ComplianceOutcome = Static<typeof ComplianceOutcomeSchema>;
 export type ComplianceResult = Static<typeof ComplianceResultSchema>;
+export type ComplianceDecision = Static<typeof ComplianceDecisionSchema>;
 export type PaymentState = Static<typeof PaymentStateSchema>;
 export type WorkContractState = Static<typeof WorkContractStateSchema>;
 export type ActorRole = Static<typeof ActorRoleSchema>;

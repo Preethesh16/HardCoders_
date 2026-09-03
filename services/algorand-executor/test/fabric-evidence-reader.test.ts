@@ -31,6 +31,7 @@ describe("file-backed Fabric evidence reader", () => {
     const record = approvedEvidence(FABRIC_TX);
     const key = MockFabricEvidenceReader.key(DEAL, MILESTONE);
     const query = {
+      evidenceId: record.evidenceId,
       dealId: DEAL,
       milestoneId: MILESTONE,
       workEvidenceHash: workEvidenceHash(record),
@@ -51,6 +52,7 @@ describe("file-backed Fabric evidence reader", () => {
   it("fails closed on an unknown milestone and on a malformed fixture", async () => {
     const record = approvedEvidence(FABRIC_TX);
     const query = {
+      evidenceId: record.evidenceId,
       dealId: DEAL,
       milestoneId: MILESTONE,
       workEvidenceHash: workEvidenceHash(record),

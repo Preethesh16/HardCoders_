@@ -15,7 +15,7 @@ const transitions: Readonly<Record<PaymentState, readonly PaymentState[]>> = {
   COMPLETED: [],
   REFUNDED: [],
   EXPIRED: [],
-  FAILED_RECONCILIATION: ['USDC_RELEASED', 'PAYOUT_CREDITED', 'COMPLETED'],
+  FAILED_RECONCILIATION: ['USDC_RELEASED', 'PAYOUT_CREDITED'],
 };
 
 export function canTransitionPayment(from: PaymentState, to: PaymentState): boolean {

@@ -46,6 +46,7 @@ export interface ReleaseBinding {
 }
 
 export interface ReleaseCommand {
+  readonly evidenceId: string;
   readonly escrowBinding: EscrowBindingInput;
   readonly milestoneId: string;
   readonly amountMinor: string;
@@ -291,6 +292,87 @@ interface ExecutorEnvelope {
   readonly success: boolean;
   readonly data: unknown;
   readonly error: { code: string; message: string } | null;
+}
+
+interface FabricPermitEnvelope {
+  readonly success: boolean;
+  readonly data: { readonly permit?: unknown } | null;
+  readonly error: { readonly code?: string; readonly message?: string } | null;
+}
+
+export interface FabricPermitProviderOptions {
+  readonly baseUrl: string;
+  readonly bearerToken?: string;
+  readonly timeoutMs?: number;
+}
+
+/**
+ * Requests the exact command authorization the executor will verify.
+ *
+ * Release commands are bound to one approved evidence projection; lifecycle
+ * commands receive a short-lived, zero-read permit. In local demo mode the
+ * Gateway accepts the explicit payments-service headers below. Hosted modes
+ * provide a workload bearer token instead.
+ */
+export class HttpFabricPermitProvider {
+  readonly #baseUrl: string;
+  readonly #bearerToken: string | undefined;
+  readonly #timeoutMs: number;
+
+  constructor(options: FabricPermitProviderOptions) {
+    this.#baseUrl = options.baseUrl;
+    this.#bearerToken = options.bearerToken;
+    this.#timeoutMs = options.timeoutMs ?? 4_000;
+  }
+
+  async issue(
+    action: EscrowAction,
+    path: string,
+    idempotencyKey: string,
+    body: unknown,
+  ): Promise<string> {
+    const release = action === 'release' ? body as Partial<ReleaseCommand> | null : null;
+    if (action === 'release' && (release === null || typeof release.evidenceId !== 'string')) {
+      throw unprocessable('A release permit requires an evidence identifier.');
+    }
+    const permitPath = action === 'release'
+      ? `/v1/evidence/${encodeURIComponent(release!.evidenceId!)}/release-permits`
+      : '/v1/command-permits';
+    let response: Response;
+    try {
+      response = await fetch(new URL(permitPath, this.#baseUrl), {
+        method: 'POST',
+        redirect: 'error',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(this.#timeoutMs),
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+          'idempotency-key': `PERMIT:${idempotencyKey}`,
+          'x-correlation-id': idempotencyKey,
+          ...(this.#bearerToken === undefined ? {
+            'x-demo-subject': 'optiwork-api',
+            'x-demo-organization': 'optiwork-platform',
+            'x-demo-role': 'payments_service',
+          } : { authorization: `Bearer ${this.#bearerToken}` }),
+        },
+        body: JSON.stringify({
+          command: { action, method: 'POST', path, idempotencyKey, body: body ?? null },
+        }),
+      });
+    } catch {
+      throw unavailable('The Fabric Gateway is unreachable; no settlement permit was issued.');
+    }
+    const envelope = await response.json().catch(() => null) as FabricPermitEnvelope | null;
+    const permit = envelope?.data?.permit;
+    if (!response.ok || envelope?.success !== true || typeof permit !== 'string' || permit.length < 32) {
+      const message = envelope?.error?.message ?? 'The Fabric Gateway rejected the settlement permit.';
+      if (response.status === 409) throw conflict(message);
+      if (response.status === 422) throw unprocessable(message);
+      throw unavailable(message);
+    }
+    return permit;
+  }
 }
 
 /**

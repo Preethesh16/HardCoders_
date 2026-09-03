@@ -111,6 +111,7 @@ export function escrowBindingCommitment(binding: EscrowBinding): `sha256:${strin
 }
 
 const releaseFields = {
+  evidenceId: canonicalIdSchema,
   escrowBinding: escrowBindingSchema,
   milestoneId: canonicalIdSchema,
   amountMinor: positiveUint64StringSchema,
@@ -177,7 +178,7 @@ const permitBase = z.object({
   idempotencyKey: idempotencyKeySchema,
   commandHash: hashSchema,
   fabricTransactionId: canonicalIdSchema,
-  authoritativeReads: z.array(commandReadSchema).min(1).max(4),
+  authoritativeReads: z.array(commandReadSchema).max(4),
 });
 
 const releaseAuthorizationSchema = z.object(releaseFields).strict().superRefine(assertReleaseCoherence);

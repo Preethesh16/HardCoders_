@@ -54,8 +54,20 @@ corepack pnpm infra:up          # PostgreSQL 17 + pgvector, MinIO, Keycloak, API
 ```
 
 Profiles let you start a subset: `--profile data`, `--profile app`,
-`--profile settlement`. The Hyperledger Fabric network is owned by a separate
-workstream and is deliberately not defined in `infra/`.
+`--profile settlement`. This Compose profile uses the evidence mock by default.
+The Fabric Gateway and Go chaincode are implemented and tested in this repo,
+but a CA/peer/orderer test network must be started separately before selecting
+`FABRIC_MODE=gateway`; it is not hidden behind the default demo command.
+
+## Current implementation status
+
+The API exposes the marketplace, credentials, corridor/FX/compliance,
+submission, payment, supplier-payment, timeline and reconciliation routes. The
+web app renders company, freelancer, supplier, provider and audit dashboards.
+The offline demo runs both corridors end to end. The Fabric Gateway and
+Algorand executor now share one release contract, covered by a live
+cross-service integration test. Public TestNet and a real Fabric deployment are
+opt-in environment profiles, not prerequisites for the offline demonstration.
 
 ## Layout
 
@@ -65,7 +77,7 @@ apps/web                  Next.js 16 / React 19 dashboards
 packages/contracts        Shared TypeBox schemas
 packages/domain           Shared money, corridor, state-machine and ledger rules
 services/algorand-executor  Isolated signing boundary and ARC-4 escrow
-blockchain/fabric         Chaincode (separate workstream)
+blockchain/fabric         Evidence-only Go chaincode
 infra                     Docker Compose profiles, Keycloak realm, Dockerfiles
 docs                      Architecture, ADRs, provenance, integration notes
 ```

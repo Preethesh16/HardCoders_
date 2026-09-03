@@ -347,6 +347,7 @@ export class PaymentService {
       expiresAt,
     };
     const command = {
+      evidenceId: evidence.evidenceId,
       escrowBinding: escrowInput,
       milestoneId: contract.milestoneId,
       amountMinor: escrowInput.amount.amountMinor,
@@ -627,19 +628,15 @@ export class PaymentService {
       requiredDocuments: documents.map((document) => ({
         code: document.code,
         satisfied: document.satisfied,
-        reason: 'Recorded at decision time.',
-        citation: {
-          sourceUri: corridor.policy.sourceUri,
-          sourceVersion: complianceRow.policyVersion,
-          section: 'Recorded at decision time.',
-          quote: 'Recorded at decision time.',
-        },
+        reason: document.reason,
+        citation: document.citation,
       })),
-      appliedRules: [],
-      citations: [],
+      appliedRules: complianceRow.appliedRules,
+      citations: complianceRow.citations,
       policyVersion: complianceRow.policyVersion,
       rulesVersion: complianceRow.rulesVersion,
       evaluatedAt: complianceRow.evaluatedAt,
+      inrEquivalent: complianceRow.inrEquivalent,
       canonicalHash: complianceRow.canonicalHash,
     };
     return {
@@ -739,6 +736,9 @@ export class PaymentService {
       corridorId: decision.corridorId,
       outcome: decision.outcome,
       reasons: [...decision.reasons],
+      appliedRules: [...decision.appliedRules],
+      citations: [...decision.citations],
+      inrEquivalent: decision.inrEquivalent,
       policyVersion: decision.policyVersion,
       rulesVersion: decision.rulesVersion,
       evaluatedAt: decision.evaluatedAt,
@@ -750,6 +750,8 @@ export class PaymentService {
         complianceResultId: decision.id,
         code: document.code,
         satisfied: document.satisfied,
+        reason: document.reason,
+        citation: document.citation,
         documentHashId: null,
       });
     }

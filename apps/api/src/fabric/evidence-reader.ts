@@ -43,6 +43,7 @@ export interface SubmissionCommitment {
   readonly milestoneHash: string;
   readonly fileHash: string;
   readonly subjectRef: string;
+  readonly buyerOrganizationRef: string;
   readonly version: number;
   readonly submittedAt: string;
 }
@@ -74,6 +75,11 @@ export function workEvidenceHash(evidence: WorkEvidence): string {
 
 export function fabricTransactionHash(fabricTxId: string): string {
   return sha256Text(fabricTxId);
+}
+
+/** Opaque buyer organization reference shared with the Fabric chaincode. */
+export function buyerOrganizationRef(organizationId: string): string {
+  return `buyer:${sha256Text(`optiwork.fabric.buyer-organization-ref.v1\0${organizationId}`).slice(7)}`;
 }
 
 function key(dealId: string, milestoneId: string): string {

@@ -8,7 +8,12 @@
  * commit to the exact decision that permitted it.
  */
 
-import type { ComplianceOutcome, CorridorPolicy, VerifiableCredential } from '@optiwork/contracts';
+import type {
+  ComplianceDecision as ContractComplianceDecision,
+  ComplianceOutcome,
+  CorridorPolicy,
+  VerifiableCredential,
+} from '@optiwork/contracts';
 import { canonicalHash } from '../canonical.js';
 import { minorOf, type Money } from '../money.js';
 import { bookIdFor } from '../corridor/service.js';
@@ -46,22 +51,10 @@ export interface RequiredDocumentDecision {
   readonly citation: RuleCitation;
 }
 
-export interface ComplianceDecision {
-  readonly id: string;
-  readonly corridorId: string;
-  readonly bookId: string;
-  readonly outcome: ComplianceOutcome;
-  readonly reasons: readonly string[];
-  readonly requiredDocuments: readonly RequiredDocumentDecision[];
-  readonly appliedRules: readonly string[];
-  readonly citations: readonly RuleCitation[];
-  readonly policyVersion: string;
-  readonly rulesVersion: string;
-  readonly evaluatedAt: string;
-  readonly canonicalHash: string;
-}
+export type ComplianceDecision = ContractComplianceDecision;
 
 const SEVERITY: Readonly<Record<ComplianceOutcome, number>> = { PASSED: 0, MANUAL_REVIEW: 1, BLOCKED: 2 };
+const compareCodePoints = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
 
 function worst(left: ComplianceOutcome, right: ComplianceOutcome): ComplianceOutcome {
   return SEVERITY[right] > SEVERITY[left] ? right : left;
@@ -139,7 +132,7 @@ export function evaluate(input: ComplianceInput): ComplianceDecision {
     }
   }
 
-  const requiredDocuments = [...required.values()].sort((left, right) => left.code.localeCompare(right.code));
+  const requiredDocuments = [...required.values()].sort((left, right) => compareCodePoints(left.code, right.code));
   const missing = requiredDocuments.filter((document) => !document.satisfied).map((document) => document.code);
   if (missing.length > 0) {
     outcome = worst(outcome, 'MANUAL_REVIEW');
@@ -149,6 +142,7 @@ export function evaluate(input: ComplianceInput): ComplianceDecision {
     reasons.push(`All ${RULES_VERSION} corridor, credential, document and value rules passed.`);
   }
 
+  const committedCitations = dedupeCitations(citations);
   const unsigned = {
     id: input.id,
     corridorId: input.policy.id,
@@ -156,7 +150,8 @@ export function evaluate(input: ComplianceInput): ComplianceDecision {
     outcome,
     reasons,
     requiredDocuments,
-    appliedRules: [...new Set(appliedRules)].sort(),
+    appliedRules: [...new Set(appliedRules)].sort(compareCodePoints),
+    citations: committedCitations,
     policyVersion: input.policy.sourceVersion,
     rulesVersion: RULES_VERSION,
     evaluatedAt: input.evaluatedAt.toISOString(),
@@ -165,7 +160,6 @@ export function evaluate(input: ComplianceInput): ComplianceDecision {
 
   return {
     ...unsigned,
-    citations: dedupeCitations(citations),
     canonicalHash: canonicalHash(unsigned),
   };
 }

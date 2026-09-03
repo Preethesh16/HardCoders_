@@ -3,7 +3,8 @@ import { z } from "zod";
 import { sha256 } from "../canonical.js";
 import type { ExecutorConfig } from "../config.js";
 import { forbidden, unavailable } from "../errors.js";
-import { escrowBindingSchema, type CommandContext, type PermitClaims } from "../types.js";
+import { workEvidenceSchema } from "./fabric-evidence-reader.js";
+import { type CommandContext, type PermitClaims } from "../types.js";
 
 const envelopeSchema = z.object({
   success: z.literal(true),
@@ -95,75 +96,36 @@ export class HttpAuthoritativeFabricReader implements AuthoritativeFabricReader 
   }
 
   async verifyCurrent(claims: PermitClaims, command: CommandContext): Promise<void> {
-    const dealId = command.action === "create"
-      ? z.object({ dealId: z.string() }).parse(command.body).dealId
-      : decodeURIComponent(command.path.split("/")[2] ?? "");
-    const expectedPrefix = `/ledger/deals/${encodeURIComponent(dealId)}/`;
+    if (claims.action !== "release") {
+      if (claims.authoritativeReads.length !== 0) {
+        throw forbidden("A non-release permit cannot claim mutable Fabric payment state.");
+      }
+      return;
+    }
     const values = new Map<string, unknown>();
     for (const read of claims.authoritativeReads) {
-      if (!read.path.startsWith(expectedPrefix) || read.path.includes("..") || read.path.includes("//")) {
+      if (read.path.includes("..") || read.path.includes("//")) {
         throw forbidden("The permit contains an unauthorized Fabric read path.");
       }
       const value = await this.read(read.path);
       if (sha256(value) !== read.dataHash) throw forbidden("Fabric state changed after the permit was issued.");
       values.set(read.path, value);
     }
-    if (claims.action === "release") this.verifyRelease(claims, values);
+    this.verifyRelease(claims, values);
   }
 
   private verifyRelease(claims: Extract<PermitClaims, { action: "release" }>, values: Map<string, unknown>): void {
     const release = claims.releaseAuthorization;
-    const base = `/ledger/deals/${encodeURIComponent(release.escrowBinding.dealId)}`
-      + `/milestones/${encodeURIComponent(release.milestoneId)}`
-      + `/payment-intents/${encodeURIComponent(release.intentId)}`;
-    if (values.size !== 3 || !values.has(base) || !values.has(`${base}/binding`) || !values.has(`${base}/fence`)) {
-      throw forbidden("A release permit must authorize exact public, private, and fence Fabric re-reads.");
+    const path = `/v1/evidence/${encodeURIComponent(release.evidenceId)}/projection`;
+    if (values.size !== 1 || !values.has(path)) {
+      throw forbidden("A release permit must authorize exactly one approved-evidence Fabric re-read.");
     }
-    const intent = intentSchema.safeParse(values.get(base));
-    const bindingView = privateBindingSchema.safeParse(values.get(`${base}/binding`));
-    const fenceView = fenceCommitmentSchema.safeParse(values.get(`${base}/fence`));
-    if (!intent.success || !bindingView.success || !fenceView.success) throw forbidden("The Fabric release state is malformed.");
-    const publicIntent = intent.data;
-    const privateView = bindingView.data;
-    const fence = fenceView.data;
-    const escrow = escrowBindingSchema.parse(release.escrowBinding);
-    if (publicIntent.status !== "CLAIMED"
-      || publicIntent.intentId !== release.intentId
-      || publicIntent.dealId !== escrow.dealId
-      || publicIntent.milestoneId !== release.milestoneId
-      || publicIntent.bindingHash !== release.bindingHash
-      || publicIntent.fenceGeneration !== release.fenceGeneration
-      || publicIntent.leaseExpiresAt !== release.leaseExpiresAt
-      || publicIntent.lastFabricTransactionId !== release.fabricClaimTransactionId
-      || privateView.status !== "CLAIMED"
-      || privateView.bindingHash !== release.bindingHash
-      || privateView.fenceGeneration !== release.fenceGeneration
-      || privateView.leaseExpiresAt !== release.leaseExpiresAt
-      || fence.fencingTokenHash !== release.authorizationCommitment
-      || fence.dealId !== escrow.dealId
-      || fence.milestoneId !== release.milestoneId
-      || fence.intentId !== release.intentId
-      || fence.bindingHash !== release.bindingHash
-      || fence.fenceGeneration !== release.fenceGeneration
-      || fence.leaseExpiresAt !== release.leaseExpiresAt
-      || fence.lastFabricTransactionId !== release.fabricClaimTransactionId) {
-      throw forbidden("The current Fabric release lease no longer matches the signed permit.");
-    }
-    const fabric = privateView.binding;
-    if (fabric.intentId !== release.intentId
-      || fabric.dealId !== escrow.dealId
-      || fabric.milestoneId !== release.milestoneId
-      || fabric.agreementHash !== escrow.agreementHash
-      || fabric.escrowNetwork !== escrow.network
-      || fabric.escrowGenesisHash !== escrow.genesisHash
-      || fabric.escrowApplicationId !== escrow.applicationId
-      || fabric.originProviderAddress !== escrow.originProviderAddress
-      || fabric.destinationProviderAddress !== escrow.destinationProviderAddress
-      || fabric.assetId !== String(escrow.assetId)
-      || fabric.amount.amountMinor !== release.amountMinor
-      || fabric.amount.currency !== escrow.amount.currency
-      || fabric.amount.scale !== escrow.amount.scale) {
-      throw forbidden("The private Fabric binding does not match the payout beneficiary and accounting target.");
+    const evidence = workEvidenceSchema.safeParse(values.get(path));
+    if (!evidence.success || evidence.data.buyerDecision !== "APPROVED"
+      || evidence.data.evidenceId !== release.evidenceId
+      || evidence.data.fabricTxId !== release.fabricClaimTransactionId
+      || sha256(evidence.data) !== release.releaseBinding.workEvidenceHash) {
+      throw forbidden("The approved Fabric evidence no longer matches the signed release.");
     }
   }
 

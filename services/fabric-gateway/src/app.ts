@@ -16,16 +16,18 @@ import { PostgresIdempotencyStore } from './idempotency-postgres.js';
 import { FabricConnectionManager } from './ledger/fabric-connection.js';
 import { FabricEvidenceLedger } from './ledger/fabric-ledger.js';
 import { MemoryEvidenceLedger } from './ledger/memory-ledger.js';
-import { ReleasePermitIssuer } from './permit.js';
+import { projectWorkEvidence, ReleasePermitIssuer } from './permit.js';
 import {
   DecideEvidenceBodySchema,
   EvidenceParamsSchema,
+  GenericPermitBodySchema,
   MutationHeadersSchema,
   QueryHeadersSchema,
   ReleasePermitBodySchema,
   SubmitEvidenceBodySchema,
   type DecideEvidenceBody,
   type EvidenceParams,
+  type GenericPermitBody,
   type MutationHeaders,
   type QueryHeaders,
   type ReleasePermitBody,
@@ -167,6 +169,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     return sendSuccess(reply, 200, { data: await ledger.get(actor, request.params.evidenceId) });
   });
 
+  app.get<{ Headers: QueryHeaders; Params: EvidenceParams }>('/v1/evidence/:evidenceId/projection', {
+    schema: { headers: QueryHeadersSchema, params: EvidenceParamsSchema },
+  }, async (request, reply) => {
+    const actor = await actorResolver.resolve(request);
+    requirePayments(actor);
+    return sendSuccess(reply, 200, projectWorkEvidence(await ledger.get(actor, request.params.evidenceId)));
+  });
+
   app.get<{ Headers: QueryHeaders; Params: EvidenceParams }>('/v1/evidence/:evidenceId/history', {
     schema: { headers: QueryHeadersSchema, params: EvidenceParamsSchema },
   }, async (request, reply) => {
@@ -203,6 +213,18 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       return sendSuccess(reply, 201, result);
     },
   );
+
+  app.post<{ Headers: MutationHeaders; Body: GenericPermitBody }>('/v1/command-permits', {
+    schema: { headers: MutationHeadersSchema, body: GenericPermitBodySchema },
+  }, async (request, reply) => {
+    const actor = await actorResolver.resolve(request);
+    requirePayments(actor);
+    const result = await executeIdempotent(idempotency, request, actor, async () =>
+      permitIssuer.issueCommand(request.body), {
+      resultTtlMs: (permit, completedAt) => Math.max(1, Date.parse(permit.expiresAt) - completedAt),
+    });
+    return sendSuccess(reply, 201, result);
+  });
 
   app.setNotFoundHandler(async () => {
     throw new AppError('RESOURCE_NOT_FOUND');

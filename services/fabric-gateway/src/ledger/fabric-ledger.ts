@@ -1,5 +1,5 @@
 import { TextDecoder } from 'node:util';
-import { canonicalHash, opaqueSellerIdentityRef } from '../canonical.js';
+import { hashParts, opaqueBuyerOrganizationRef, opaqueSellerIdentityRef } from '../canonical.js';
 import { AppError, asAppError } from '../errors.js';
 import type {
   AuthenticatedActor,
@@ -53,6 +53,7 @@ export function normalizeEvidence(value: unknown): LedgerWorkEvidence {
     milestoneHash: requiredString(record, 'milestoneHash', HASH),
     fileHash: requiredString(record, 'fileHash', HASH),
     sellerIdentityRef: requiredString(record, 'sellerIdentityRef', ID),
+    buyerOrganizationRef: requiredString(record, 'buyerOrganizationRef', /^buyer:[a-f0-9]{64}$/u),
     version: version as number,
     submittedAt: requiredString(record, 'submittedAt'),
     buyerDecision: buyerDecision as LedgerWorkEvidence['buyerDecision'],
@@ -98,6 +99,15 @@ function requireBuyer(actor: AuthenticatedActor): void {
   if (actor.role !== 'company_member') throw new AppError('FORBIDDEN');
 }
 
+function authorizeRead(actor: AuthenticatedActor, evidence: LedgerWorkEvidence): void {
+  if (['payments_service', 'audit_service', 'platform_admin'].includes(actor.role)) return;
+  if ((actor.role === 'freelancer' || actor.role === 'supplier')
+    && opaqueSellerIdentityRef(actor) === evidence.sellerIdentityRef) return;
+  if (actor.role === 'company_member'
+    && opaqueBuyerOrganizationRef(actor.organizationId) === evidence.buyerOrganizationRef) return;
+  throw new AppError('FORBIDDEN');
+}
+
 export interface FabricEvidenceLedgerOptions {
   readonly provider: FabricContractProvider;
   readonly channelName: string;
@@ -134,6 +144,7 @@ export class FabricEvidenceLedger implements EvidenceLedger {
       input.milestoneHash,
       input.fileHash,
       opaqueSellerIdentityRef(actor),
+      input.buyerOrganizationRef,
       String(input.version),
       metadata.ledgerIdempotencyKey,
     ], metadata.ledgerIdempotencyKey);
@@ -146,40 +157,44 @@ export class FabricEvidenceLedger implements EvidenceLedger {
   ): Promise<LedgerWorkEvidence> {
     requireBuyer(actor);
     const contract = await this.#provider.getContract('buyer');
-    const decisionHash = canonicalHash({
-      schemaVersion: '1.0',
-      evidenceId: input.evidenceId,
-      expectedFileHash: input.expectedFileHash,
-      expectedVersion: input.expectedVersion,
-      decision: input.decision,
-      buyerIdentityRef: canonicalHash({ organizationId: actor.organizationId, subject: actor.subject }),
-    });
+    const buyerOrganizationRef = opaqueBuyerOrganizationRef(actor.organizationId);
+    const decisionHash = hashParts(
+      'optiwork.fabric.buyer-decision.v1', input.evidenceId, input.expectedFileHash,
+      String(input.expectedVersion), input.decision, buyerOrganizationRef,
+    );
     return this.#submit(contract, 'decide', 'DecideWorkEvidence', [
       input.evidenceId,
       input.decision,
       input.expectedFileHash,
       String(input.expectedVersion),
+      buyerOrganizationRef,
       decisionHash,
       metadata.ledgerIdempotencyKey,
     ], metadata.ledgerIdempotencyKey);
   }
 
-  public async get(_actor: AuthenticatedActor, evidenceId: string): Promise<LedgerWorkEvidence> {
+  public async get(actor: AuthenticatedActor, evidenceId: string): Promise<LedgerWorkEvidence> {
     try {
       const contract = await this.#provider.getContract('reader');
-      return normalizeEvidence(decode(await contract.evaluate('GetWorkEvidence', { arguments: [evidenceId] })));
+      const evidence = normalizeEvidence(decode(await contract.evaluate('GetWorkEvidence', { arguments: [evidenceId] })));
+      authorizeRead(actor, evidence);
+      return evidence;
     } catch (error) {
       throw asAppError(error);
     }
   }
 
   public async history(
-    _actor: AuthenticatedActor,
+    actor: AuthenticatedActor,
     evidenceId: string,
   ): Promise<readonly WorkEvidenceHistoryEntry[]> {
     try {
       const contract = await this.#provider.getContract('reader');
-      return normalizeHistory(decode(await contract.evaluate('GetWorkEvidenceHistory', { arguments: [evidenceId] })));
+      const history = normalizeHistory(decode(await contract.evaluate('GetWorkEvidenceHistory', { arguments: [evidenceId] })));
+      const latest = history.at(-1)?.value;
+      if (latest === undefined) throw new AppError('LEDGER_UNAVAILABLE');
+      authorizeRead(actor, latest);
+      return history;
     } catch (error) {
       throw asAppError(error);
     }
