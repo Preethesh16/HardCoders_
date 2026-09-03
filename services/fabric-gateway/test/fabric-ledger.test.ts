@@ -48,6 +48,19 @@ function metadata() {
 }
 
 describe('real Fabric adapter safety', () => {
+  it('normalizes Fabric-required empty decision fields on pending evidence', async () => {
+    const pendingOnChain = { ...evidence, buyerDecisionHash: '', decidedAt: '' };
+    const contract: FabricContractLike = {
+      submitAsync: vi.fn(),
+      evaluate: vi.fn(async () => encoder.encode(JSON.stringify(pendingOnChain))),
+    };
+    const ledger = new FabricEvidenceLedger({
+      provider: provider(contract), channelName: 'channel', chaincodeName: 'chaincode',
+    });
+    await expect(ledger.get({ ...actor, role: 'platform_admin', roles: ['platform_admin'] }, evidence.evidenceId))
+      .resolves.toEqual(evidence);
+  });
+
   it('retries commit status on the same submitted transaction without rebroadcasting', async () => {
     let statusReads = 0;
     const submitted: SubmittedTransactionLike = {

@@ -1,21 +1,19 @@
 FROM node:24.19.0-alpine AS build
-
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
-WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
+WORKDIR /workspace
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.base.json ./
+COPY services/algorand-executor/package.json services/algorand-executor/
 RUN pnpm install --frozen-lockfile
-COPY tsconfig.json tsconfig.build.json ./
-COPY src ./src
-RUN pnpm build && pnpm prune --prod
+COPY services/algorand-executor services/algorand-executor
+RUN pnpm --filter @optiwork/algorand-executor build \
+ && pnpm deploy --legacy --filter @optiwork/algorand-executor --prod /app
 
 FROM node:24.19.0-alpine AS runtime
-
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
-COPY --from=build --chown=node:node /app/dist ./dist
-COPY --chown=node:node package.json ./package.json
-COPY --chown=node:node migrations ./migrations
+COPY --from=build --chown=node:node /app ./
+COPY --from=build --chown=node:node /workspace/services/algorand-executor/migrations ./migrations
 USER node
 EXPOSE 4301
 CMD ["node", "dist/server.js"]

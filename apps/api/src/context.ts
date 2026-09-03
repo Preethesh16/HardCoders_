@@ -13,7 +13,7 @@ import { MemoryDataStore, PostgresDataStore, type DataStore } from './db/store.j
 import { DemoTokenVerifier, OidcTokenVerifier, type TokenVerifier } from './auth/authorization.js';
 import { createObjectStore, type ObjectStore } from './storage/object-store.js';
 import { createAiAdapter, type AiAdapter } from './ai/adapter.js';
-import { MockFabricEvidenceReader, type FabricEvidenceReader } from './fabric/evidence-reader.js';
+import { GatewayFabricEvidenceReader, MockFabricEvidenceReader, type FabricEvidenceReader } from './fabric/evidence-reader.js';
 import {
   HttpEscrowExecutor,
   HttpFabricPermitProvider,
@@ -91,7 +91,16 @@ export function createContext(config: ApiConfig, overrides: ContextOverrides = {
   const rates = overrides.rates
     ?? (config.fx.mode === 'frankfurter' ? new FrankfurterRateSource(config.fx.baseUrl) : new FixtureRateSource());
   const fabric = overrides.fabric
-    ?? new MockFabricEvidenceReader(config.fabric.evidenceFixturePath);
+    ?? (config.fabric.mode === 'gateway'
+      ? new GatewayFabricEvidenceReader(
+        config.fabric.gatewayUrl!,
+        {
+          mode: config.fabric.gatewayAuthMode,
+          ...(config.fabric.gatewayToken === undefined ? {} : { bearerToken: config.fabric.gatewayToken }),
+        },
+        config.fabric.gatewayTimeoutMs,
+      )
+      : new MockFabricEvidenceReader(config.fabric.evidenceFixturePath));
 
   return {
     config,

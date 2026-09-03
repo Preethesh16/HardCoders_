@@ -9,6 +9,8 @@ ALTER TABLE algorand_executor_commands
 -- signed permit claims. Only an unescaped canonical deal segment can be
 -- recovered without guessing. Encoded/absent paths fail below and require an
 -- operator-reviewed rebuild or backfill.
+-- Legacy one-time backfill only. Current permits use /v1/evidence/:id/projection
+-- and new command rows persist deal_id explicitly before this constraint runs.
 UPDATE algorand_executor_commands
 SET deal_id = substring(
   permit_claims #>> '{authoritativeReads,0,path}'

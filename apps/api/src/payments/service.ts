@@ -36,7 +36,7 @@ import {
 import type { Select } from '../db/store.js';
 import { requireOwnership, requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import { bookIdFor, resolve } from '../corridor/service.js';
-import { evaluate, type ComplianceDecision } from '../compliance/engine.js';
+import { assertComplianceDecision, evaluate, type ComplianceDecision } from '../compliance/engine.js';
 import { buildQuote, assertQuoteCurrent, SETTLEMENT_SCALE, totalFeesMinor, type FxQuoteRecord } from '../fx/quote.js';
 import { convertMoney, money, parseRate, type Money } from '../money.js';
 import { providersForBook, providerCapabilitiesSatisfied, type CorridorProviders } from './providers.js';
@@ -100,7 +100,7 @@ export class PaymentService {
     const { origin, destination } = await this.parties(contract.buyerOrganizationId, contract.providerOrganizationId);
     const corridor = resolve(origin.country, destination.country);
     const bookId = corridor.bookId;
-    const providers = providersForBook(bookId);
+    const providers = this.providers(bookId);
     const capabilities = providerCapabilitiesSatisfied(providers, corridor.policy.requiredProviderCapabilities);
     if (!capabilities.satisfied) {
       throw unprocessable('No configured provider holds the capabilities this corridor requires.', {
@@ -200,7 +200,7 @@ export class PaymentService {
     if (compliance.outcome !== 'PASSED') {
       throw conflict('Funding requires a passed compliance decision.');
     }
-    const providers = providersForBook(payment.bookId);
+    const providers = this.providers(payment.bookId);
 
     const accounts = await this.accounts(payment, contract, providers, quote);
     // 1. The buyer's funding currency leaves their book.
@@ -320,7 +320,7 @@ export class PaymentService {
     if (!approved?.fabricTxId) {
       throw conflict('A release needs a Fabric-recorded buyer approval for the current work version.');
     }
-    const evidence = await this.context.fabric.read(contract.id, contract.milestoneId);
+    const evidence = await this.context.fabric.read(approved.evidenceId);
     if (!evidence || evidence.buyerDecision !== 'APPROVED') {
       throw conflict('Fabric does not currently hold an approved version for this milestone.');
     }
@@ -409,7 +409,7 @@ export class PaymentService {
 
     // The destination provider converts USD to the payout currency and credits
     // the beneficiary's simulated wallet.
-    const providers = providersForBook(payment.bookId);
+    const providers = this.providers(payment.bookId);
     const accounts = await this.accounts(payment, contract, providers, quote);
     await this.context.ledger.post({
       bookId: payment.bookId,
@@ -487,7 +487,7 @@ export class PaymentService {
         state: refunded.escrow.state,
         updatedAt: this.context.clock.now().toISOString(),
       });
-      const providers = providersForBook(payment.bookId);
+      const providers = this.providers(payment.bookId);
       const accounts = await this.accounts(payment, contract, providers, quote);
       await this.context.ledger.post({
         bookId: payment.bookId,
@@ -635,10 +635,11 @@ export class PaymentService {
       citations: complianceRow.citations,
       policyVersion: complianceRow.policyVersion,
       rulesVersion: complianceRow.rulesVersion,
-      evaluatedAt: complianceRow.evaluatedAt,
+      evaluatedAt: new Date(complianceRow.evaluatedAt).toISOString(),
       inrEquivalent: complianceRow.inrEquivalent,
       canonicalHash: complianceRow.canonicalHash,
     };
+    assertComplianceDecision(compliance);
     return {
       payment,
       quote: quoteRow.quote as unknown as FxQuoteRecord,
@@ -808,23 +809,27 @@ export class PaymentService {
     if (existing) return { row: existing, input: this.toEscrowInput(existing), hash: existing.bindingHash };
 
     const network = this.context.config.algorand.network;
+    const deployment = this.context.config.algorand.deployment;
+    if (this.context.config.algorand.mode === 'executor' && deployment === undefined) {
+      throw new Error('A real Algorand executor requires a deployment manifest.');
+    }
     const input: EscrowBindingInput = {
       dealId: contract.id,
       agreementHash: contract.contractHash,
       originProviderAddress: providers.origin.address,
       destinationProviderAddress: providers.destination.address,
       // LocalNet mints OptiUSD-DEMO; TestNet uses Circle's official USDC ASA.
-      assetId: network === 'testnet' ? 10_458_941 : 1,
+      assetId: deployment?.assetId ?? (network === 'testnet' ? 10_458_941 : 1),
       amount: {
         amountMinor: quote.settlementAmount.amountMinor,
         currency: 'USD',
         scale: SETTLEMENT_SCALE,
       },
       network,
-      genesisHash: network === 'testnet'
+      genesisHash: deployment?.genesisHash ?? (network === 'testnet'
         ? 'SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI='
-        : 'localnet-demo-genesis-hash',
-      applicationId: '1',
+        : 'localnet-demo-genesis-hash'),
+      applicationId: deployment?.applicationId ?? '1',
     };
     const hash = escrowBindingCommitment(input);
     const now = this.context.clock.now().toISOString();
@@ -848,6 +853,14 @@ export class PaymentService {
       updatedAt: now,
     });
     return { row, input, hash };
+  }
+
+  private providers(bookId: string): CorridorProviders {
+    const configured = this.context.config.algorand.deployment?.providers[bookId];
+    return providersForBook(bookId, configured === undefined ? {} : {
+      originAddress: configured.originAddress,
+      destinationAddress: configured.destinationAddress,
+    });
   }
 
   private toEscrowInput(row: Select<typeof escrowBindings>): EscrowBindingInput {

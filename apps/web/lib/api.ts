@@ -115,7 +115,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<ApiOutc
   } catch {
     return {
       ok: false,
-      reason: `The OptiWork API is not reachable at ${API_BASE_URL}. Start it with "pnpm --filter @optiwork/api dev".`,
+      reason: `The Anchor API is not reachable at ${API_BASE_URL}. Start it with "pnpm --filter @optiwork/api dev".`,
     };
   }
 }

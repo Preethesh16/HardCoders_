@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { bookIdFor, listCorridors, resolve } from '../src/corridor/service.js';
 import { assertQuoteCurrent, buildQuote, quoteIsCurrent } from '../src/fx/quote.js';
 import { FixtureRateSource, FrankfurterRateSource } from '../src/fx/rates.js';
-import { evaluate, type CredentialSnapshot } from '../src/compliance/engine.js';
+import { assertComplianceDecision, evaluate, type CredentialSnapshot } from '../src/compliance/engine.js';
 import { RULES_VERSION, thresholdRulesFor } from '../src/compliance/rules.js';
 import { money, parseMajor } from '../src/money.js';
 
@@ -216,7 +216,7 @@ describe('versioned compliance rules', () => {
       ['wrong country', credential({ country: 'DE' })],
     ];
     for (const [label, originCredential] of cases) {
-      const decision = evaluate({ ...base, id: `CMP-${label}`, originCredential });
+      const decision = evaluate({ ...base, id: `CMP-${label.replaceAll(' ', '-')}`, originCredential });
       expect(decision.outcome, label).toBe('BLOCKED');
     }
   });
@@ -234,5 +234,27 @@ describe('versioned compliance rules', () => {
     expect(evaluate(input).canonicalHash).toBe(evaluate(input).canonicalHash);
     expect(evaluate({ ...input, inrEquivalent: money('1000001', 'INR', 2) }).canonicalHash)
       .not.toBe(evaluate(input).canonicalHash);
+  });
+
+  it('enforces the shared rich decision schema at runtime', () => {
+    const decision = evaluate({
+      id: 'CMP-SCHEMA',
+      policy: inward,
+      inrEquivalent: money('1000000', 'INR', 2),
+      originCredential: credential(),
+      destinationCredential: credential({ country: 'IN' }),
+      providedDocuments: ['INVOICE', 'SERVICE_EXPORT_DECLARATION'],
+      evaluatedAt: NOW,
+    });
+
+    expect(() => assertComplianceDecision(decision)).not.toThrow();
+    expect(() => assertComplianceDecision({ ...decision, uncommittedField: true }))
+      .toThrow(/shared runtime contract/u);
+    expect(() => assertComplianceDecision({ ...decision, evaluatedAt: 'not-an-instant' }))
+      .toThrow(/shared runtime contract/u);
+    expect(() => assertComplianceDecision({
+      ...decision,
+      inrEquivalent: money('1000001', 'INR', 2),
+    })).toThrow(/canonical commitment/u);
   });
 });

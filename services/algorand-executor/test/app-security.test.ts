@@ -119,8 +119,8 @@ describe("executor transport boundary", () => {
       idempotencyKey: command.idempotencyKey, commandHash: commandHash(command),
       fabricTransactionId: body.fabricClaimTransactionId,
       authoritativeReads: [{
-        path: "/ledger/deals/DEAL-RECONCILE/milestones/MS-RECONCILE/payment-intents/INTENT-RECONCILE",
-        dataHash: `sha256:${"d".repeat(64)}`,
+        path: `/v1/evidence/${body.evidenceId}/projection`,
+        dataHash: body.releaseBinding.workEvidenceHash,
       }],
       releaseAuthorization: body,
     };

@@ -9,7 +9,6 @@ import {
   createFxQuote,
   createWorkEvidence,
   decideWorkEvidence,
-  evaluateCompliance,
   resolveCorridor,
   signCredential,
   subjectCommitment,
@@ -65,38 +64,6 @@ describe('cross-border domain', () => {
     expect(verifyCredential(signed.value, signed.publicKeyPem, now)).toBe(true);
     expect(verifyCredential({ ...signed.value, country: 'DE' }, signed.publicKeyPem, now)).toBe(false);
     expect(verifyCredential(signed.value, createDemoIssuer().publicKeyPem, now)).toBe(false);
-  });
-
-  it('applies the import due-diligence threshold only to the outward corridor', () => {
-    const indianBuyer = credential('buyer-in', 'IN', 'COMPANY', 'BASIC').value;
-    const ukSupplier = credential('supplier-gb', 'GB', 'SUPPLIER').value;
-    const result = evaluateCompliance({
-      id: 'compliance-001',
-      policy: resolveCorridor('IN', 'GB'),
-      amountInInrMinor: '26000000',
-      originCredential: indianBuyer,
-      destinationCredential: ukSupplier,
-      verifiedCredentialIds: [indianBuyer.id, ukSupplier.id],
-      providedDocuments: ['INVOICE', 'FORM_A2_DEMO', 'TAX_REVIEW_DEMO', 'IMPORT_EVIDENCE'],
-      evaluatedAt: now,
-    });
-    expect(result.outcome).toBe('MANUAL_REVIEW');
-    expect(result.requiredDocuments).toContain('BUYER_DUE_DILIGENCE');
-
-    const company = credential('company-pl', 'PL', 'COMPANY').value;
-    const freelancer = credential('freelancer-in', 'IN', 'FREELANCER').value;
-    const inward = evaluateCompliance({
-      id: 'compliance-002',
-      policy: resolveCorridor('PL', 'IN'),
-      amountInInrMinor: '26000000',
-      originCredential: company,
-      destinationCredential: freelancer,
-      verifiedCredentialIds: [company.id, freelancer.id],
-      providedDocuments: ['INVOICE', 'SERVICE_EXPORT_DECLARATION'],
-      evaluatedAt: now,
-    });
-    expect(inward.outcome).toBe('PASSED');
-    expect(inward.requiredDocuments).not.toContain('BUYER_DUE_DILIGENCE');
   });
 
   it('prevents inward/outward journal netting and conflicting replay', () => {

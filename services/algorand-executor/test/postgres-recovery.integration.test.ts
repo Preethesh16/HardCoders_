@@ -98,6 +98,8 @@ describeWithPostgres("executor PostgreSQL recovery migrations", () => {
         commandHash: hash,
         fabricTransactionId: `FABRIC-PERMIT-${generation}`,
         authoritativeReads: [{
+          // This row models the pre-002 schema. Migration 002 must recover its
+          // deal ID from the legacy permit before enforcing NOT NULL.
           path: `/ledger/deals/${targetDealId}/milestones/${milestoneId}/payment-intents/${intentId}`,
           dataHash: `sha256:${"1".repeat(64)}`,
         }],

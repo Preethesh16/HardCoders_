@@ -48,9 +48,26 @@ export class AppError extends Error {
   }
 }
 
+function errorText(error: unknown): string {
+  if (!(error instanceof Error)) return '';
+
+  const messages = [`${error.name}: ${error.message}`];
+  const details = (error as Error & { details?: unknown }).details;
+  if (Array.isArray(details)) {
+    for (const detail of details) {
+      if (typeof detail === 'object' && detail !== null && 'message' in detail) {
+        const message = (detail as { message?: unknown }).message;
+        if (typeof message === 'string') messages.push(message);
+      }
+    }
+  }
+
+  return messages.join('\n').toLowerCase();
+}
+
 export function asAppError(error: unknown): AppError {
   if (error instanceof AppError) return error;
-  const text = error instanceof Error ? `${error.name}: ${error.message}`.toLowerCase() : '';
+  const text = errorText(error);
   if (text.includes('not found')) return new AppError('RESOURCE_NOT_FOUND');
   if (text.includes('deadline') || text.includes('timeout')) return new AppError('LEDGER_COMMIT_TIMEOUT');
   if (text.includes('authorize') || text.includes('access denied')) return new AppError('FORBIDDEN');

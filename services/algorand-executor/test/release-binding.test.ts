@@ -70,7 +70,10 @@ async function fixture() {
       schemaVersion: "1.0" as const, method: "POST" as const, path: command.path,
       idempotencyKey: command.idempotencyKey, commandHash: commandHash(command),
       fabricTransactionId: release?.fabricClaimTransactionId ?? `FABRIC-${command.idempotencyKey}`,
-      authoritativeReads: [{ path: `/ledger/deals/${DEAL}/algorand-authorization`, dataHash: `sha256:${"a".repeat(64)}` }],
+      authoritativeReads: release ? [{
+        path: `/v1/evidence/${encodeURIComponent(release.evidenceId)}/projection`,
+        dataHash: release.releaseBinding.workEvidenceHash,
+      }] : [],
     };
     return release
       ? { ...base, action: "release" as const, releaseAuthorization: release } as PermitClaims
@@ -227,6 +230,24 @@ describe("approved Fabric evidence re-read", () => {
     const { input, command } = release(escrowBinding, "EV-CHANGED", workEvidenceHash(record));
     evidence.revise(DEAL, MILESTONE, { version: 2, fileHash: `sha256:${"9".repeat(64)}` });
     await expect(run(command, input)).rejects.toThrow(/changed after the release permit was signed/u);
+    expect(chain.prepareCalls.filter(({ action }) => action === "release")).toHaveLength(0);
+  });
+
+  it("refuses provider substitution before signing", async () => {
+    const { chain, evidence, escrowBinding, run } = await fixture();
+    const record = approvedEvidence(FABRIC_TX);
+    evidence.set(DEAL, MILESTONE, record);
+    const substitutedBinding = {
+      ...escrowBinding,
+      destinationProviderAddress: algosdk.generateAccount().addr.toString(),
+    };
+    const { input, command } = release(
+      substitutedBinding,
+      "EV-PROVIDER-SUBSTITUTION",
+      workEvidenceHash(record),
+    );
+
+    await expect(run(command, input)).rejects.toThrow(/binding differs from durable state/u);
     expect(chain.prepareCalls.filter(({ action }) => action === "release")).toHaveLength(0);
   });
 

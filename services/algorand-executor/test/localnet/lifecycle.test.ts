@@ -26,7 +26,7 @@ import {
   type PermitClaims,
   type ReleaseInput,
 } from "../../src/types.js";
-import { releaseInput, seedApprovedEvidence } from "../helpers.js";
+import { approvedEvidence, releaseInput, seedApprovedEvidence } from "../helpers.js";
 
 const ALGOD_URL = "http://127.0.0.1:4001";
 const ALGOD_TOKEN = "a".repeat(64);
@@ -46,8 +46,11 @@ class LocalFabricReader implements AuthoritativeFabricReader {
   async verifyCurrent(claims: PermitClaims, command: CommandContext): Promise<void> {
     this.verifiedCommands += 1;
     if (claims.action !== command.action) throw new Error("Fabric action mismatch.");
-    if (claims.action === "release" && claims.authoritativeReads.length !== 3) {
-      throw new Error("Release did not perform all three authoritative Fabric reads.");
+    if (claims.action === "release" && claims.authoritativeReads.length !== 1) {
+      throw new Error("Release did not perform its single approved-evidence Fabric read.");
+    }
+    if (claims.action !== "release" && claims.authoritativeReads.length !== 0) {
+      throw new Error("A lifecycle permit must not claim mutable Fabric reads.");
     }
     for (const read of claims.authoritativeReads) {
       if (!this.values.has(read.path) || sha256(this.values.get(read.path)) !== read.dataHash) {
@@ -108,12 +111,6 @@ type PermitSigner = {
   sequence: number;
 };
 
-function commandDealId(command: CommandContext): string {
-  if (command.action === "create") return (command.body as { dealId: string }).dealId;
-  if (command.action === "release") return (command.body as ReleaseInput).escrowBinding.dealId;
-  return decodeURIComponent(command.path.split("/")[2] ?? "");
-}
-
 async function signedPermit(
   command: CommandContext,
   reader: LocalFabricReader,
@@ -121,27 +118,13 @@ async function signedPermit(
   options: { jti?: string } = {},
 ): Promise<{ compact: string; paths: string[] }> {
   signer.sequence += 1;
-  const dealId = commandDealId(command);
   const release = command.action === "release" ? command.body as ReleaseInput : undefined;
-  const base = `/ledger/deals/${encodeURIComponent(dealId)}`;
-  const paths = release
-    ? [
-        `${base}/milestones/${encodeURIComponent(release.milestoneId)}/payment-intents/${encodeURIComponent(release.intentId)}`,
-        `${base}/milestones/${encodeURIComponent(release.milestoneId)}/payment-intents/${encodeURIComponent(release.intentId)}/binding`,
-        `${base}/milestones/${encodeURIComponent(release.milestoneId)}/payment-intents/${encodeURIComponent(release.intentId)}/fence`,
-      ]
-    : [`${base}/algorand-authorization`];
-  const authoritativeReads = paths.map((path, index) => {
-    const value = {
-      schemaVersion: "1.0",
-      dealId,
-      action: command.action,
-      permitSequence: signer.sequence,
-      readIndex: index,
-    };
+  const paths = release ? [`/v1/evidence/${encodeURIComponent(release.evidenceId)}/projection`] : [];
+  const authoritativeReads = release ? paths.map((path) => {
+    const value = approvedEvidence(release.fabricClaimTransactionId, { evidenceId: release.evidenceId });
     reader.set(path, value);
     return { path, dataHash: sha256(value) };
-  });
+  }) : [];
   const now = Math.floor(Date.now() / 1_000);
   const fabricTransactionId = release?.fabricClaimTransactionId
     ?? `FABRIC-${command.action.toUpperCase()}-${signer.sequence}`;
@@ -215,9 +198,9 @@ describe("real AlgoKit LocalNet escrow", () => {
       sender: originTreasury.addr,
       signer: originTreasurySigner,
       total: 1_000_000n,
-      decimals: 0,
-      assetName: "Anchor LocalNet Settlement",
-      unitName: "ANCHOR",
+      decimals: 6,
+      assetName: "OptiUSD-DEMO",
+      unitName: "OPTUSD",
       maxRoundsToWaitForConfirmation: 20,
       suppressLog: true,
     });
@@ -300,8 +283,10 @@ describe("real AlgoKit LocalNet escrow", () => {
       ALGORAND_ASSET_ID: assetId.toString(),
       ALGORAND_SIGNER_ADDRESS: executor.addr.toString(),
       ALGORAND_SIGNER_PRIVATE_KEY_BASE64: Buffer.from(executor.sk).toString("base64"),
-      ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: originTreasury.addr.toString(),
-      ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: Buffer.from(originTreasury.sk).toString("base64"),
+      ALGORAND_ORIGIN_PROVIDER_TREASURIES_JSON: JSON.stringify([{
+        address: originTreasury.addr.toString(),
+        privateKeyBase64: Buffer.from(originTreasury.sk).toString("base64"),
+      }]),
       ALGORAND_MAX_VALIDITY_ROUNDS: "100",
     });
     const reader = new LocalFabricReader();
@@ -335,7 +320,7 @@ describe("real AlgoKit LocalNet escrow", () => {
         originProviderAddress: originTreasury.addr.toString(),
         destinationProviderAddress: destinationProvider.addr.toString(),
         assetId: Number(assetId),
-        amount: { amountMinor: "10000", currency: "USD", scale: 2 },
+        amount: { amountMinor: "10000", currency: "USD", scale: 6 },
       },
     };
 
@@ -351,12 +336,6 @@ describe("real AlgoKit LocalNet escrow", () => {
     expect(createReplay.createTxId).toBe(createdA.createTxId);
     await run({ action: "fund", method: "POST", path: `/escrows/${dealA}/fund`, idempotencyKey: "LOCALNET-FUND-A", body: null });
 
-    const stalePause: CommandContext = {
-      action: "pause", method: "POST", path: `/escrows/${dealA}/pause`, idempotencyKey: "LOCALNET-STALE-PAUSE", body: null,
-    };
-    const stalePermit = await signedPermit(stalePause, reader, permitSigner);
-    reader.tamper(stalePermit.paths[0]!);
-    await expect(service.mutate(stalePause, stalePermit.compact)).rejects.toThrow(/Fabric state changed/u);
     await run({ action: "pause", method: "POST", path: `/escrows/${dealA}/pause`, idempotencyKey: "LOCALNET-PAUSE-A", body: null });
     await run({ action: "resume", method: "POST", path: `/escrows/${dealA}/resume`, idempotencyKey: "LOCALNET-RESUME-A", body: null });
 
@@ -373,7 +352,7 @@ describe("real AlgoKit LocalNet escrow", () => {
       fabricClaimTransactionId: "FABRIC-LOCALNET-CLAIM-001",
       idempotencyKey: "LOCALNET-RELEASE-A",
       workEvidenceHash: seedApprovedEvidence(
-        evidenceReader, dealA, "MS-LOCALNET-001", "FABRIC-LOCALNET-CLAIM-001",
+        evidenceReader, dealA, "MS-LOCALNET-001", "FABRIC-LOCALNET-CLAIM-001", { evidenceId: "EVIDENCE-TEST-001" },
       ),
     });
     const releaseCommand: CommandContext = {
@@ -383,6 +362,9 @@ describe("real AlgoKit LocalNet escrow", () => {
       idempotencyKey: "LOCALNET-RELEASE-A",
       body: releaseA,
     };
+    const stalePermit = await signedPermit(releaseCommand, reader, permitSigner);
+    reader.tamper(stalePermit.paths[0]!);
+    await expect(service.mutate(releaseCommand, stalePermit.compact)).rejects.toThrow(/Fabric state changed/u);
     const released = await run(releaseCommand) as { escrow: Escrow; transactionId: string; replay: boolean };
     expect(released).toMatchObject({ replay: false, escrow: { state: "COMPLETED", lockedMinor: "0", releasedMinor: "10000" } });
     const releaseReplay = await service.mutate(
@@ -410,7 +392,7 @@ describe("real AlgoKit LocalNet escrow", () => {
         originProviderAddress: originTreasury.addr.toString(),
         destinationProviderAddress: destinationProvider.addr.toString(),
         assetId: Number(assetId),
-        amount: { amountMinor: "7000", currency: "USD", scale: 2 },
+        amount: { amountMinor: "7000", currency: "USD", scale: 6 },
       },
     });
     await run({ action: "fund", method: "POST", path: `/escrows/${dealB}/fund`, idempotencyKey: "LOCALNET-FUND-B", body: null });
@@ -446,7 +428,7 @@ describe("real AlgoKit LocalNet escrow", () => {
         originProviderAddress: originTreasury.addr.toString(),
         destinationProviderAddress: destinationProvider.addr.toString(),
         assetId: Number(assetId),
-        amount: { amountMinor: "5000", currency: "USD", scale: 2 },
+        amount: { amountMinor: "5000", currency: "USD", scale: 6 },
       },
     });
     await run({ action: "fund", method: "POST", path: `/escrows/${dealC}/fund`, idempotencyKey: "LOCALNET-FUND-C", body: null });
@@ -473,7 +455,7 @@ describe("real AlgoKit LocalNet escrow", () => {
       fabricClaimTransactionId: "FABRIC-LOCALNET-CLAIM-RECOVERY-N",
       idempotencyKey: "LOCALNET-RELEASE-RECOVERY-N",
       workEvidenceHash: seedApprovedEvidence(
-        evidenceReader, dealC, "MS-LOCALNET-RECOVERY", "FABRIC-LOCALNET-CLAIM-RECOVERY-N",
+        evidenceReader, dealC, "MS-LOCALNET-RECOVERY", "FABRIC-LOCALNET-CLAIM-RECOVERY-N", { evidenceId: "EVIDENCE-TEST-001" },
       ),
     });
     const releaseCommandN: CommandContext = {
@@ -505,7 +487,18 @@ describe("real AlgoKit LocalNet escrow", () => {
       });
     }
 
-    const expiredN = await recoveryService.reconcile(releaseCommandN);
+    // Recreate the service after signed bytes are durable. Reconciliation must
+    // resume from those exact bytes without a new permit or a second signing
+    // operation, matching a real executor process restart.
+    const restartedRecoveryService = new ExecutorService(
+      shortValidityConfig,
+      store,
+      new Ed25519FabricPermitVerifier(shortValidityConfig),
+      reader,
+      new RealAlgorandChain(shortValidityConfig),
+      evidenceReader,
+    );
+    const expiredN = await restartedRecoveryService.reconcile(releaseCommandN);
     expect(expiredN).toMatchObject({
       status: "EXPIRED",
       transactionId: preparedN!.prepared!.transactionId,
@@ -535,7 +528,7 @@ describe("real AlgoKit LocalNet escrow", () => {
       fabricClaimTransactionId: "FABRIC-LOCALNET-CLAIM-RECOVERY-N-PLUS-ONE",
       idempotencyKey: "LOCALNET-RELEASE-RECOVERY-N-PLUS-ONE",
       workEvidenceHash: seedApprovedEvidence(
-        evidenceReader, dealC, "MS-LOCALNET-RECOVERY", "FABRIC-LOCALNET-CLAIM-RECOVERY-N-PLUS-ONE",
+        evidenceReader, dealC, "MS-LOCALNET-RECOVERY", "FABRIC-LOCALNET-CLAIM-RECOVERY-N-PLUS-ONE", { evidenceId: "EVIDENCE-TEST-001" },
       ),
     });
     const releaseCommandNPlusOne: CommandContext = {

@@ -14,6 +14,9 @@ import type {
   CorridorPolicy,
   VerifiableCredential,
 } from '@optiwork/contracts';
+import { ComplianceDecisionSchema } from '@optiwork/contracts';
+import { FormatRegistry } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 import { canonicalHash } from '../canonical.js';
 import { minorOf, type Money } from '../money.js';
 import { bookIdFor } from '../corridor/service.js';
@@ -52,6 +55,38 @@ export interface RequiredDocumentDecision {
 }
 
 export type ComplianceDecision = ContractComplianceDecision;
+
+if (!FormatRegistry.Has('date-time')) {
+  FormatRegistry.Set('date-time', (value) => {
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+  });
+}
+if (!FormatRegistry.Has('uri')) {
+  FormatRegistry.Set('uri', (value) => {
+    try {
+      const uri = new URL(value);
+      return uri.protocol === 'https:' || uri.protocol === 'http:';
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Enforces the shared boundary for newly evaluated and database-hydrated decisions. */
+export function assertComplianceDecision(value: unknown): asserts value is ComplianceDecision {
+  if (!Value.Check(ComplianceDecisionSchema, value)) {
+    const violations = [...Value.Errors(ComplianceDecisionSchema, value)]
+      .slice(0, 3)
+      .map((error) => `${error.path || '/'}: ${error.message}`)
+      .join('; ');
+    throw new Error(`Compliance decision violated the shared runtime contract: ${violations}.`);
+  }
+  const { canonicalHash: expectedHash, ...committedDecision } = value;
+  if (canonicalHash(committedDecision) !== expectedHash) {
+    throw new Error('Compliance decision does not match its canonical commitment.');
+  }
+}
 
 const SEVERITY: Readonly<Record<ComplianceOutcome, number>> = { PASSED: 0, MANUAL_REVIEW: 1, BLOCKED: 2 };
 const compareCodePoints = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
@@ -158,10 +193,12 @@ export function evaluate(input: ComplianceInput): ComplianceDecision {
     inrEquivalent: input.inrEquivalent,
   };
 
-  return {
+  const decision = {
     ...unsigned,
     canonicalHash: canonicalHash(unsigned),
   };
+  assertComplianceDecision(decision);
+  return decision;
 }
 
 function dedupeCitations(citations: readonly RuleCitation[]): RuleCitation[] {

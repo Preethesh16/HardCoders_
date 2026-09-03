@@ -417,6 +417,7 @@ export const uploadedObjects = pgTable('uploaded_objects', {
 export const workSubmissions = pgTable('work_submissions', {
   id: id(),
   contractId: ref('contract_id').notNull(),
+  evidenceId: ref('evidence_id').notNull(),
   version: integer('version').notNull(),
   objectId: ref('object_id').notNull(),
   fileHash: hash('file_hash').notNull(),
@@ -426,7 +427,10 @@ export const workSubmissions = pgTable('work_submissions', {
   buyerDecisionHash: hash('buyer_decision_hash'),
   decidedAt: instant('decided_at'),
   submittedAt: instant('submitted_at').notNull(),
-}, (table) => [uniqueIndex('work_submissions_version_idx').on(table.contractId, table.version)]);
+}, (table) => [
+  uniqueIndex('work_submissions_version_idx').on(table.contractId, table.version),
+  index('work_submissions_evidence_idx').on(table.evidenceId),
+]);
 
 /** The complete, ordered audit narrative shown in every dashboard. */
 export const timelineEvents = pgTable('timeline_events', {

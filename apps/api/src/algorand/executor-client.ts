@@ -393,7 +393,16 @@ export class HttpEscrowExecutor implements EscrowExecutor {
   ) {}
 
   create(binding: EscrowBindingInput, idempotencyKey: string): Promise<CommandOutcome> {
-    return this.#mutate('create', '/escrows', idempotencyKey, binding);
+    // The executor owns and pins the deployment coordinates. Its create
+    // command accepts only the escrow expectation and adds the configured
+    // network, genesis hash and application ID to the returned binding.
+    const {
+      network: _network,
+      genesisHash: _genesisHash,
+      applicationId: _applicationId,
+      ...expectation
+    } = binding;
+    return this.#mutate('create', '/escrows', idempotencyKey, expectation);
   }
   fund(dealId: string, idempotencyKey: string): Promise<CommandOutcome> {
     return this.#mutate('fund', `/escrows/${encodeURIComponent(dealId)}/fund`, idempotencyKey, null);

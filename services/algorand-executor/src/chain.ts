@@ -207,7 +207,7 @@ function assertExpectedInput(input: PrepareInput, config: ExecutorConfig): void 
     && binding.data.genesisHash === config.ALGORAND_GENESIS_HASH
     && binding.data.applicationId === config.ALGORAND_APPLICATION_ID.toString()
     && BigInt(binding.data.assetId) === config.ALGORAND_ASSET_ID
-    && binding.data.originProviderAddress === config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS;
+    && config.originProviderTreasuries.has(binding.data.originProviderAddress);
   const releaseMatches = input.action === "release"
     ? input.release !== undefined
       && releaseInputSchema.safeParse(input.release).success
@@ -223,8 +223,10 @@ export class RealAlgorandChain implements AlgorandChain {
   readonly #algod: algosdk.Algodv2;
   readonly #signer: algosdk.TransactionSigner;
   readonly #account: algosdk.Account;
-  readonly #originTreasurySigner: algosdk.TransactionSigner;
-  readonly #originTreasuryAccount: algosdk.Account;
+  readonly #originTreasuries = new Map<string, {
+    readonly account: algosdk.Account;
+    readonly signer: algosdk.TransactionSigner;
+  }>();
 
   constructor(private readonly config: ExecutorConfig) {
     this.#algod = new algosdk.Algodv2(
@@ -236,18 +238,19 @@ export class RealAlgorandChain implements AlgorandChain {
       sk: config.signerPrivateKey,
     };
     this.#signer = algosdk.makeBasicAccountTransactionSigner(this.#account);
-    this.#originTreasuryAccount = {
-      addr: algosdk.Address.fromString(config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS),
-      sk: config.originProviderTreasuryPrivateKey,
-    };
-    this.#originTreasurySigner = algosdk.makeBasicAccountTransactionSigner(this.#originTreasuryAccount);
+    for (const [address, privateKey] of config.originProviderTreasuries) {
+      const account = { addr: algosdk.Address.fromString(address), sk: privateKey };
+      this.#originTreasuries.set(address, {
+        account,
+        signer: algosdk.makeBasicAccountTransactionSigner(account),
+      });
+    }
   }
 
   async prepare(input: PrepareInput): Promise<PreparedTransaction> {
     assertExpectedInput(input, this.config);
-    if (input.binding.originProviderAddress !== this.config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS) {
-      throw conflict("The escrow originTreasury does not match the configured originTreasury treasury signer.");
-    }
+    const originTreasury = this.#originTreasuries.get(input.binding.originProviderAddress);
+    if (originTreasury === undefined) throw conflict("The escrow origin treasury has no configured signer.");
     if (input.action === "release") {
       if (!input.release || !input.fabricClaimTransactionId
         || input.release.fabricClaimTransactionId !== input.fabricClaimTransactionId) {
@@ -284,13 +287,13 @@ export class RealAlgorandChain implements AlgorandChain {
         break;
       case "fund": {
         const funding = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
-          sender: this.#originTreasuryAccount.addr,
+          sender: originTreasury.account.addr,
           receiver: algosdk.getApplicationAddress(appId),
           amount: BigInt(input.binding.amount.amountMinor),
           assetIndex: this.config.ALGORAND_ASSET_ID,
           suggestedParams: safeParams(params, this.config),
         });
-        methodArgs.push({ txn: funding, signer: this.#originTreasurySigner });
+        methodArgs.push({ txn: funding, signer: originTreasury.signer });
         break;
       }
       case "release": {
@@ -447,11 +450,12 @@ export class RealAlgorandChain implements AlgorandChain {
       const application = appCall?.applicationCall;
       const funding = expected.action === "fund" ? transactions[0] : undefined;
       const fundingFields = funding?.assetTransfer;
+      const originTreasuryAddress = expected.binding.originProviderAddress;
       if (!appCall || !application
         || appCall.type !== algosdk.TransactionType.appl
         || appCall.sender.toString() !== this.config.ALGORAND_SIGNER_ADDRESS
         || !verifyTransactionSignature(signed.at(-1)!, this.config.ALGORAND_SIGNER_ADDRESS)
-        || (funding !== undefined && !verifyTransactionSignature(signed[0]!, this.config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS))) {
+        || (funding !== undefined && !verifyTransactionSignature(signed[0]!, originTreasuryAddress))) {
         throw new Error("transaction signer or type mismatch");
       }
 
@@ -521,7 +525,7 @@ export class RealAlgorandChain implements AlgorandChain {
       if (expected.action === "fund") {
         if (!funding || !fundingFields
           || funding.type !== algosdk.TransactionType.axfer
-          || funding.sender.toString() !== this.config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS
+          || funding.sender.toString() !== originTreasuryAddress
           || fundingFields.assetIndex !== this.config.ALGORAND_ASSET_ID
           || fundingFields.amount !== BigInt(expected.binding.amount.amountMinor)
           || fundingFields.receiver.toString() !== algosdk.getApplicationAddress(this.config.ALGORAND_APPLICATION_ID).toString()
@@ -629,22 +633,30 @@ export class RealAlgorandChain implements AlgorandChain {
 
   async readiness(): Promise<boolean> {
     try {
-      const [params, app, asset, signer, originTreasury, holding, originTreasuryHolding] = await Promise.all([
+      const [params, app, asset, signer, holding, ...originStates] = await Promise.all([
         this.#algod.getTransactionParams().do(),
         this.#algod.getApplicationByID(this.config.ALGORAND_APPLICATION_ID).do(),
         this.#algod.getAssetByID(this.config.ALGORAND_ASSET_ID).do(),
         this.#algod.accountInformation(this.config.ALGORAND_SIGNER_ADDRESS).do(),
-        this.#algod.accountInformation(this.config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS).do(),
         this.#algod.accountAssetInformation(algosdk.getApplicationAddress(this.config.ALGORAND_APPLICATION_ID), this.config.ALGORAND_ASSET_ID).do(),
-        this.#algod.accountAssetInformation(this.config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS, this.config.ALGORAND_ASSET_ID).do(),
+        ...[...this.config.originProviderTreasuries.keys()].flatMap((address) => [
+          this.#algod.accountInformation(address).do(),
+          this.#algod.accountAssetInformation(address, this.config.ALGORAND_ASSET_ID).do(),
+        ]),
       ]);
+      const originsReady = [...this.config.originProviderTreasuries.keys()].every((address, index) => {
+        const account = originStates[index * 2];
+        const assetHolding = originStates[index * 2 + 1];
+        return account !== undefined && assetHolding !== undefined
+          && 'address' in account && account.address.toString() === address
+          && 'assetHolding' in assetHolding && assetHolding.assetHolding?.assetId === this.config.ALGORAND_ASSET_ID;
+      });
       return Buffer.from(params.genesisHash ?? []).toString("base64") === this.config.ALGORAND_GENESIS_HASH
         && app.id === this.config.ALGORAND_APPLICATION_ID
         && asset.index === this.config.ALGORAND_ASSET_ID
         && signer.address.toString() === this.config.ALGORAND_SIGNER_ADDRESS
-        && originTreasury.address.toString() === this.config.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS
         && holding.assetHolding?.assetId === this.config.ALGORAND_ASSET_ID
-        && originTreasuryHolding.assetHolding?.assetId === this.config.ALGORAND_ASSET_ID;
+        && originsReady;
     } catch {
       return false;
     }
