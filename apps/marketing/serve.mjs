@@ -10,6 +10,12 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
+import { stepList, resetRun, runStep } from "./workflow.mjs";
+
+function sendJson(res, status, payload) {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(payload));
+}
 
 const ROOT = new URL(".", import.meta.url).pathname;
 const PORT = Number(process.env.PORT ?? 4175);
@@ -69,6 +75,22 @@ const server = createServer(async (req, res) => {
       headers: { "idempotency-key": "optiwork-demo-walkthrough-0001" },
       body: JSON.stringify({})
     });
+    return;
+  }
+
+  // Step-by-step workflow driver (see workflow.mjs).
+  if (requestPath === "/api/workflow/steps" && req.method === "GET") {
+    sendJson(res, 200, { steps: stepList() });
+    return;
+  }
+  if (requestPath === "/api/workflow/reset" && req.method === "POST") {
+    sendJson(res, 200, resetRun());
+    return;
+  }
+  const stepMatch = /^\/api\/workflow\/step\/(\d+)$/.exec(requestPath);
+  if (stepMatch && req.method === "POST") {
+    const result = await runStep(Number(stepMatch[1]));
+    sendJson(res, result.ok ? 200 : 422, result);
     return;
   }
 

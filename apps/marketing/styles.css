@@ -100,6 +100,35 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
 #portalHome.active{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:18px;align-items:start}.portal-welcome,.portal-stats{grid-column:1/-1}.agent-dex{grid-column:2;grid-row:3;margin:0;border-radius:16px;position:sticky;top:24px}.portal-grid{grid-column:1;grid-row:3;grid-template-columns:1fr}.portal-side{grid-template-columns:1fr 1fr}.agent-dex>header{height:68px}.agent-dex>header strong{font-size:8px}.dex-light{width:44px;height:44px}.dex-body{grid-template-columns:1fr;margin:10px;padding:12px;gap:12px}.dex-display{height:175px}.dex-sprite{width:190px;height:145px}.dex-info{gap:10px}.dex-name h2{font-size:13px}.dex-info>p{font-size:8px}.dex-role-note{padding:9px}.dex-role-note p{font-size:7px}.dex-controls{grid-template-columns:42px 1fr 42px;gap:5px}.dex-controls>button{width:38px;height:38px;font-size:8px}.dex-controls>div{padding:5px 3px}.dex-controls>div button{width:27px;height:28px;font-size:4px}.agent-dex:before{width:31px;height:31px;right:12px;top:14px}.agent-dex>header>span{margin-right:40px;font-size:5px}
 @media(max-width:1150px){#portalHome.active{grid-template-columns:1fr}.agent-dex,.portal-grid{grid-column:1}.agent-dex{grid-row:3;position:static}.portal-grid{grid-row:4}.dex-body{grid-template-columns:260px 1fr}.dex-display{height:230px}}
 @media(max-width:700px){.dex-body{grid-template-columns:1fr}.portal-side{grid-template-columns:1fr}}
+/* WORKFLOW tab: same card language as .portal-stats / .activity-feed, one card per real API step. */
+.workflow-controls{display:flex;gap:10px;align-items:center;flex:none}
+.workflow-controls button{padding:14px 16px;background:var(--acid);color:#07100d;border:3px solid #07100d;box-shadow:4px 4px 0 #07100d;font:6px/1.6 "Press Start 2P",monospace;cursor:pointer;white-space:nowrap}
+.workflow-controls #workflowReset{background:#29473b;color:#cfe3d6}
+.workflow-controls button:hover{transform:translate(2px,2px);box-shadow:2px 2px 0 #07100d}
+.workflow-controls button:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.workflow-status{padding:14px 16px;margin-bottom:16px;background:#0d211b;border:3px solid #07100d;font:7px "Press Start 2P",monospace;color:var(--acid);line-height:1.7}
+.workflow-steps{display:grid;gap:12px}
+.workflow-step{background:#17372d;border:4px solid #07100d;box-shadow:5px 5px 0 #07100d;opacity:.55;transition:opacity .2s}
+.workflow-step[data-state="running"],.workflow-step[data-state="done"],.workflow-step[data-state="failed"]{opacity:1}
+.workflow-step>header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:3px solid #07100d}
+.workflow-step>header>i{width:32px;height:32px;flex:none;display:grid;place-items:center;background:#29473b;border:2px solid #07100d;font:6px "Press Start 2P",monospace;font-style:normal;color:#fff}
+.workflow-step>header>span{flex:1;min-width:0}
+.workflow-step>header b{display:block;font:6px "Press Start 2P",monospace;color:#fff}
+.workflow-step>header small{display:block;margin-top:6px;font:8px var(--mono);color:#82998d}
+.workflow-step>header em{font-style:normal;padding:7px 9px;border:2px solid #07100d;background:#29473b;font:5px "Press Start 2P",monospace;color:#9db3a6}
+.workflow-step[data-state="running"]>header em{background:#f0ce48;color:#07100d}
+.workflow-step[data-state="running"]>header>i{background:#f0ce48;color:#07100d}
+.workflow-step[data-state="done"]>header em{background:var(--acid);color:#07100d}
+.workflow-step[data-state="done"]>header>i{background:var(--acid);color:#07100d}
+.workflow-step[data-state="failed"]>header em,.workflow-step[data-state="failed"]>header>i{background:#d2452f;color:#fff}
+.workflow-step>p{margin:0;padding:13px 16px;font:9px/1.7 var(--mono);color:#9db3a6}
+.workflow-facts:not(:empty){display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:1px;background:#07100d;border-top:3px solid #07100d}
+.workflow-facts p{margin:0;padding:12px 16px;background:#0d211b}
+.workflow-facts small{display:block;font:5px "Press Start 2P",monospace;color:#7e9488}
+.workflow-facts b{display:block;margin-top:7px;font:9px var(--mono);color:var(--acid);word-break:break-all}
+.workflow-facts .workflow-error b{color:#ff8f7a}
+@media(max-width:760px){.view-heading:has(.workflow-controls){display:block}.workflow-controls{margin-top:20px}}
+
 /* AUDIT tab: reuses .portal-stats / .activity-feed from the Home view above, just laid out as three panels. */
 .ledger-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
 .ledger-grid .ledger-timeline{grid-column:1/-1}
