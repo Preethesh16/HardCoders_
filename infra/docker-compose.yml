@@ -134,8 +134,12 @@ services:
       S3_BUCKET: optiwork-documents
       S3_ACCESS_KEY_ID: optiwork
       S3_SECRET_ACCESS_KEY: optiwork-local-development
-      FX_MODE: fixture
-      AI_MODE: fixture
+      # Interactive local runs use live reference FX and OpenAI when the
+      # repository's ignored .env opts in. local:e2e overrides both to fixture
+      # so the offline acceptance gate remains deterministic.
+      FX_MODE: ${FX_MODE:-frankfurter}
+      AI_MODE: ${AI_MODE:-fixture}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ALGORAND_MODE: executor
       ALGORAND_NETWORK: localnet
       ALGORAND_EXECUTOR_URL: http://algorand-executor:4301

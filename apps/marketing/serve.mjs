@@ -10,11 +10,25 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { stepList, resetRun, runStep } from "./workflow.mjs";
+import { stepList, resetRun, runStep, currentRun } from "./workflow.mjs";
 
 function sendJson(res, status, payload) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(payload));
+}
+
+async function readJson(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 24_000_000) throw new Error("Request body is too large.");
+    chunks.push(chunk);
+  }
+  if (size === 0) return {};
+  const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("JSON object required.");
+  return parsed;
 }
 
 const ROOT = new URL(".", import.meta.url).pathname;
@@ -80,7 +94,11 @@ const server = createServer(async (req, res) => {
 
   // Step-by-step workflow driver (see workflow.mjs).
   if (requestPath === "/api/workflow/steps" && req.method === "GET") {
-    sendJson(res, 200, { steps: stepList() });
+    sendJson(res, 200, { steps: stepList(), run: currentRun() });
+    return;
+  }
+  if (requestPath === "/api/workspace/state" && req.method === "GET") {
+    sendJson(res, 200, { steps: stepList(), run: currentRun() });
     return;
   }
   if (requestPath === "/api/workflow/reset" && req.method === "POST") {
@@ -89,8 +107,12 @@ const server = createServer(async (req, res) => {
   }
   const stepMatch = /^\/api\/workflow\/step\/(\d+)$/.exec(requestPath);
   if (stepMatch && req.method === "POST") {
-    const result = await runStep(Number(stepMatch[1]));
-    sendJson(res, result.ok ? 200 : 422, result);
+    try {
+      const result = await runStep(Number(stepMatch[1]), await readJson(req));
+      sendJson(res, result.ok ? 200 : 422, result);
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: String(error.message ?? error) });
+    }
     return;
   }
 

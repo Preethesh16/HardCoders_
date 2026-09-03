@@ -24,7 +24,7 @@ import { FixtureRateSource, FrankfurterRateSource, type FxRateSource } from './f
 import { IdempotencyStore } from './idempotency/store.js';
 import { Ledger } from './ledger/books.js';
 import { Timeline } from './timeline/events.js';
-import { SequentialIds, systemClock, type Clock, type IdGenerator } from './runtime.js';
+import { randomIds, SequentialIds, systemClock, type Clock, type IdGenerator } from './runtime.js';
 
 export interface AppContext {
   readonly config: ApiConfig;
@@ -69,7 +69,10 @@ function createDataStore(config: ApiConfig): DataStore {
 export function createContext(config: ApiConfig, overrides: ContextOverrides = {}): AppContext {
   const store = overrides.store ?? createDataStore(config);
   const clock = overrides.clock ?? systemClock;
-  const ids = overrides.ids ?? new SequentialIds();
+  // A durable database outlives the process, so process-local counters can
+  // collide after any restart. Memory demos/tests keep readable sequential
+  // IDs; persistent profiles use globally unique IDs.
+  const ids = overrides.ids ?? (config.databaseUrl === undefined ? new SequentialIds() : randomIds);
 
   const auth = overrides.auth
     ?? (config.auth.mode === 'oidc' ? new OidcTokenVerifier(config.auth) : new DemoTokenVerifier());

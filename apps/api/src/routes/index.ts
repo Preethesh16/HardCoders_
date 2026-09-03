@@ -35,6 +35,7 @@ import {
   RecordDocumentBody,
   RefundPaymentBody,
   ResolveCorridorBody,
+  SelectApplicationBody,
   SupplierPaymentBody,
   VerifyCredentialBody,
 } from './schemas.js';
@@ -139,6 +140,22 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
         );
         return { ...evaluated, contract };
       },
+    });
+  });
+
+  /** Human assignment is deliberately separate from advisory shortlisting. */
+  app.post<{ Params: { id: string } }>('/v1/applications/:id/select', {
+    schema: { params: IdParams, body: SelectApplicationBody, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    const body = request.body as Static<typeof SelectApplicationBody>;
+    return mutate(context, request, reply, principal, {
+      scope: 'applications.select',
+      run: async () => marketplace.selectApplicant(
+        principal,
+        request.params.id,
+        money(body.amount.amountMinor, body.amount.currency, body.amount.scale),
+      ),
     });
   });
 
@@ -268,6 +285,16 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
     return mutate(context, request, reply, principal, {
       scope: 'submissions.decide',
       run: async () => submissions.decide(principal, request.params.id, body),
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/v1/submissions/:id/evaluate', {
+    schema: { params: IdParams, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    return mutate(context, request, reply, principal, {
+      scope: 'submissions.evaluate',
+      run: async () => submissions.evaluate(principal, request.params.id),
     });
   });
 

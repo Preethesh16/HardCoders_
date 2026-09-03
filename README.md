@@ -109,8 +109,8 @@ corepack pnpm demo
 ```
 
 Open the integrated experience at [http://127.0.0.1:4175](http://127.0.0.1:4175).
-Choose a role, enter the demo portal, and open **Workflow** to execute the real
-12-stage API journey one decision at a time. The five evaluator dashboards
+Choose a role and enter the single-tab **Deal Room** to execute the real
+14-stage journey one authorized decision at a time. The five evaluator dashboards
 remain available at [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
 ### Full cryptographic proof run
@@ -132,7 +132,7 @@ The command starts isolated resources, deploys `OptiUSD-DEMO` and the escrow,
 executes both HTTP journeys, verifies both ledgers, checks cross-organization
 authorization and privacy boundaries, smoke-tests all five dashboards, then
 opens the integrated portal in a real headless browser and completes its
-12-stage workflow. It leaves the product experience running at
+14-stage role-aware workflow. It leaves the product experience running at
 [http://127.0.0.1:4175](http://127.0.0.1:4175) and the evaluator dashboards at
 [http://127.0.0.1:3000](http://127.0.0.1:3000).
 See the [LocalNet runbook](docs/LOCALNET_RUNBOOK.md) for ports, lifecycle
@@ -148,11 +148,11 @@ The app executes both corridors end to end and exposes five role-specific views:
 
 ### 90-second evaluator walkthrough
 
-1. Open `:4175`, choose **Company**, sign in with the prefilled demo credentials and skip the tour.
-2. Select **Workflow**, click **Run full workflow**, and watch all 12 live stages reach `DONE`.
-3. Open **Audit** to inspect the refreshed books, compliance decisions and event trail.
-4. Open **Provider operations** at `:3000/provider` and verify the `INWARD` and `OUTWARD` books and treasuries never net.
-5. Open **Administrator & audit** at `:3000/admin` and inspect rule versions, hashes, actors and reconciliation status.
+1. Open `:4175` in two tabs: enter one as **Company** and the other as **Freelancer**. Both poll the same persisted deal.
+2. Company publishes the work; freelancer applies; the agent shortlists; then the company explicitly assigns the applicant.
+3. Both parties approve the exact contract hash. Company runs live FX/compliance and funds the real LocalNet ARC-4 escrow.
+4. Freelancer uploads the actual deliverable. Company grants review access, runs advisory validation, approves on Fabric and releases escrow.
+5. Inspect the right-hand proof panel, then open `:3000/provider` or `:3000/admin` for the complete books, rules, transactions and reconciliation trail.
 
 ## Product tour
 
@@ -204,6 +204,7 @@ The API exposes real workflow commands rather than a single scripted endpoint. R
 POST /v1/jobs
 POST /v1/jobs/:id/applications
 POST /v1/applications/:id/evaluate
+POST /v1/applications/:id/select
 POST /v1/contracts/:id/approve
 
 POST /v1/credentials/verify
@@ -211,6 +212,7 @@ POST /v1/corridors/resolve
 POST /v1/fx/quotes
 
 POST /v1/contracts/:id/submissions
+POST /v1/submissions/:id/evaluate
 POST /v1/submissions/:id/approve
 GET  /v1/submissions/:id/access
 
@@ -269,7 +271,8 @@ Test ALGO and TestNet USDC have no monetary value.
 
 | Capability | Status |
 |---|---|
-| Integrated role portal and live 12-stage workflow | ✅ Runs against the real local API, Fabric and Algorand stack |
+| Integrated company/freelancer deal room and live 14-stage workflow | ✅ Role-owned actions run against PostgreSQL, MinIO, Fabric and Algorand |
+| Live decision support | ✅ OpenAI advisory agents, Frankfurter reference FX and official RBI source observation, each with visible fallback provenance |
 | Five evaluator dashboards and two-corridor browser demonstration | ✅ Runs locally with deterministic AI/FX fixtures |
 | Marketplace, contracts, credentials, compliance, FX, books and timelines | ✅ Implemented, runtime-validated and tested |
 | PostgreSQL and MinIO adapters | ✅ Real local acceptance profile verified |

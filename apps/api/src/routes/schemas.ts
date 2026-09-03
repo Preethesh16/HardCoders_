@@ -47,6 +47,10 @@ export const EvaluateApplicationBody = Type.Object({
   amount: Type.Optional(MoneyInput),
 }, { additionalProperties: false });
 
+export const SelectApplicationBody = Type.Object({
+  amount: MoneyInput,
+}, { additionalProperties: false });
+
 export const ApproveContractBody = Type.Object({
   party: Type.Union([Type.Literal('BUYER'), Type.Literal('PROVIDER')]),
   acceptedTermsHash: Sha256Schema,

@@ -115,11 +115,14 @@ export class FrankfurterRateSource implements FxRateSource {
     url.searchParams.set('to', to);
     const response = await fetch(url, {
       method: 'GET',
-      redirect: 'error',
+      redirect: 'follow',
       cache: 'no-store',
       signal: AbortSignal.timeout(this.timeoutMs),
       headers: { accept: 'application/json' },
     });
+    if (!['api.frankfurter.app', 'api.frankfurter.dev'].includes(new URL(response.url).hostname)) {
+      throw unavailable('The reference FX service redirected to an unexpected host.');
+    }
     if (!response.ok) throw unavailable('The reference FX service rejected the request.');
     const body = frankfurterSchema(await response.json());
     const value = body.rates[to];

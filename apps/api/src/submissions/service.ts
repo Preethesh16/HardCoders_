@@ -194,6 +194,54 @@ export class SubmissionService {
   }
 
   /**
+   * Runs the advisory work-validation agent as its own visible stage. The
+   * result is persisted in the contract timeline so a human decision can
+   * never be confused with an AI recommendation.
+   */
+  async evaluate(principal: Principal, submissionId: string) {
+    requireRole(principal, 'company_member', 'platform_admin');
+    const submission = await this.requireSubmission(submissionId);
+    const contract = await this.requireContract(submission.contractId);
+    requireOwnership(principal, contract.buyerOrganizationId);
+    if (submission.buyerDecision !== 'PENDING') {
+      throw conflict(`Version ${submission.version} already has decision ${submission.buyerDecision}.`);
+    }
+
+    const existing = (await this.context.timeline.forContract(contract.id))
+      .filter((event) => event.kind === 'WORK_EVALUATED'
+        && (event.detail as Record<string, unknown>)['submissionId'] === submissionId)
+      .at(-1);
+    if (existing) return { advisory: existing.detail, replay: true };
+
+    const result = await this.context.ai.evaluate({
+      purpose: 'WORK_VALIDATION',
+      instruction: 'Assess whether the submitted deliverable looks complete. You are advisory only.',
+      facts: {
+        version: submission.version,
+        fileHashPrefix: submission.fileHash.slice(7, 15),
+        contractHashPrefix: contract.contractHash.slice(7, 15),
+      },
+    });
+    const advisory = {
+      submissionId,
+      version: submission.version,
+      score: result.score,
+      summary: result.summary,
+      source: result.source,
+      model: result.model,
+      promptHash: result.promptHash,
+      advisoryOnly: true,
+    };
+    await this.context.timeline.append({
+      kind: 'WORK_EVALUATED',
+      actor: this.actor(principal),
+      contractId: contract.id,
+      detail: advisory,
+    });
+    return { advisory, replay: false };
+  }
+
+  /**
    * The buyer's decision. AI may have produced an advisory validation signal,
    * but only this call records a decision, and only the buyer can make it.
    */
@@ -206,11 +254,22 @@ export class SubmissionService {
       throw conflict(`Version ${submission.version} already has decision ${submission.buyerDecision}.`);
     }
 
-    const advisory = await this.context.ai.evaluate({
-      purpose: 'WORK_VALIDATION',
-      instruction: 'Assess whether the submitted deliverable looks complete. You are advisory only.',
-      facts: { version: submission.version, fileHashPrefix: submission.fileHash.slice(7, 15) },
-    });
+    let validation = (await this.context.timeline.forContract(contract.id))
+      .filter((event) => event.kind === 'WORK_EVALUATED'
+        && (event.detail as Record<string, unknown>)['submissionId'] === submissionId)
+      .at(-1);
+    if (!validation) {
+      // Backwards-compatible safety net for API clients created before the
+      // explicit validation endpoint existed. The product UI always calls the
+      // visible validation stage first.
+      await this.evaluate(principal, submissionId);
+      validation = (await this.context.timeline.forContract(contract.id))
+        .filter((event) => event.kind === 'WORK_EVALUATED'
+          && (event.detail as Record<string, unknown>)['submissionId'] === submissionId)
+        .at(-1);
+    }
+    if (!validation) throw conflict('The advisory work validation could not be recorded.');
+    const advisory = validation.detail as Record<string, unknown>;
 
     const now = this.context.clock.now().toISOString();
     const record = await this.context.fabric.recordDecision(this.fabricActor(principal), {
@@ -245,7 +304,7 @@ export class SubmissionService {
         decision: input.decision,
         fabricTxId: record.fabricTxId,
         evidenceHash: workEvidenceHash(record.evidence),
-        advisoryScore: advisory.score,
+        advisoryScore: advisory['score'],
         advisoryOnly: true,
         comment: input.comment.slice(0, 240),
       },

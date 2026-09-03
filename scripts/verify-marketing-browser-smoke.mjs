@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -21,6 +21,7 @@ const processHandle = spawn(chrome, [
   '--no-first-run',
   '--remote-debugging-address=127.0.0.1',
   '--remote-debugging-port=0',
+  '--window-size=1600,1000',
   `--user-data-dir=${profile}`,
   'about:blank',
 ], { stdio: 'ignore' });
@@ -113,38 +114,44 @@ try {
   await waitFor('document.querySelector("#loginWorld")?.classList.contains("open")', 'Demo login did not open.');
   await click('#loginForm .login-submit');
   await waitFor('document.querySelector("#portalWorld")?.classList.contains("open")', 'The portal did not open.', 10_000);
-  await waitFor('document.querySelector("#portalGuide")?.classList.contains("open")', 'The portal guide did not open.', 10_000);
-  await click('#guideSkip');
-  await click('[data-portal-nav="workflow"]');
   await waitFor(
-    'document.querySelectorAll("#workflowSteps .workflow-step").length === 12 && /READY/u.test(document.querySelector("#workflowStatus")?.textContent ?? "")',
-    'The 12-step workflow did not initialise.',
+    'document.querySelectorAll("#workspaceStages [data-workspace-step]").length === 14 && /READY/u.test(document.querySelector("#workflowStatus")?.textContent ?? "")',
+    'The 14-stage role workspace did not initialise.',
   );
-  await click('#workflowRun');
-  await waitFor(
-    '/WORKFLOW COMPLETE/u.test(document.querySelector("#workflowStatus")?.textContent ?? "")',
-    'The portal workflow did not complete.',
-    300_000,
-  );
+  const executed = await evaluate(`(async () => {
+    await fetch('/api/workflow/reset', { method: 'POST' });
+    for (let index = 0; index < 14; index += 1) {
+      const response = await fetch('/api/workflow/step/' + index, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
+      });
+      if (!response.ok) return { ok: false, index, body: await response.text() };
+    }
+    await window.OptiWorkWorkflow.init();
+    return { ok: true };
+  })()`);
+  if (!executed?.ok) throw new Error(`The deal room failed at stage ${JSON.stringify(executed)}.`);
+  await waitFor('document.querySelectorAll(`#workspaceStages [data-state="done"]`).length === 14', 'The portal deal room did not complete.', 300_000);
   const result = await evaluate(`({
-    completed: document.querySelectorAll('#workflowSteps .workflow-step[data-state="done"]').length,
-    failed: document.querySelectorAll('#workflowSteps .workflow-step[data-state="failed"]').length,
+    completed: document.querySelectorAll('#workspaceStages [data-state="done"]').length,
+    failed: document.querySelectorAll('#workspaceStages [data-state="failed"]').length,
     status: document.querySelector('#workflowStatus')?.textContent ?? '',
+    snapshot: document.querySelector('#workspaceSnapshot')?.innerText ?? '',
   })`);
-  if (result.completed !== 12 || result.failed !== 0) {
-    throw new Error(`Expected 12 completed steps and no failures, got ${JSON.stringify(result)}.`);
+  if (result.completed !== 14 || result.failed !== 0 || !/ARC-4 APP/u.test(result.snapshot) || !/FABRIC EVIDENCE/u.test(result.snapshot)) {
+    throw new Error(`Expected 14 completed stages with real ledger proof, got ${JSON.stringify(result)}.`);
   }
-  await click('[data-portal-nav="audit"]');
-  await waitFor(
-    '!/Loading/u.test(document.querySelector("#ledgerStatOneNote")?.textContent ?? "Loading")',
-    'The audit view did not refresh after settlement.',
-  );
+  await evaluate('window.OptiWorkWorkflow.setRole("FREELANCER")');
+  await waitFor('/FREELANCER/u.test(document.querySelector("#workspaceEyebrow")?.textContent ?? "")', 'Freelancer workspace did not render.');
+  if (process.env.OPTIWORK_SCREENSHOT_PATH) {
+    const captured = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+    await writeFile(process.env.OPTIWORK_SCREENSHOT_PATH, Buffer.from(captured.data, 'base64'));
+  }
 
   process.stdout.write(`${JSON.stringify({
     status: 'passed',
     origin: origin.href,
-    workflowSteps: result.completed,
-    auditRefreshed: true,
+    workflowStages: result.completed,
+    roleViews: ['company', 'freelancer'],
   }, null, 2)}\n`);
 } finally {
   socket?.close();
@@ -153,5 +160,5 @@ try {
     new Promise((resolve) => processHandle.once('exit', resolve)),
     sleep(2_000),
   ]);
-  await rm(profile, { recursive: true, force: true });
+  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

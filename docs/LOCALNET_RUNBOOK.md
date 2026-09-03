@@ -60,8 +60,8 @@ The command performs these operations in order:
     scoped service logs for personal, signing and raw-file data; and
 12. opens a real headless Chrome session, clicks the dashboard demonstration,
     smoke-tests `/`, `/company`, `/freelancer`, `/supplier`, `/provider` and
-    `/admin`, then signs into the integrated role portal and completes all 12
-    live workflow stages when Chrome or Chromium is installed.
+    `/admin`, then signs into the integrated role portal and completes all 14
+    role-aware deal-room stages when Chrome or Chromium is installed.
 
 Successful completion leaves the services running for browser inspection.
 

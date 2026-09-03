@@ -3,6 +3,9 @@ set -Eeuo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE=(docker compose --project-name optiwork-local -f "${ROOT}/infra/docker-compose.yml")
+if [[ -f "${ROOT}/.env" ]]; then
+  COMPOSE+=(--env-file "${ROOT}/.env")
+fi
 STATE="${ROOT}/.optiwork/localnet"
 
 log() { printf '[anchor-local] %s\n' "$*"; }
@@ -120,7 +123,7 @@ e2e() {
   "${COMPOSE[@]}" --profile local down --volumes --remove-orphans >/dev/null 2>&1 || true
   deploy_algorand
   render_runtime
-  wait_stack
+  FX_MODE=fixture AI_MODE=fixture wait_stack
   node "${ROOT}/scripts/verify-local-e2e.mjs"
   node "${ROOT}/scripts/verify-fabric-authorization.mjs"
   verify_private_boundaries
@@ -131,7 +134,7 @@ e2e() {
   if [[ -n "${browser}" ]]; then
     node "${ROOT}/scripts/verify-browser-smoke.mjs" "${browser}"
     node "${ROOT}/scripts/verify-marketing-browser-smoke.mjs" "${browser}"
-    log 'browser smoke passed the five dashboards and the integrated 12-step portal workflow'
+    log 'browser smoke passed the five dashboards and the integrated role-aware deal room'
   fi
   log 'real LocalNet E2E passed; the experience is at http://127.0.0.1:4175 and dashboards at http://127.0.0.1:3000'
 }

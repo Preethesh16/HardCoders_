@@ -172,6 +172,20 @@ const FIXTURES: Readonly<Record<AiPurpose, Fixture>> = {
 interface ResponsesPayload {
   readonly output_text?: unknown;
   readonly model?: unknown;
+  readonly output?: readonly {
+    readonly type?: unknown;
+    readonly content?: readonly { readonly type?: unknown; readonly text?: unknown }[];
+  }[];
+}
+
+function responseText(payload: ResponsesPayload): string {
+  if (typeof payload.output_text === 'string') return payload.output_text;
+  for (const output of payload.output ?? []) {
+    for (const content of output.content ?? []) {
+      if (content.type === 'output_text' && typeof content.text === 'string') return content.text;
+    }
+  }
+  return '';
 }
 
 /**
@@ -194,7 +208,7 @@ export class OpenAiAdapter implements AiAdapter {
     assertNoPersonalFacts(request);
     const promptHash = promptHashOf(request);
     try {
-      const response = await fetch(new URL('/responses', this.config.baseUrl), {
+      const response = await fetch(new URL(`${this.config.baseUrl.replace(/\/$/u, '')}/responses`), {
         method: 'POST',
         redirect: 'error',
         cache: 'no-store',
@@ -211,11 +225,40 @@ export class OpenAiAdapter implements AiAdapter {
             + '"summary" (one short paragraph) and "citations" (array of {sourceUri, sourceVersion, quote}). '
             + 'You are advisory only: never state that a payment, identity or submission is approved.',
           input: JSON.stringify({ purpose: request.purpose, facts: request.facts }),
+          text: {
+            format: {
+              type: 'json_schema',
+              name: 'optiwork_advisory',
+              strict: true,
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  score: { type: 'integer', minimum: 0, maximum: 100 },
+                  summary: { type: 'string' },
+                  citations: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        sourceUri: { type: 'string' },
+                        sourceVersion: { type: 'string' },
+                        quote: { type: 'string' },
+                      },
+                      required: ['sourceUri', 'sourceVersion', 'quote'],
+                    },
+                  },
+                },
+                required: ['score', 'summary', 'citations'],
+              },
+            },
+          },
         }),
       });
       if (!response.ok) throw unavailable('The AI provider rejected the request.');
       const payload = await response.json() as ResponsesPayload;
-      const text = typeof payload.output_text === 'string' ? payload.output_text : '';
+      const text = responseText(payload);
       const parsed = JSON.parse(text) as { score?: unknown; summary?: unknown; citations?: unknown };
       const score = typeof parsed.score === 'number' && Number.isInteger(parsed.score)
         ? Math.min(100, Math.max(0, parsed.score))

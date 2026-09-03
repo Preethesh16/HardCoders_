@@ -46,12 +46,20 @@ async function walkToFundedContract(current: Harness) {
   const evaluated = await call(current, 'POST', `/v1/applications/${application.body.id}/evaluate`, {
     token: polishCompany.token,
     idempotencyKey: 'demo-evaluate-0001',
-    body: { select: true, amount: { amountMinor: '1200000', currency: 'PLN', scale: 2 } },
+    body: { select: false },
   });
   expect(evaluated.status).toBe(200);
   expect(evaluated.body.evaluation.advisoryOnly).toBe(true);
   expect(evaluated.body.citations.length).toBeGreaterThan(0);
-  const contract = evaluated.body.contract;
+  expect(evaluated.body.contract).toBeNull();
+
+  const selected = await call(current, 'POST', `/v1/applications/${application.body.id}/select`, {
+    token: polishCompany.token,
+    idempotencyKey: 'demo-select-0001',
+    body: { amount: { amountMinor: '1200000', currency: 'PLN', scale: 2 } },
+  });
+  expect(selected.status).toBe(200);
+  const contract = selected.body;
 
   const buyerApproval = await call(current, 'POST', `/v1/contracts/${contract.id}/approve`, {
     token: polishCompany.token,
@@ -136,6 +144,13 @@ describe('Poland to India inward journey', () => {
     // A signed URL, never a raw storage key.
     expect(JSON.stringify(access.body)).not.toContain('deliverable/');
 
+    const validation = await call(current, 'POST', `/v1/submissions/${submission.body.submission.id}/evaluate`, {
+      token: polishCompany.token,
+      idempotencyKey: 'demo-work-validation-0001',
+    });
+    expect(validation.status).toBe(200);
+    expect(validation.body.advisory.advisoryOnly).toBe(true);
+
     const decided = await call(current, 'POST', `/v1/submissions/${submission.body.submission.id}/approve`, {
       token: polishCompany.token,
       idempotencyKey: 'demo-decision-0001',
@@ -159,7 +174,7 @@ describe('Poland to India inward journey', () => {
     const kinds = timeline.body.events.map((event: { kind: string }) => event.kind);
     expect(kinds).toEqual(expect.arrayContaining([
       'CORRIDOR_RESOLVED', 'FX_QUOTED', 'COMPLIANCE_EVALUATED', 'PAYMENT_CREATED',
-      'FIAT_FUNDED', 'ESCROW_CREATED', 'USDC_LOCKED', 'WORK_SUBMITTED', 'WORK_APPROVED',
+      'FIAT_FUNDED', 'ESCROW_CREATED', 'USDC_LOCKED', 'WORK_SUBMITTED', 'WORK_EVALUATED', 'WORK_APPROVED',
       'RELEASE_AUTHORIZED', 'USDC_RELEASED', 'PAYOUT_CREDITED', 'PAYMENT_COMPLETED',
     ]));
     expect(timeline.body.reconciliation.status).toBe('MATCHED');
