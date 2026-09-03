@@ -16,3 +16,6 @@ test-results/
 
 blockchain/fabric/network/generated/
 blockchain/fabric/network/staging-generated/
+
+# Runtime state written by the mock Fabric evidence reader.
+.optiwork/

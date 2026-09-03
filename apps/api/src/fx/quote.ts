@@ -11,7 +11,7 @@
 import type { CorridorPolicy } from '@optiwork/contracts';
 import { canonicalHash } from '../canonical.js';
 import { unprocessable } from '../errors.js';
-import { basisPointFee, convertMoney, money, subtractMoney, type Money, type ScaledRate } from '../money.js';
+import { basisPointFee, convertMoney, money, subtractMoney, type Money } from '../money.js';
 import type { CorridorRates } from './rates.js';
 
 export const SETTLEMENT_SCALE = 6;
@@ -21,10 +21,16 @@ export const FEE_SCHEDULE_VERSION = 'OPTIWORK-FEES-v1';
 export const ORIGIN_FEE_BASIS_POINTS = 50;
 export const DESTINATION_FEE_BASIS_POINTS = 35;
 
+/**
+ * A leg carries its rate as an exact scaled integer in string form. Nothing in
+ * a quote is ever a JavaScript number, so a quote can be serialised, stored,
+ * hashed and re-read without losing a digit.
+ */
 export interface QuoteLeg {
   readonly ordinal: number;
   readonly pair: string;
-  readonly rate: ScaledRate;
+  readonly rateUnits: string;
+  readonly rateScale: number;
   readonly from: Money;
   readonly to: Money;
 }
@@ -102,14 +108,16 @@ export function buildQuote(input: BuildQuoteInput): FxQuoteRecord {
     {
       ordinal: 1,
       pair: `${policy.fundingCurrency}/USD`,
-      rate: rates.fundingToUsd,
+      rateUnits: rates.fundingToUsd.units.toString(),
+      rateScale: rates.fundingToUsd.scale,
       from: fundingAmount,
       to: grossSettlementAmount,
     },
     {
       ordinal: 2,
       pair: `USD/${policy.payoutCurrency}`,
-      rate: rates.usdToPayout,
+      rateUnits: rates.usdToPayout.units.toString(),
+      rateScale: rates.usdToPayout.scale,
       from: settlementAmount,
       to: grossPayoutAmount,
     },
@@ -127,14 +135,7 @@ export function buildQuote(input: BuildQuoteInput): FxQuoteRecord {
     settlementAmount,
     grossPayoutAmount,
     payoutAmount,
-    legs: legs.map((leg) => ({
-      ordinal: leg.ordinal,
-      pair: leg.pair,
-      rateUnits: leg.rate.units.toString(),
-      rateScale: leg.rate.scale,
-      from: leg.from,
-      to: leg.to,
-    })),
+    legs,
     fees,
     provider: input.provider ?? 'OPTIWORK_SIMULATED_PROVIDER',
     rateSource: rates.source,
@@ -145,11 +146,7 @@ export function buildQuote(input: BuildQuoteInput): FxQuoteRecord {
     executable: false as const,
   };
 
-  return {
-    ...unsigned,
-    legs,
-    canonicalHash: canonicalHash(unsigned),
-  };
+  return { ...unsigned, canonicalHash: canonicalHash(unsigned) };
 }
 
 export function quoteIsCurrent(quote: { expiresAt: string }, at: Date): boolean {

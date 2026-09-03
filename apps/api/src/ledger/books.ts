@@ -20,6 +20,7 @@ export type AccountType =
   | 'CUSTOMER_FUNDING'
   | 'PROVIDER_SETTLEMENT'
   | 'PROVIDER_FEE_INCOME'
+  | 'ESCROW_CONTROL'
   | 'PAYOUT_PAYABLE'
   | 'BENEFICIARY_WALLET';
 
@@ -144,32 +145,37 @@ export class Ledger {
     }
 
     const entryId = this.ids.next('JE');
-    await this.store.insert(journalEntries, {
-      id: entryId,
-      bookId: input.bookId,
-      direction: input.direction,
-      currency: first.currency,
-      scale: first.scale,
-      paymentId: input.paymentId ?? null,
-      reference: input.reference,
-      memo: input.memo,
-      postedAt: this.clock.now().toISOString(),
-      entryHash,
-    });
-    for (const [index, line] of input.lines.entries()) {
-      await this.store.insert(journalLines, {
-        id: this.ids.next('JL'),
-        entryId,
-        accountId: line.accountId,
+    // The entry and its lines are one atomic write. A half-written entry would
+    // be an unbalanced entry, and PostgreSQL's deferred balance trigger only
+    // gets to check at commit - so the commit has to include the lines.
+    await this.store.transaction(async (tx) => {
+      await tx.insert(journalEntries, {
+        id: entryId,
         bookId: input.bookId,
         direction: input.direction,
         currency: first.currency,
         scale: first.scale,
-        ordinal: index + 1,
-        side: line.side,
-        amountMinor: line.amount.amountMinor,
+        paymentId: input.paymentId ?? null,
+        reference: input.reference,
+        memo: input.memo,
+        postedAt: this.clock.now().toISOString(),
+        entryHash,
       });
-    }
+      for (const [index, line] of input.lines.entries()) {
+        await tx.insert(journalLines, {
+          id: this.ids.next('JL'),
+          entryId,
+          accountId: line.accountId,
+          bookId: input.bookId,
+          direction: input.direction,
+          currency: first.currency,
+          scale: first.scale,
+          ordinal: index + 1,
+          side: line.side,
+          amountMinor: line.amount.amountMinor,
+        });
+      }
+    });
     return { entryId, entryHash, replay: false };
   }
 
