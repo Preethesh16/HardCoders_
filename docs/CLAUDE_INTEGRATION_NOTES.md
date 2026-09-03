@@ -140,3 +140,68 @@ any route, service or database table.
 
 The API never writes to Fabric directly and never reads Fabric state for
 authorization; the executor's own re-read is the authoritative gate.
+
+---
+
+## 4. Connecting the real Fabric Gateway
+
+Everything below is a configuration change plus the Gateway itself. No route,
+service, table or test in the non-Fabric workstream needs to change.
+
+### 4.1 API
+
+1. Implement `GatewayFabricEvidenceReader`'s two write paths, or expose Gateway
+   endpoints the API can call. They currently throw
+   `Writing work evidence is owned by the Fabric Gateway workstream` on purpose
+   (`apps/api/src/fabric/evidence-reader.ts`), so a half-configured deployment
+   fails closed instead of fabricating a commitment.
+2. Set `FABRIC_MODE=gateway` and `FABRIC_GATEWAY_URL`.
+3. Supply the workload authorization the reader's `authorization()` callback
+   returns — a Keycloak client-credentials token for the API's service account.
+
+The submission and decision commitments the API sends are exactly the
+`SubmissionCommitment` and `DecisionCommitment` shapes in that file. They carry
+hashes, a version, an opaque subject reference and a decision. Nothing else.
+
+### 4.2 Algorand executor
+
+1. Set `FABRIC_EVIDENCE_MODE=gateway` and remove
+   `FABRIC_EVIDENCE_FIXTURE_PATH`. TestNet already refuses the mock reader.
+2. Configure `FABRIC_PERMIT_PUBLIC_JWK_JSON` with the Gateway's Ed25519 permit
+   public key, and `FABRIC_PERMIT_ISSUER` / `FABRIC_PERMIT_AUDIENCE`.
+3. Configure the Gateway OIDC client-credentials identity
+   (`FABRIC_GATEWAY_OIDC_*`). A static bearer is accepted on LocalNet only.
+
+### 4.3 Permit minting
+
+`apps/api/src/context.ts` currently supplies `unavailablePermit`, which throws.
+Replace it with a call to the Gateway's permit-minting endpoint. The API already
+computes every field the permit must contain; see `PaymentService.release` in
+`apps/api/src/payments/service.ts`, which builds the `releaseBinding`, the
+`authorizationCommitment` and the `fabricClaimTransactionId` that the permit
+must reproduce byte for byte.
+
+### 4.4 What stays the API's responsibility
+
+The API owns the business decision to release: the approved submission, the
+compliance decision, the FX quote and the payment state machine. The Gateway
+owns the Fabric record and the permit. The executor owns the signature and the
+final Fabric re-read. None of the three trusts the other two on its own.
+
+---
+
+## 5. Shared files this workstream did not touch
+
+`packages/contracts`, `packages/domain`, `docs/architecture/**`,
+`docs/THIRD_PARTY_PROVENANCE.md`, `blockchain/fabric/**` and
+`services/fabric-gateway/**` are unchanged. The one requested change to
+`packages/contracts` is section 2.2 above.
+
+`packages/domain` is used as-is by the API for money conversion
+(`convertMoney`), corridor policy (`corridorPolicies`, `resolveCorridor`),
+credential signing and verification, and both state machines
+(`assertPaymentTransition`, `assertTransition`). One observation for its owner,
+not a request: `createFxQuote` hard-codes a 60-second quote expiry, so the API
+builds its own quote record with a configurable TTL
+(`apps/api/src/fx/quote.ts`) while still using the domain's fixed-point
+conversion primitive.

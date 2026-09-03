@@ -1,0 +1,269 @@
+{
+  "realm": "optiwork",
+  "enabled": true,
+  "displayName": "OptiWork (local demonstration)",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 900,
+  "roles": {
+    "realm": [
+      {
+        "name": "company_member",
+        "description": "Acts for a buying company: posts work, selects applicants, approves contracts, funds and releases payments."
+      },
+      {
+        "name": "freelancer",
+        "description": "Applies for work, submits deliverables and receives a simulated payout."
+      },
+      {
+        "name": "supplier",
+        "description": "Supplies goods or services against an outward supplier payment."
+      },
+      {
+        "name": "provider_operator",
+        "description": "Operates a simulated provider treasury: funds, reconciles and inspects settlement."
+      },
+      {
+        "name": "platform_admin",
+        "description": "Administers the platform and reads across tenants."
+      },
+      {
+        "name": "compliance_service",
+        "description": "Records credential status changes and reads compliance decisions."
+      },
+      {
+        "name": "payments_service",
+        "description": "Machine identity for payment orchestration."
+      },
+      {
+        "name": "audit_service",
+        "description": "Read-only audit access across tenants."
+      }
+    ]
+  },
+  "clientScopes": [
+    {
+      "name": "optiwork-claims",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "organization-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "organization_id",
+            "claim.name": "organization_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "optiwork-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "optiwork-api",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "optiwork-api",
+      "name": "OptiWork API",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "optiwork-web",
+      "name": "OptiWork web",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://127.0.0.1:3000/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://127.0.0.1:3000",
+        "http://localhost:3000"
+      ],
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "optiwork-claims"
+      ]
+    },
+    {
+      "clientId": "optiwork-payments",
+      "name": "OptiWork payments workload",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "defaultClientScopes": [
+        "optiwork-claims"
+      ],
+      "_comment": "The client secret is generated on first start and must never be committed."
+    }
+  ],
+  "users": [
+    {
+      "username": "pl-buyer",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Warsaw",
+      "lastName": "Engineering lead",
+      "attributes": {
+        "organization_id": [
+          "ORG-PL-NOVA"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "optiwork-local-development",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "company_member"
+      ]
+    },
+    {
+      "username": "in-freelancer",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Bengaluru",
+      "lastName": "Contract engineer",
+      "attributes": {
+        "organization_id": [
+          "ORG-IN-TALENT"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "optiwork-local-development",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "freelancer"
+      ]
+    },
+    {
+      "username": "in-buyer",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Pune",
+      "lastName": "Procurement manager",
+      "attributes": {
+        "organization_id": [
+          "ORG-IN-IMPORTER"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "optiwork-local-development",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "company_member"
+      ]
+    },
+    {
+      "username": "gb-supplier",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Leeds",
+      "lastName": "Account manager",
+      "attributes": {
+        "organization_id": [
+          "ORG-GB-SUPPLIER"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "optiwork-local-development",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "supplier"
+      ]
+    },
+    {
+      "username": "provider-ops",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Provider",
+      "lastName": "Operations",
+      "attributes": {
+        "organization_id": [
+          "ORG-OPTIWORK-OPS"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "optiwork-local-development",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "provider_operator",
+        "payments_service"
+      ]
+    },
+    {
+      "username": "platform-admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Platform",
+      "lastName": "Administrator",
+      "attributes": {
+        "organization_id": [
+          "ORG-OPTIWORK-ADMIN"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "optiwork-local-development",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "platform_admin",
+        "audit_service",
+        "compliance_service"
+      ]
+    }
+  ]
+}

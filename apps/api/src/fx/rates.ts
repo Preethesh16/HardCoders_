@@ -55,7 +55,7 @@ function fixtureFor(currency: string): { toUsd: string; observedAt: string } {
 export class FixtureRateSource implements FxRateSource {
   readonly name = 'FIXTURE' as const;
 
-  async rates(policy: CorridorPolicy): Promise<CorridorRates> {
+  async rates(policy: CorridorPolicy, _at?: Date): Promise<CorridorRates> {
     const funding = fixtureFor(policy.fundingCurrency);
     const payout = fixtureFor(policy.payoutCurrency);
     return {

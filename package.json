@@ -9,10 +9,13 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
+    "demo": "turbo run dev --parallel --filter @optiwork/api --filter @optiwork/web",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "infra:up": "docker compose -f infra/docker-compose.yml --profile full up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml --profile full down"
   },
   "devDependencies": {
     "turbo": "2.5.6",
