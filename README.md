@@ -15,7 +15,7 @@
 
 </div>
 
-![Anchor product experience showing global work moving from Poland to India](docs/assets/readme/product-experience.png)
+![Anchor pixel-art landing experience showing global work moving from Poland to India](docs/assets/readme/anchor-landing.png)
 
 > **The core insight:** one ledger should not be forced to prove everything. Fabric proves **what work was approved**. Algorand proves **that settlement happened**. PostgreSQL proves **who, how much and why**.
 
@@ -47,6 +47,24 @@ Most payment demos put a transfer on-chain and stop. Anchor tackles the harder q
 | **Auditability** | Every material outcome is tied to a rule version, quote hash, evidence hash, actor and ordered timeline event. |
 | **Demo readiness** | One command launches the app; one button runs both journeys through the same domain services used by the HTTP API. |
 
+## The product that works today
+
+Anchor exposes exactly two human roles—**Company** and **Freelancer**—inside one
+shared pixel-art deal room. Provider settlement, compliance, evidence recording
+and audit remain automated platform services, not fake login personas.
+
+| Company controls | Freelancer controls | Anchor automates |
+|---|---|---|
+| Publish a blank work brief | Discover the published opportunity | Collect and rank three proposals |
+| Compare ranked proposals and select a person | Submit price, timing, availability and approach | Draft the private agreement |
+| Define commercial, policy and legal terms | Review and accept the identical agreement hash | Refresh official rules and calculate live FX |
+| Download evidence and approve or reject delivery | Upload any deliverable and receive local payout | Fund escrow, validate evidence and release settlement |
+
+The two browser sessions poll the same shared cursor. Opening a Freelancer tab
+cannot create or reset a job; only the Company sees an explicit reset control.
+The cursor survives UI-service restarts, while authoritative business records,
+files and ledger proofs remain in PostgreSQL, MinIO, Fabric and Algorand.
+
 ## Three ledgers, one workflow
 
 | Boundary | Owns | Explicitly does **not** own |
@@ -58,8 +76,9 @@ Most payment demos put a transfer on-chain and stop. Anchor tackles the harder q
 
 ```mermaid
 flowchart LR
-    U[Company / freelancer / supplier] --> W[Next.js dashboards]
-    W --> A[Fastify orchestration API]
+    U[Company / freelancer] --> W[Pixel-art role portals]
+    W --> B[Same-origin workflow boundary]
+    B --> A[Fastify orchestration API]
 
     A --> P[(PostgreSQL<br/>workflow + accounting)]
     A --> O[(MinIO / S3<br/>private files)]
@@ -76,6 +95,50 @@ flowchart LR
 
     AI[Advisory AI<br/>rank · draft · explain] -. no authority .-> A
 ```
+
+## One continuous deal
+
+```text
+Company publishes a brief
+        ↓
+Freelancer submits price + delivery proposal
+        ↓
+AI ranks three candidates → Company makes the final selection
+        ↓
+Company defines terms → both parties approve one document hash
+        ↓
+Rules + live FX + compliance execute automatically
+        ↓
+Provider funds a fixed-value Algorand ARC-4 escrow
+        ↓
+Freelancer uploads privately → SHA-256 evidence enters Fabric
+        ↓
+AI validates as advice → Company makes the approval decision
+        ↓
+Fabric-bound permit releases escrow → INR balance is credited
+```
+
+Only seven human commands exist: publish, apply, select, define terms, accept
+terms, deliver and approve. The progress rail displays the automatic stages but
+does not turn infrastructure operations into decorative buttons.
+
+### Verified live-FX example
+
+The latest browser-driven acceptance run selected an `11,800 PLN` proposal and
+used the Frankfurter/ECB reference adapter:
+
+```text
+11,800.00 PLN × 0.26846                 = 3,167.828000 USD
+3,167.828000 USD − 50 bps origin fee   = 3,151.988860 USDC locked
+3,151.988860 USD × 94.49                =   297,831.43 INR
+297,831.43 INR − 35 bps destination fee =   296,789.02 INR credited
+```
+
+The quote stores both legs, fee amounts, observation time, expiry and canonical
+hash. Funding fixes the USDC amount, so later FX movement cannot change the
+already secured escrow. This browser journey runs on **Algorand LocalNet** with
+a zero-value six-decimal demo ASA; the separately linked public TestNet proof is
+not substituted into the local demo.
 
 ## The release path: proof before payout
 
@@ -94,7 +157,7 @@ This makes a database flag such as `APPROVED=true` insufficient to move money. T
 
 ### Fast browser preview
 
-### Prerequisites
+#### Prerequisites
 
 - Node.js `24.x`
 - pnpm via Corepack
@@ -108,14 +171,16 @@ corepack pnpm install
 corepack pnpm demo
 ```
 
-Open the integrated experience at [http://127.0.0.1:4175](http://127.0.0.1:4175).
-Choose a role and enter the single-tab **Deal Room** to execute the real
-role-specific journey. The company publishes a blank brief, compares three
-independent proposals and selects one freelancer; the selected freelancer
-accepts the private agreement and uploads the real deliverable. Only seven
-human decisions are exposed. Screening, official-source review, compliance,
-FX, escrow funding, work validation and release advance automatically and stay
-visible as non-clickable progress inside the same pixel-art Anchor experience.
+Open [Anchor](http://127.0.0.1:4175), or use the direct role links in two tabs:
+
+- [Company portal](http://127.0.0.1:4175/?role=company)
+- [Freelancer portal](http://127.0.0.1:4175/?role=freelancer)
+
+The Company publishes an empty brief, compares three independent proposals and
+selects one freelancer. The Freelancer accepts the exact private agreement and
+uploads a real file. Screening, official-source review, compliance, FX, escrow
+funding, work validation and release then advance automatically as visible,
+non-clickable stages inside the same Anchor experience.
 
 ### Full cryptographic proof run
 
@@ -156,7 +221,7 @@ Anchor services. They do not log in, choose work or appear as user roles.
 
 1. Open `:4175` in two tabs: enter one as **Company** and the other as **Freelancer**. Both poll the same shared deal cursor; its business records remain in PostgreSQL/MinIO and the cursor survives UI-service restarts.
 2. Company publishes the work; freelancer applies; the agent shortlists; then the company explicitly assigns the applicant.
-3. Both parties approve the exact contract hash. Company runs live FX/compliance and funds the real LocalNet ARC-4 escrow.
+3. Both parties approve the exact contract hash. Anchor automatically runs the official-source check, live FX, compliance and real LocalNet ARC-4 funding.
 4. Freelancer uploads the actual deliverable. Company grants review access, runs advisory validation, approves on Fabric and releases escrow.
 5. Inspect the contextual service proof in the same deal room; there is no separate provider or administrator persona.
 
@@ -167,16 +232,22 @@ Fabric approval and Algorand release both complete.
 
 ## Product tour
 
+### One visual system, two accountable humans
+
 <table>
   <tr>
-    <td width="50%"><img src="docs/assets/readme/company-dashboard.png" alt="Polish company dashboard with contract, FX, compliance and escrow details"></td>
-    <td width="50%"><img src="docs/assets/readme/product-experience.png" alt="Buyer and seller deal room with contextual platform proof"></td>
+    <td width="50%"><img src="docs/assets/readme/anchor-company-workflow.png" alt="Anchor Company deal room after approved work and completed LocalNet payout"></td>
+    <td width="50%"><img src="docs/assets/readme/anchor-freelancer-workflow.png" alt="Anchor Freelancer deal room showing the secured payout and private agreement"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Company view</strong><br/>Contract, exact FX legs, cited compliance and release proof.</td>
-    <td align="center"><strong>Buyer + seller experience</strong><br/>Human decisions with automatic settlement and evidence services in context.</td>
+    <td align="center"><strong>Company / buyer</strong><br/>Five-stage hiring, agreement, escrow and evidence-approval journey.</td>
+    <td align="center"><strong>Freelancer / seller</strong><br/>Six-stage proposal, agreement, private delivery and local-payout journey.</td>
   </tr>
 </table>
+
+These screenshots are captured by the two-browser acceptance test after the
+same deal reaches `COMPLETED`. The side rail is role-specific; hashes, ARC-4
+application/ASA references and the private agreement remain visible in context.
 
 ## Architecture and technology
 
@@ -184,7 +255,7 @@ Anchor is intentionally a **modular monolith plus two isolated blockchain gatewa
 
 | Layer | Technology | Responsibility |
 |---|---|---|
-| Web | Next.js 16, React 19, Tailwind CSS 4 | Server-rendered role dashboards; no browser-side blockchain keys |
+| Product experience | Pixel-art HTML/CSS/JavaScript portal served by Node; legacy Next.js routes redirect here | One canonical Company/Freelancer interface; no browser-side blockchain keys |
 | API | Node.js 24, TypeScript 5.9, Fastify 5, TypeBox | Marketplace, identity, corridor, compliance, FX and payment orchestration |
 | Business data | PostgreSQL 17, Drizzle ORM, pgvector | Workflow, versioned decisions, exact-money books and reconciliation |
 | Private files | MinIO locally, S3-compatible storage | Opaque object keys and short-lived authorized access |
@@ -251,6 +322,7 @@ corepack pnpm verify
 cd blockchain/fabric/chaincode && go test ./...
 cd ../../..
 corepack pnpm local:e2e
+corepack pnpm test:browser:roles
 ```
 
 The automated suite covers:
@@ -265,6 +337,9 @@ The automated suite covers:
 - persisted-signed-transaction recovery and ambiguous broadcast reconciliation;
 - ARC-4 create, fund, partial release, pause/resume, refund and completion behavior;
 - Algorand LocalNet and public TestNet lifecycle suites as explicit opt-in tests.
+- two isolated browser sessions proving Company publish → Freelancer apply,
+  three-candidate screening, bilateral agreement, arbitrary file upload, Fabric
+  approval and Algorand release without cross-role reset races.
 
 ```bash
 corepack pnpm --filter @optiwork/algorand-executor test:localnet
@@ -287,7 +362,7 @@ Test ALGO and TestNet USDC have no monetary value.
 
 | Capability | Status |
 |---|---|
-| Integrated company/freelancer deal room and seven human decisions | ✅ Role-specific controls plus automatic PostgreSQL, MinIO, Fabric and Algorand stages |
+| Integrated company/freelancer deal room and seven human decisions | ✅ Role-specific controls, cross-tab job visibility, Company-only reset and restart-persistent shared cursor |
 | Multi-applicant hiring and private agreement | ✅ Three independent proposals, advisory ranking, human selection, party-only MinIO document and stable hashes |
 | Live decision support | ✅ OpenAI advisory agents, Frankfurter reference FX and seven official regulation-source observations, each with visible fallback provenance |
 | Buyer and seller proof views plus two-corridor demonstration | ✅ Platform-service evidence is embedded without inventing extra user roles |
@@ -297,7 +372,7 @@ Test ALGO and TestNet USDC have no monetary value.
 | Fabric evidence chaincode and Gateway | ✅ Implemented and tested |
 | ARC-4 escrow and isolated Algorand executor | ✅ Implemented and tested |
 | Fabric-to-executor release contract | ✅ Cross-service integration tested |
-| Fully automated real Fabric + Algorand LocalNet journeys | ✅ Both corridors complete with confirmed transactions |
+| Fully automated real Fabric + Algorand LocalNet journeys | ✅ Browser workflow and both API corridors complete with confirmed transactions |
 | Public Algorand TestNet deployment and lifecycle | ✅ App `770960502`; official USDC; explorer-confirmed release/refund/recovery |
 | Production OIDC deployment and custody hardening | ⏭️ Explicitly deferred |
 
@@ -311,7 +386,7 @@ evaluation never depends on a faucet or external service.
 ```text
 apps/api                    Fastify API, workflow services, Drizzle schema and migrations
 apps/marketing              Integrated landing page, role portal and live workflow driver
-apps/web                    Next.js dashboards and remittance advice
+apps/web                    Legacy Next.js routes, redirects and remittance advice
 packages/contracts          Shared TypeBox boundary schemas
 packages/domain             Money, corridor, state-machine and ledger invariants
 services/fabric-gateway     Fabric access, identity mapping, permits and checkpoints

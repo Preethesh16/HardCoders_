@@ -204,6 +204,8 @@ try {
 
   await company.waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 5', 'Company journey rail did not complete.', 15_000);
   await freelancer.waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'Freelancer journey rail did not complete.', 15_000);
+  await company.waitFor('document.querySelector(".payout-card")?.classList.contains("complete") === true', 'Company payout card did not render the completed release.', 15_000);
+  await freelancer.waitFor('document.querySelector(".payout-card")?.classList.contains("complete") === true', 'Freelancer payout card did not render the completed release.', 15_000);
   const finalState = await company.state();
   if (!finalState.run?.results?.fabricDecisionTxId || !finalState.run?.results?.binding?.dealId) throw new Error('Final ledger proofs are incomplete.');
   await company.screenshot('/home/infinity/Documents/Codex/2026-09-03/cr/work/anchor-company-completed.png');

@@ -224,8 +224,13 @@
   function payoutCard() {
     const payment = results().payment;
     const binding = results().binding;
+    const agreedFunding = results().quote?.fundingAmount ?? results().contractAmount ?? (results().job ? {
+      amountMinor: results().job.budgetAmountMinor,
+      currency: results().job.budgetCurrency,
+      scale: results().job.budgetScale
+    } : null);
     const completed = model.run?.phase === "COMPLETED" || payment?.state === "COMPLETED" || binding?.state === "COMPLETED";
-    return `<section class="workspace-card payout-card ${completed ? "complete" : ""}"><header><span>SECURED PAYOUT</span><b>${completed ? "COMPLETED" : escape(payment?.state ?? binding?.state ?? "PENDING")}</b></header><div class="payout-route"><span><small>COMPANY PAYS</small><b>${escape(results().job ? money(results().job.budgetAmountMinor, results().job.budgetScale, results().job.budgetCurrency) : "PLN")}</b></span><i>→</i><span><small>ESCROW LOCKS</small><b>${escape(binding ? money(binding.amountUsdcMinor, binding.scale ?? 6, "USDC") : "USDC")}</b></span><i>→</i><span><small>YOU RECEIVE</small><b>${escape(payment?.payoutAmountMinor ? money(payment.payoutAmountMinor, payment.payoutScale, payment.payoutCurrency ?? "INR") : "INR")}</b></span></div><p>${completed ? "Your local INR credit is complete and linked to the approved Fabric evidence." : "No crypto wallet is required. Provider accounts handle settlement backstage."}</p></section>`;
+    return `<section class="workspace-card payout-card ${completed ? "complete" : ""}"><header><span>SECURED PAYOUT</span><b>${completed ? "COMPLETED" : escape(payment?.state ?? binding?.state ?? "PENDING")}</b></header><div class="payout-route"><span><small>AGREED PRICE</small><b>${escape(agreedFunding ? money(agreedFunding.amountMinor, agreedFunding.scale, agreedFunding.currency) : "PLN")}</b></span><i>→</i><span><small>ESCROW LOCKS</small><b>${escape(binding ? money(binding.amountUsdcMinor, binding.scale ?? 6, "USDC") : "USDC")}</b></span><i>→</i><span><small>YOU RECEIVE</small><b>${escape(payment?.payoutAmountMinor ? money(payment.payoutAmountMinor, payment.payoutScale, payment.payoutCurrency ?? "INR") : "INR")}</b></span></div><p>${completed ? "Your local INR credit is complete and linked to the approved Fabric evidence." : "No crypto wallet is required. Provider accounts handle settlement backstage."}</p></section>`;
   }
 
   function waiting(title, copy) {
