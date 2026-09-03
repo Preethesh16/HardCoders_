@@ -1,12 +1,21 @@
 import { buildApp } from './app.js';
+import { loadConfig } from './config.js';
+import { createContext } from './context.js';
+import { seedDemo } from './demo/seed.js';
 
-const host = process.env['API_HOST'] ?? '127.0.0.1';
-const port = Number(process.env['API_PORT'] ?? '4000');
+const config = loadConfig();
+const context = createContext(config);
+const app = await buildApp({ logger: true, config, context });
 
-const app = await buildApp({ logger: true });
+// The demo profile starts with a populated marketplace so the walkthrough is
+// immediate. Hosted profiles start empty and are seeded deliberately.
+if (config.profile === 'demo') {
+  const seed = await seedDemo(context);
+  app.log.info({ issuerDid: seed.issuerDid }, 'Seeded the demonstration marketplace');
+}
 
 try {
-  await app.listen({ host, port });
+  await app.listen({ host: config.host, port: config.port });
 } catch (error) {
   app.log.error(error);
   process.exitCode = 1;
