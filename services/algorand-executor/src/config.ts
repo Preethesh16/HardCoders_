@@ -198,10 +198,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
   assertNotDeniedNetwork(parsed.ALGORAND_GENESIS_HASH);
 
   if (parsed.ALGORAND_NETWORK === "testnet") {
-    if (fabricGatewayAuth.mode === "demo") {
-      throw new Error("Gateway demo authentication is LocalNet-only.");
-    }
-    const loopbackGatewayDemo = parsed.PUBLIC_TESTNET_DEMO && isLoopback(parsed.FABRIC_GATEWAY_URL);
+    // The public-network acceptance profile deliberately keeps the human-facing
+    // application on its guarded demo identities while exercising a real
+    // Fabric network and public Algorand TestNet. Demo headers are accepted
+    // only when the operator explicitly opts in and the Gateway is reachable
+    // solely through loopback/the private Compose service name. A hosted or
+    // otherwise remote TestNet deployment still requires OIDC below.
+    const loopbackGatewayDemo = parsed.PUBLIC_TESTNET_DEMO
+      && (isLoopback(parsed.FABRIC_GATEWAY_URL) || isLocalComposeService(parsed.FABRIC_GATEWAY_URL));
     if (parsed.ALGORAND_ALGOD_URL.protocol !== "https:"
       || (parsed.FABRIC_GATEWAY_URL.protocol !== "https:" && !loopbackGatewayDemo)) {
       throw new Error("Testnet requires HTTPS for Algod and the Fabric Gateway, except an explicitly enabled loopback demo Gateway.");
@@ -212,8 +216,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Execut
     const loopbackOidcDemo = fabricGatewayAuth.mode === "oidc"
       && parsed.PUBLIC_TESTNET_DEMO
       && isLoopback(fabricGatewayAuth.tokenUrl);
-    if (fabricGatewayAuth.mode !== "oidc"
-      || (fabricGatewayAuth.tokenUrl.protocol !== "https:" && !loopbackOidcDemo)) {
+    if (fabricGatewayAuth.mode === "demo" && !loopbackGatewayDemo) {
+      throw new Error("Testnet Gateway demo authentication requires PUBLIC_TESTNET_DEMO and a loopback or private Compose Gateway.");
+    }
+    if (fabricGatewayAuth.mode === "static"
+      || (fabricGatewayAuth.mode === "oidc"
+        && fabricGatewayAuth.tokenUrl.protocol !== "https:"
+        && !loopbackOidcDemo)) {
       throw new Error("Testnet requires HTTPS Gateway OIDC client credentials, except explicitly enabled loopback demo OIDC; static bearer tokens are LocalNet-only.");
     }
     // Pin the exact public TestNet genesis identity. Transport checks run first

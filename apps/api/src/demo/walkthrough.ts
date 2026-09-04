@@ -52,6 +52,12 @@ async function inwardJourney(context: AppContext, seed: SeedResult): Promise<Jou
   const payments = new PaymentService(context);
   const buyer = seed.polishCompany.principal;
   const provider = seed.indianFreelancer.principal;
+  // Public TestNet USDC comes only from a zero-value faucet. Keep the public
+  // acceptance transaction deliberately small while exercising the identical
+  // quote, escrow, evidence and release machinery used by LocalNet.
+  const agreedAmount = context.config.algorand.network === 'testnet'
+    ? money('1000', 'PLN', 2)
+    : money('1200000', 'PLN', 2);
 
   const job = await marketplace.createJob(buyer, {
     title: 'Cross-border reconciliation service',
@@ -62,7 +68,7 @@ async function inwardJourney(context: AppContext, seed: SeedResult): Promise<Jou
     payerCountry: 'PL',
     fundingCurrency: 'PLN',
     destinationCountry: 'IN',
-    budget: money('1200000', 'PLN', 2),
+    budget: agreedAmount,
   });
   const application = await marketplace.apply(provider, job.id, {
     residenceCountry: 'IN',
@@ -73,7 +79,7 @@ async function inwardJourney(context: AppContext, seed: SeedResult): Promise<Jou
       + 'including ledger-to-settlement comparison and exception handling.',
   });
   await marketplace.evaluateApplication(buyer, application.id);
-  const contract = await marketplace.selectApplicant(buyer, application.id, money('1200000', 'PLN', 2));
+  const contract = await marketplace.selectApplicant(buyer, application.id, agreedAmount);
 
   await marketplace.approveContract(buyer, contract.id, { party: 'BUYER', acceptedTermsHash: contract.contractHash });
   await marketplace.approveContract(provider, contract.id, { party: 'PROVIDER', acceptedTermsHash: contract.contractHash });
@@ -88,7 +94,7 @@ async function inwardJourney(context: AppContext, seed: SeedResult): Promise<Jou
 
   const created = await payments.create(buyer, {
     contractId: contract.id,
-    fundingAmount: money('1200000', 'PLN', 2),
+    fundingAmount: agreedAmount,
   });
   await payments.fund(buyer, created.payment.id, `demo-inward-fund-${created.payment.id}`);
 
@@ -127,6 +133,9 @@ async function outwardJourney(context: AppContext, seed: SeedResult): Promise<Jo
   const payments = new PaymentService(context);
   const buyer = seed.indianCompany.principal;
   const supplier = seed.ukSupplier.principal;
+  const agreedAmount = context.config.algorand.network === 'testnet'
+    ? money('10000', 'INR', 2)
+    : money('80000000', 'INR', 2);
 
   const job = await marketplace.createJob(buyer, {
     title: 'Calibrated optical assemblies',
@@ -137,7 +146,7 @@ async function outwardJourney(context: AppContext, seed: SeedResult): Promise<Jo
     payerCountry: 'IN',
     fundingCurrency: 'INR',
     destinationCountry: 'GB',
-    budget: money('80000000', 'INR', 2),
+    budget: agreedAmount,
   });
   const application = await marketplace.apply(supplier, job.id, {
     residenceCountry: 'GB',
@@ -148,7 +157,7 @@ async function outwardJourney(context: AppContext, seed: SeedResult): Promise<Jo
       + 'calibration certificates and customs documentation.',
   });
   await marketplace.evaluateApplication(buyer, application.id);
-  const contract = await marketplace.selectApplicant(buyer, application.id, money('80000000', 'INR', 2));
+  const contract = await marketplace.selectApplicant(buyer, application.id, agreedAmount);
   await marketplace.approveContract(buyer, contract.id, { party: 'BUYER', acceptedTermsHash: contract.contractHash });
   await marketplace.approveContract(supplier, contract.id, { party: 'PROVIDER', acceptedTermsHash: contract.contractHash });
 
@@ -166,7 +175,7 @@ async function outwardJourney(context: AppContext, seed: SeedResult): Promise<Jo
 
   const created = await payments.create(buyer, {
     contractId: contract.id,
-    fundingAmount: money('80000000', 'INR', 2),
+    fundingAmount: agreedAmount,
   });
   await payments.fund(buyer, created.payment.id, `demo-outward-fund-${created.payment.id}`);
 

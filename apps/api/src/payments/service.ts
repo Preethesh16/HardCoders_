@@ -305,17 +305,23 @@ export class PaymentService {
     });
     // 2. The origin provider converts to USD and takes its fee.
     const originFee = quote.fees.find((fee) => fee.code === 'ORIGIN_AND_PLATFORM')!.amount;
+    const usdConversionLines = [
+      { accountId: accounts.originSettlementUsd, side: 'DEBIT' as const, amount: quote.grossSettlementAmount },
+      ...(BigInt(originFee.amountMinor) > 0n
+        ? [{ accountId: accounts.feeIncomeUsd, side: 'CREDIT' as const, amount: originFee }]
+        : []),
+      { accountId: accounts.escrowControlUsd, side: 'CREDIT' as const, amount: quote.settlementAmount },
+    ];
     await this.context.ledger.post({
       bookId: payment.bookId,
       direction: payment.direction as 'INWARD' | 'OUTWARD',
       reference: `${payment.id}:USD_CONVERSION`,
       memo: `Simulated ${quote.fundingAmount.currency} to USD conversion for ${payment.id}`,
       paymentId: payment.id,
-      lines: [
-        { accountId: accounts.originSettlementUsd, side: 'DEBIT', amount: quote.grossSettlementAmount },
-        { accountId: accounts.feeIncomeUsd, side: 'CREDIT', amount: originFee },
-        { accountId: accounts.escrowControlUsd, side: 'CREDIT', amount: quote.settlementAmount },
-      ],
+      // A percentage fee can legitimately round to zero at the currency's
+      // fixed scale (notably in faucet-sized TestNet demonstrations). Zero is
+      // not a journal movement, so omit that line while preserving balance.
+      lines: usdConversionLines,
     });
     let current = await this.transition(payment, 'FIAT_FUNDED');
     await this.context.timeline.append({
@@ -510,17 +516,20 @@ export class PaymentService {
       ],
     });
     const destinationFee = quote.fees.find((fee) => fee.code === 'DESTINATION_OFFRAMP')!.amount;
+    const payoutLines = [
+      { accountId: accounts.destinationPayout, side: 'DEBIT' as const, amount: quote.grossPayoutAmount },
+      ...(BigInt(destinationFee.amountMinor) > 0n
+        ? [{ accountId: accounts.feeIncomePayout, side: 'CREDIT' as const, amount: destinationFee }]
+        : []),
+      { accountId: accounts.beneficiaryWallet, side: 'CREDIT' as const, amount: quote.payoutAmount },
+    ];
     await this.context.ledger.post({
       bookId: payment.bookId,
       direction: payment.direction as 'INWARD' | 'OUTWARD',
       reference: `${payment.id}:PAYOUT`,
       memo: `Simulated USD to ${quote.payoutAmount.currency} payout for ${payment.id}`,
       paymentId: payment.id,
-      lines: [
-        { accountId: accounts.destinationPayout, side: 'DEBIT', amount: quote.grossPayoutAmount },
-        { accountId: accounts.feeIncomePayout, side: 'CREDIT', amount: destinationFee },
-        { accountId: accounts.beneficiaryWallet, side: 'CREDIT', amount: quote.payoutAmount },
-      ],
+      lines: payoutLines,
     });
     current = await this.transition(current, 'PAYOUT_CREDITED');
     await this.context.timeline.append({
@@ -659,6 +668,7 @@ export class PaymentService {
     const payment = await this.requirePayment(paymentId);
     const contract = await this.requireContract(payment.contractId);
     requireReadAccess(principal, contract.buyerOrganizationId, contract.providerOrganizationId);
+    const hydrated = await this.hydrate(payment);
     const [contractEvents, paymentEvents] = await Promise.all([
       this.context.timeline.forContract(contract.id),
       this.context.timeline.forPayment(paymentId),
@@ -677,6 +687,9 @@ export class PaymentService {
     return {
       payment,
       contract,
+      quote: hydrated.quote,
+      compliance: hydrated.compliance,
+      corridor: hydrated.corridor,
       events: merged,
       commands,
       binding,

@@ -77,6 +77,24 @@ describe("executor configuration", () => {
     })).toThrow(/explicitly enabled loopback demo OIDC/u);
   });
 
+  it("allows guarded demo Gateway auth only for an explicit local public-TestNet acceptance runtime", () => {
+    const localDemo = {
+      ALGORAND_NETWORK: "testnet",
+      PUBLIC_TESTNET_DEMO: "true",
+      ALGORAND_GENESIS_HASH: TESTNET_GENESIS_HASH,
+      ALGORAND_ASSET_ID: TESTNET_USDC_ASSET_ID.toString(),
+      ALGORAND_ALGOD_URL: "https://testnet-api.algonode.cloud",
+      FABRIC_GATEWAY_URL: "http://fabric-gateway:4200",
+      FABRIC_GATEWAY_BEARER_TOKEN: "",
+      FABRIC_GATEWAY_DEMO_AUTH: "true",
+    } as const;
+    expect(testConfig(localDemo).fabricGatewayAuth).toEqual({ mode: "demo" });
+    expect(() => testConfig({ ...localDemo, PUBLIC_TESTNET_DEMO: "false" }))
+      .toThrow(/explicitly enabled loopback demo Gateway/u);
+    expect(() => testConfig({ ...localDemo, FABRIC_GATEWAY_URL: "http://gateway.example" }))
+      .toThrow(/explicitly enabled loopback demo Gateway/u);
+  });
+
   it("pins the exact public TestNet genesis and refuses MainNet on any network", () => {
     const testnetOidc = {
       ALGORAND_NETWORK: "testnet",

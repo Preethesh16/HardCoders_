@@ -1,0 +1,39 @@
+# Public Algorand TestNet acceptance overlay. The business services and private
+# Fabric evidence network remain local; only settlement targets the pinned
+# public TestNet application and official zero-value Circle TestNet USDC.
+services:
+  fabric-gateway:
+    env_file:
+      - ../.optiwork/testnet/fabric-gateway.env
+
+  algorand-executor:
+    env_file:
+      - ../.optiwork/testnet/algorand-executor.env
+    environment:
+      ALGORAND_NETWORK: testnet
+      PUBLIC_TESTNET_DEMO: "true"
+      ALGORAND_ALGOD_URL: https://testnet-api.algonode.cloud
+      ALGORAND_ALGOD_TOKEN: ""
+      ALGORAND_INDEXER_URL: https://testnet-idx.algonode.cloud
+      ALGORAND_REQUEST_TIMEOUT_MS: "120000"
+      ALGORAND_CONFIRMATION_ROUNDS: "3"
+      FABRIC_GATEWAY_DEMO_AUTH: "true"
+
+  api:
+    env_file:
+      - ../.optiwork/testnet/api.env
+    environment:
+      OPTIWORK_PROFILE: demo
+      AUTH_MODE: demo
+      ALGORAND_NETWORK: testnet
+      ALGORAND_EXPLORER_BASE_URL: https://lora.algokit.io/testnet
+    volumes:
+      - ../.optiwork/testnet/algorand-deployment.json:/run/optiwork/algorand-deployment.json:ro
+
+  web:
+    environment:
+      NEXT_PUBLIC_ALGORAND_EXPLORER_BASE_URL: https://lora.algokit.io/testnet
+
+  marketing:
+    environment:
+      ANCHOR_WORKFLOW_STATE_FILE: /tmp/anchor-testnet-workflow-state.json

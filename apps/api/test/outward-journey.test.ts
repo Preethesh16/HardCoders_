@@ -145,6 +145,54 @@ describe('India to United Kingdom outward supplier journey', () => {
     expect(await current.context.ledger.bookIsBalanced('IN-GB-OUTWARD')).toBe(true);
   });
 
+  it('omits a percentage-fee journal line when the fee rounds to zero', async () => {
+    harness = await createHarness();
+    const current = harness;
+    const { indianCompany, ukSupplier } = current.seed;
+    const contract = await supplierContract(current, '10000');
+    const created = await call(current, 'POST', '/v1/supplier-payments', {
+      token: indianCompany.token,
+      idempotencyKey: 'outward-payment-tiny-fee',
+      body: {
+        contractId: contract.id,
+        fundingAmount: { amountMinor: '10000', currency: 'INR', scale: 2 },
+        invoiceReference: 'INV-PENNINE-TESTNET-TINY',
+        documents: documents(IMPORT_DOCUMENTS),
+      },
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.quote.fees.find((fee: { code: string }) => fee.code === 'DESTINATION_OFFRAMP').amount.amountMinor)
+      .toBe('0');
+    await call(current, 'POST', `/v1/payments/${created.body.payment.id}/fund`, {
+      token: indianCompany.token,
+      idempotencyKey: 'outward-fund-tiny-fee',
+    });
+    const submission = await call(current, 'POST', `/v1/contracts/${contract.id}/submissions`, {
+      token: ukSupplier.token,
+      idempotencyKey: 'outward-submission-tiny-fee',
+      body: {
+        fileName: 'tiny-shipment.pdf',
+        contentType: 'application/pdf',
+        contentBase64: base64('tiny shipment manifest'),
+        note: 'Faucet-sized TestNet acceptance shipment.',
+      },
+    });
+    await call(current, 'POST', `/v1/submissions/${submission.body.submission.id}/approve`, {
+      token: indianCompany.token,
+      idempotencyKey: 'outward-decision-tiny-fee',
+      body: { decision: 'APPROVED', comment: 'Accepted.' },
+    });
+    const released = await call(current, 'POST', `/v1/payments/${created.body.payment.id}/release`, {
+      token: indianCompany.token,
+      idempotencyKey: 'outward-release-tiny-fee',
+    });
+    expect(released.status).toBe(200);
+    expect(released.body.payment.state).toBe('COMPLETED');
+    const lines = await current.context.store.findMany(journalLines, { bookId: 'IN-GB-OUTWARD' });
+    expect(lines.every((line) => BigInt(line.amountMinor) > 0n)).toBe(true);
+    expect(await current.context.ledger.bookIsBalanced('IN-GB-OUTWARD')).toBe(true);
+  });
+
   it('never lets an outward posting touch an inward account', async () => {
     harness = await createHarness();
     const current = harness;

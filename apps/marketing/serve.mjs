@@ -86,6 +86,19 @@ async function proxyToApi(req, res, path, init = {}) {
   }
 }
 
+async function runtimeMetadata() {
+  try {
+    const response = await fetch(new URL("/health/live", API_BASE_URL), {
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const health = await response.json();
+    return { network: health.network ?? "unknown", adapters: health.adapters ?? {} };
+  } catch {
+    return { network: "unknown", adapters: {} };
+  }
+}
+
 function safeDownloadName(value, fallback) {
   const cleaned = String(value ?? fallback).replace(/[^a-zA-Z0-9._-]/gu, "_").slice(0, 120);
   return cleaned || fallback;
@@ -129,7 +142,7 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (requestPath === "/api/workspace/state" && req.method === "GET") {
-    sendJson(res, 200, { steps: stepList(), run: currentRun() });
+    sendJson(res, 200, { steps: stepList(), run: currentRun(), runtime: await runtimeMetadata() });
     return;
   }
   if (requestPath === "/api/authorization/evaluate" && req.method === "POST") {

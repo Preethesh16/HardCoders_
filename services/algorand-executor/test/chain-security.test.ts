@@ -66,6 +66,15 @@ function createInput(config: ExecutorConfig, idempotencyKey: string, dealId: str
   };
 }
 
+function fundInput(config: ExecutorConfig): PrepareInput {
+  return {
+    ...createInput(config, "CREATE-A", "DEAL-A"),
+    action: "fund",
+    commandHash: `sha256:${"e".repeat(64)}`,
+    idempotencyKey: "FUND-A",
+  };
+}
+
 describe("signed command binding and fee policy", () => {
   it("rejects a valid signed blob prepared for another command before any Algod reconciliation call", async () => {
     const initial = testConfig();
@@ -103,6 +112,39 @@ describe("signed command binding and fee policy", () => {
 
     await expect(chain.prepare(createInput(config, "CREATE-A", "DEAL-A")))
       .rejects.toThrow(/fee outside the configured microAlgo cap/u);
+    expect(server.requests()).toBe(1);
+  });
+
+  it("rejects an underfunded origin treasury before constructing or signing a funding group", async () => {
+    const initial = testConfig();
+    const server = await fakeAlgod((request, response) => {
+      if (request.method === "GET" && request.url?.includes("/v2/accounts/")
+        && request.url.includes(`/assets/${initial.ALGORAND_ASSET_ID.toString()}`)) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          "asset-holding": {
+            amount: 99,
+            "asset-id": Number(initial.ALGORAND_ASSET_ID),
+            "is-frozen": false,
+          },
+          round: 100,
+        }));
+        return;
+      }
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: `unexpected request ${request.method} ${request.url}` }));
+    });
+    const config = testConfig({
+      ALGORAND_ALGOD_URL: server.endpoint,
+      ALGORAND_SIGNER_ADDRESS: initial.ALGORAND_SIGNER_ADDRESS,
+      ALGORAND_SIGNER_PRIVATE_KEY_BASE64: Buffer.from(initial.signerPrivateKey).toString("base64"),
+      ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS: initial.ALGORAND_ORIGIN_PROVIDER_TREASURY_ADDRESS,
+      ALGORAND_ORIGIN_PROVIDER_TREASURY_PRIVATE_KEY_BASE64: Buffer.from(initial.originProviderTreasuryPrivateKey).toString("base64"),
+    });
+    const chain = new RealAlgorandChain(config);
+
+    await expect(chain.prepare(fundInput(config)))
+      .rejects.toThrow(/insufficient settlement assets: 99 available, 100 required.*not signed/u);
     expect(server.requests()).toBe(1);
   });
 });

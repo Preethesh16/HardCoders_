@@ -1240,3 +1240,169 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
   #portalWorkflow .deal-complete-confirmation>button,#portalWorkflow .deal-complete-confirmation>span{grid-column:1/-1;text-align:center}
 }
 @media(prefers-reduced-motion:reduce){#portalWorkflow .deal-companion{transition:none}}
+
+/* Completed-deal receipt. Every value is projected from persisted workflow data. */
+#portalWorkflow .settlement-receipt{margin-top:22px;overflow:hidden;background:#fff;border:1px solid #dce5de;border-radius:12px;box-shadow:0 12px 34px rgba(23,55,45,.09);color:#17372d}
+#portalWorkflow .settlement-receipt>header{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;padding:28px;border-bottom:1px solid #dce5de}
+#portalWorkflow .settlement-receipt>header small,#portalWorkflow .settlement-panel>header span,#portalWorkflow .conservation-proof>header span,#portalWorkflow .settlement-audit summary span{font:6px/1.6 "Press Start 2P",monospace;color:#61766b}
+#portalWorkflow .settlement-receipt>header h3{max-width:760px;margin:10px 0 8px;font:18px/1.5 "Press Start 2P",monospace;text-wrap:balance}
+#portalWorkflow .settlement-receipt>header p{max-width:800px;margin:0;color:#576a60;font:13px/1.65 var(--mono);text-wrap:pretty}
+#portalWorkflow .settlement-receipt>header>span{flex:none;padding:10px 12px;border-radius:7px;font:6px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .settlement-receipt [data-state="matched"]{background:#dff5e7;color:#17603d}
+#portalWorkflow .settlement-receipt [data-state="mismatched"]{background:#ffe0de;color:#8c2b25}
+#portalWorkflow .settlement-identifiers{display:grid;grid-template-columns:1.2fr 1fr .8fr 1fr;background:#f4f7f4;border-bottom:1px solid #dce5de}
+#portalWorkflow .settlement-identifiers>div{min-width:0;padding:16px 18px;border-right:1px solid #dce5de}
+#portalWorkflow .settlement-identifiers>div:last-child{border-right:0}
+#portalWorkflow .settlement-identifiers small,#portalWorkflow .receipt-time-grid small,#portalWorkflow .provider-command-list small,#portalWorkflow .trust-proof-grid small,#portalWorkflow .settlement-money-flow small,#portalWorkflow .conservation-proof article small{display:block;color:#73847b;font:6px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .settlement-identifiers b{display:block;margin-top:7px;overflow:hidden;font:700 11px/1.5 var(--mono);font-variant-numeric:tabular-nums;text-overflow:ellipsis;white-space:nowrap}
+#portalWorkflow .settlement-command-center{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,.65fr);gap:1px;background:#dce5de;border-bottom:1px solid #dce5de}
+#portalWorkflow .settlement-value-story{padding:30px;background:#102b22;color:#fff}
+#portalWorkflow .settlement-value-story>small,#portalWorkflow .settlement-journey header small,#portalWorkflow .fee-impact header small,#portalWorkflow .settlement-section-title span{font:7px/1.55 "Press Start 2P",monospace}
+#portalWorkflow .settlement-value-story>small{color:#d9ff45}
+#portalWorkflow .settlement-value-story>div{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr) 28px minmax(0,1fr);align-items:center;margin:24px 0}
+#portalWorkflow .settlement-value-story>div>i{color:#d9ff45;text-align:center;font:700 18px var(--mono);font-style:normal}
+#portalWorkflow .settlement-value-story>div>span{min-width:0}
+#portalWorkflow .settlement-value-story em,#portalWorkflow .settlement-value-story b,#portalWorkflow .settlement-value-story span>small{display:block}
+#portalWorkflow .settlement-value-story em{color:#94aa9f;font:9px/1.45 var(--mono);font-style:normal}
+#portalWorkflow .settlement-value-story b{margin-top:8px;color:#fff;font:700 clamp(15px,1.45vw,22px)/1.35 var(--mono);font-variant-numeric:tabular-nums}
+#portalWorkflow .settlement-value-story .stable-value{padding:16px;background:#173f34;border:1px solid #4f7567}
+#portalWorkflow .settlement-value-story .stable-value b{color:#d9ff45}
+#portalWorkflow .settlement-value-story span>small{margin-top:7px;color:#91aaa0;font:8px/1.45 var(--mono)}
+#portalWorkflow .settlement-value-story>p{max-width:780px;margin:0;color:#b5c4bd;font:12px/1.65 var(--mono);text-wrap:pretty}
+#portalWorkflow .settlement-kpis{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#dce5de}
+#portalWorkflow .settlement-kpis article{min-width:0;padding:20px 18px;background:#f5f8f5}
+#portalWorkflow .settlement-kpis small,#portalWorkflow .settlement-kpis b,#portalWorkflow .settlement-kpis span{display:block}
+#portalWorkflow .settlement-kpis small{color:#697d72;font:6px/1.55 "Press Start 2P",monospace}
+#portalWorkflow .settlement-kpis b{margin:11px 0 5px;color:#17372d;font:700 17px/1.35 var(--mono);font-variant-numeric:tabular-nums}
+#portalWorkflow .settlement-kpis span{color:#718078;font:10px/1.45 var(--mono)}
+#portalWorkflow .settlement-journey{margin:24px;border:1px solid #cbd8cf;border-radius:10px;overflow:hidden}
+#portalWorkflow .settlement-journey>header,#portalWorkflow .fee-impact>header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 20px;background:#f3f7f3;border-bottom:1px solid #dce5de}
+#portalWorkflow .settlement-journey h4,#portalWorkflow .fee-impact h4{margin:6px 0 0;font:700 17px/1.45 var(--mono)}
+#portalWorkflow .settlement-journey>header>b,#portalWorkflow .fee-impact>header>span{padding:7px 9px;background:#e3f2e7;color:#17603d;border-radius:6px;font:7px/1.45 "Press Start 2P",monospace}
+#portalWorkflow .settlement-journey>div{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));background:#dce5de;gap:1px}
+#portalWorkflow .settlement-journey article{position:relative;min-width:0;min-height:150px;padding:18px 14px;background:#fff}
+#portalWorkflow .settlement-journey article>i{display:grid;place-items:center;width:30px;height:30px;margin-bottom:17px;background:#edf2ee;color:#6e8176;border-radius:50%;font:700 10px var(--mono);font-style:normal}
+#portalWorkflow .settlement-journey article[data-complete="true"]>i{background:#17372d;color:#d9ff45}
+#portalWorkflow .settlement-journey article small,#portalWorkflow .settlement-journey article b,#portalWorkflow .settlement-journey article time{display:block}
+#portalWorkflow .settlement-journey article small{color:#267b50;font:7px/1.45 "Press Start 2P",monospace}
+#portalWorkflow .settlement-journey article b{margin-top:8px;color:#34493e;font:700 10px/1.5 var(--mono)}
+#portalWorkflow .settlement-journey article time{margin-top:10px;color:#798a81;font:9px/1.45 var(--mono);font-variant-numeric:tabular-nums}
+#portalWorkflow .settlement-section-title{display:flex;align-items:flex-end;justify-content:space-between;gap:22px;padding:8px 24px 13px}
+#portalWorkflow .settlement-section-title span{color:#17372d}
+#portalWorkflow .settlement-section-title p{margin:0;color:#708078;font:11px/1.5 var(--mono);text-wrap:pretty}
+#portalWorkflow .settlement-money-flow{display:grid;grid-template-columns:minmax(180px,.9fr) minmax(230px,1.15fr) minmax(200px,1fr) minmax(230px,1.15fr) minmax(180px,.9fr);align-items:stretch;gap:1px;margin:0 24px 24px;overflow:hidden;background:#456357;border:1px solid #456357;border-radius:10px;color:#fff}
+#portalWorkflow .settlement-money-flow .flow-value{min-width:0;min-height:178px;padding:21px;background:#173b30}
+#portalWorkflow .settlement-money-flow .flow-value.escrow-value{background:#143945}
+#portalWorkflow .settlement-money-flow .flow-value.payout-value{background:#1b5639}
+#portalWorkflow .settlement-money-flow .flow-value b{display:block;margin:18px 0 9px;color:#fff;font:700 clamp(14px,1.25vw,19px)/1.4 var(--mono);font-variant-numeric:tabular-nums}
+#portalWorkflow .settlement-money-flow .flow-value.escrow-value b{color:#67e4f2}
+#portalWorkflow .settlement-money-flow .flow-value.payout-value b{color:#9af0b9}
+#portalWorkflow .settlement-money-flow .flow-value p{margin:0;color:#afc0b7;font:11px/1.55 var(--mono);text-wrap:pretty}
+#portalWorkflow .flow-conversion{display:grid;grid-template-columns:1fr auto;grid-template-rows:1fr auto;gap:12px;padding:18px;background:#102b22}
+#portalWorkflow .flow-conversion>span{min-width:0}
+#portalWorkflow .flow-conversion>span small,#portalWorkflow .flow-conversion>span b,#portalWorkflow .flow-conversion>span em{display:block}
+#portalWorkflow .flow-conversion>span b{margin-top:8px;color:#fff;font:700 13px/1.4 var(--mono);font-variant-numeric:tabular-nums}
+#portalWorkflow .flow-conversion>i{grid-column:2;grid-row:1;align-self:center;color:#d9ff45;font:700 18px var(--mono);font-style:normal}
+#portalWorkflow .flow-conversion .flow-fee{grid-column:1/-1;padding:11px 12px;background:#403621;border:1px solid #725f35}
+#portalWorkflow .flow-conversion .flow-fee small{color:#d9bd72}
+#portalWorkflow .flow-conversion .flow-fee b{margin:6px 0 3px;color:#fff;font-size:12px}
+#portalWorkflow .flow-conversion .flow-fee em{color:#bda96e;font:9px/1.4 var(--mono);font-style:normal}
+#portalWorkflow .fee-impact{margin:0 24px 24px;border:1px solid #cbd8cf;border-radius:10px;overflow:hidden}
+#portalWorkflow .fee-impact>div{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#dce5de}
+#portalWorkflow .fee-impact article{padding:18px;background:#fff}
+#portalWorkflow .fee-impact article>div{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#31483c;font:11px/1.45 var(--mono)}
+#portalWorkflow .fee-impact article>div b{font-variant-numeric:tabular-nums}
+#portalWorkflow .fee-impact article>i{display:block;height:10px;margin:14px 0;background:#e6ece7;overflow:hidden}
+#portalWorkflow .fee-impact article>i>b{display:block;width:var(--fill);min-width:3px;height:100%;background:#c79b3a}
+#portalWorkflow .fee-impact article>p{margin:0;color:#6a7a71;font:10px/1.55 var(--mono);text-wrap:pretty}
+#portalWorkflow .conservation-proof{margin:24px;border:1px solid #cbd8cf;border-radius:10px;overflow:hidden}
+#portalWorkflow .conservation-proof>header,#portalWorkflow .settlement-panel>header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 17px;background:#f3f7f3;border-bottom:1px solid #dce5de}
+#portalWorkflow .conservation-proof>header b,#portalWorkflow .settlement-panel>header b{padding:7px 9px;border-radius:6px;font:6px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .conservation-proof>div{display:grid;grid-template-columns:repeat(4,1fr)}
+#portalWorkflow .conservation-proof article{min-width:0;padding:17px;border-right:1px solid #e1e8e2}
+#portalWorkflow .conservation-proof article:last-child{border-right:0}
+#portalWorkflow .conservation-proof article b{display:block;margin:10px 0 7px;color:#17603d;font:700 16px/1.45 var(--mono);font-variant-numeric:tabular-nums}
+#portalWorkflow .conservation-proof article p{margin:0;color:#627168;font:11px/1.55 var(--mono);text-wrap:pretty}
+#portalWorkflow .conservation-proof>footer{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;height:auto;padding:14px 17px;background:#eaf6ed;border:0;font:11px/1.5 var(--mono)}
+#portalWorkflow .conservation-proof>footer b{color:#17603d}
+#portalWorkflow .conservation-proof>footer em{font-style:normal;font-variant-numeric:tabular-nums}
+#portalWorkflow .network-fee-note{margin:0;padding:12px 17px;background:#fff8e5;border-top:1px solid #ead8a8;color:#6d5720;font:11px/1.55 var(--mono);text-wrap:pretty}
+#portalWorkflow .settlement-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:0 24px 24px}
+#portalWorkflow .settlement-panel{min-width:0;border:1px solid #dce5de;border-radius:10px;overflow:hidden}
+#portalWorkflow .receipt-time-grid{display:grid;grid-template-columns:1fr 1fr}
+#portalWorkflow .receipt-time-grid>span{min-width:0;padding:14px 16px;border-right:1px solid #e1e8e2;border-bottom:1px solid #e1e8e2}
+#portalWorkflow .receipt-time-grid>span:nth-child(2n){border-right:0}
+#portalWorkflow .receipt-time-grid b{display:block;margin-top:7px;overflow:hidden;font:700 11px/1.5 var(--mono);font-variant-numeric:tabular-nums;text-overflow:ellipsis;white-space:nowrap}
+#portalWorkflow .receipt-obligations{display:grid;gap:1px;background:#dce5de}
+#portalWorkflow .receipt-obligations article{padding:14px 16px;background:#fff}
+#portalWorkflow .receipt-obligations article header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#portalWorkflow .receipt-obligations article header b{font:700 10px/1.5 var(--mono)}
+#portalWorkflow .receipt-obligations article header em{padding:5px 7px;border-radius:999px;background:#eaf6ed;color:#17603d;font:700 8px/1.4 var(--mono);font-style:normal}
+#portalWorkflow .receipt-obligations article p{margin:8px 0;color:#53665b;font:11px/1.55 var(--mono);text-wrap:pretty}
+#portalWorkflow .receipt-obligations article small{color:#7a8b82;font:9px/1.45 var(--mono)}
+#portalWorkflow .receipt-rule-tags{display:flex;flex-wrap:wrap;gap:6px;padding:15px;background:#f7f9f7}
+#portalWorkflow .receipt-rule-tags span{padding:6px 8px;background:#e6eee8;border-radius:5px;font:8px/1.4 var(--mono)}
+#portalWorkflow .receipt-sources{max-height:440px;overflow:auto}
+#portalWorkflow .receipt-sources>a,#portalWorkflow .receipt-sources>div{display:block;padding:14px 16px;border-bottom:1px solid #e1e8e2}
+#portalWorkflow .receipt-sources>a:last-child,#portalWorkflow .receipt-sources>div:last-child{border-bottom:0}
+#portalWorkflow .receipt-sources b,#portalWorkflow .receipt-sources span{display:block;font:11px/1.5 var(--mono)}
+#portalWorkflow .receipt-sources span{margin-top:4px;color:#687b70;font-size:10px;font-variant-numeric:tabular-nums}
+#portalWorkflow .receipt-sources a:hover b{text-decoration:underline}
+#portalWorkflow .blockchain-proof{margin:0 24px 24px}
+#portalWorkflow .trust-proof-grid{display:grid;grid-template-columns:1fr 1fr}
+#portalWorkflow .trust-proof-grid article{min-width:0;padding:18px;border-right:1px solid #e1e8e2}
+#portalWorkflow .trust-proof-grid article:last-child{border-right:0}
+#portalWorkflow .trust-proof-grid b{display:block;margin:9px 0;font:8px/1.6 "Press Start 2P",monospace}
+#portalWorkflow .trust-proof-grid p{margin:5px 0;color:#5b6d63;font:11px/1.5 var(--mono)}
+#portalWorkflow .trust-proof-grid code{display:block;margin-top:10px;padding:9px;overflow:hidden;background:#102b22;color:#d9ff45;font:10px/1.45 var(--mono);text-overflow:ellipsis;white-space:nowrap}
+#portalWorkflow .provider-command-list{border-top:1px solid #e1e8e2}
+#portalWorkflow .provider-command-list>div{display:grid;grid-template-columns:.7fr 1.3fr 1fr;gap:14px;padding:13px 17px;border-bottom:1px solid #e1e8e2}
+#portalWorkflow .provider-command-list>div:last-child{border-bottom:0}
+#portalWorkflow .provider-command-list b,#portalWorkflow .provider-command-list a,#portalWorkflow .provider-command-list code{display:block;margin-top:6px;color:#17372d;font:700 11px/1.45 var(--mono);font-variant-numeric:tabular-nums}
+#portalWorkflow .provider-command-list a{text-decoration:underline}
+#portalWorkflow .settlement-audit{margin:0 24px 24px;border:1px solid #dce5de;border-radius:10px;overflow:hidden}
+#portalWorkflow .settlement-audit summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px;background:#f3f7f3;cursor:pointer;list-style:none}
+#portalWorkflow .settlement-audit summary::-webkit-details-marker{display:none}
+#portalWorkflow .settlement-audit summary b{font:700 9px/1.45 var(--mono)}
+#portalWorkflow .settlement-audit ol{max-height:620px;margin:0;padding:8px 18px 8px 42px;overflow:auto;list-style:none}
+#portalWorkflow .settlement-audit li{position:relative;padding:13px 0 13px 22px;border-bottom:1px solid #e7ece8}
+#portalWorkflow .settlement-audit li:last-child{border-bottom:0}
+#portalWorkflow .settlement-audit li>i{position:absolute;left:-16px;top:18px;width:9px;height:9px;background:#267b50;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px #267b50}
+#portalWorkflow .settlement-audit li>div>span{display:flex;align-items:center;justify-content:space-between;gap:14px}
+#portalWorkflow .settlement-audit li b{font:700 11px/1.5 var(--mono)}
+#portalWorkflow .settlement-audit li time{color:#708278;font:10px/1.45 var(--mono);font-variant-numeric:tabular-nums}
+#portalWorkflow .settlement-audit li p{margin:5px 0;color:#52645a;font:11px/1.5 var(--mono);text-wrap:pretty}
+#portalWorkflow .settlement-audit li small{color:#7b8b83;font:8px/1.4 var(--mono)}
+#portalWorkflow .settlement-empty{margin:0;padding:18px;color:#687970;font:11px/1.55 var(--mono)}
+@media(max-width:1050px){
+  #portalWorkflow .settlement-command-center{grid-template-columns:1fr}
+  #portalWorkflow .settlement-journey>div{grid-template-columns:repeat(4,1fr)}
+  #portalWorkflow .settlement-money-flow{grid-template-columns:1fr 1fr}
+  #portalWorkflow .settlement-money-flow .flow-value.payout-value{grid-column:1/-1}
+  #portalWorkflow .settlement-identifiers{grid-template-columns:1fr 1fr}
+  #portalWorkflow .settlement-identifiers>div:nth-child(2){border-right:0}
+  #portalWorkflow .settlement-identifiers>div:nth-child(-n+2){border-bottom:1px solid #dce5de}
+  #portalWorkflow .conservation-proof>div{grid-template-columns:1fr 1fr}
+  #portalWorkflow .conservation-proof article:nth-child(2){border-right:0}
+  #portalWorkflow .conservation-proof article:nth-child(-n+2){border-bottom:1px solid #e1e8e2}
+}
+@media(max-width:780px){
+  #portalWorkflow .settlement-receipt>header{display:block;padding:22px}
+  #portalWorkflow .settlement-receipt>header>span{display:inline-block;margin-top:14px}
+  #portalWorkflow .settlement-identifiers,#portalWorkflow .conservation-proof>div,#portalWorkflow .settlement-detail-grid,#portalWorkflow .trust-proof-grid,#portalWorkflow .settlement-kpis,#portalWorkflow .settlement-journey>div,#portalWorkflow .settlement-money-flow,#portalWorkflow .fee-impact>div{grid-template-columns:1fr}
+  #portalWorkflow .settlement-value-story{padding:22px}
+  #portalWorkflow .settlement-value-story>div{grid-template-columns:1fr;margin:18px 0;gap:10px}
+  #portalWorkflow .settlement-value-story>div>i{transform:rotate(90deg)}
+  #portalWorkflow .settlement-journey>header,#portalWorkflow .fee-impact>header,#portalWorkflow .settlement-section-title{display:block}
+  #portalWorkflow .settlement-journey>header>b,#portalWorkflow .fee-impact>header>span{display:inline-block;margin-top:12px}
+  #portalWorkflow .settlement-section-title p{margin-top:7px}
+  #portalWorkflow .settlement-money-flow{margin-inline:14px}
+  #portalWorkflow .fee-impact{margin-inline:14px}
+  #portalWorkflow .settlement-identifiers>div,#portalWorkflow .conservation-proof article,#portalWorkflow .trust-proof-grid article{border-right:0;border-bottom:1px solid #e1e8e2}
+  #portalWorkflow .settlement-detail-grid{padding-inline:14px}
+  #portalWorkflow .conservation-proof,#portalWorkflow .blockchain-proof,#portalWorkflow .settlement-audit{margin-inline:14px}
+  #portalWorkflow .conservation-proof>footer{grid-template-columns:1fr}
+  #portalWorkflow .provider-command-list>div{grid-template-columns:1fr}
+  #portalWorkflow .settlement-audit li>div>span{display:block}
+  #portalWorkflow .settlement-audit li time{display:block;margin-top:4px}
+}

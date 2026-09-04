@@ -20,6 +20,10 @@
     "local:down": "bash scripts/local.sh down",
     "local:status": "bash scripts/local.sh status",
     "local:e2e": "bash scripts/local.sh e2e",
+    "testnet:up": "bash scripts/testnet.sh up",
+    "testnet:down": "bash scripts/testnet.sh down",
+    "testnet:status": "bash scripts/testnet.sh status",
+    "testnet:e2e": "bash scripts/testnet.sh e2e",
     "test:browser:roles": "node scripts/verify-role-workflow-browser.mjs"
   },
   "devDependencies": {

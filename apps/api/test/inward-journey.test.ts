@@ -195,6 +195,9 @@ describe('Poland to India inward journey', () => {
     ]));
     expect(timeline.body.reconciliation.status).toBe('MATCHED');
     expect(timeline.body.binding.network).toBe('localnet');
+    expect(timeline.body.quote.canonicalHash).toBe(payment.quote.canonicalHash);
+    expect(timeline.body.compliance.canonicalHash).toBe(payment.compliance.canonicalHash);
+    expect(timeline.body.corridor.id).toBe('PL-IN-INWARD-v1');
 
     // The freelancer's simulated INR wallet holds exactly the quoted payout.
     const wallet = await current.context.store.findOne(fiatAccounts, {

@@ -402,6 +402,9 @@ async function runFundingAutomation(nonce) {
     run.results.payment = funded.payment ?? funded;
     const timeline = await call(companyPartyKey(), "GET", `/v1/payments/${run.results.paymentId}/timeline`);
     run.results.binding = timeline.binding;
+    run.results.settlementTimeline = timeline;
+    run.results.quote = timeline.quote ?? run.results.quote;
+    run.results.compliance = timeline.compliance ?? run.results.compliance;
     stageSet("automation", "escrow", "COMPLETED", "Algorand confirmed the funded escrow.", [
       ["DEAL", timeline.binding?.dealId ?? "—"], ["LOCKED", timeline.binding ? usdc(timeline.binding.amountUsdcMinor, timeline.binding.scale) : "—"], ["NETWORK", timeline.binding?.network ?? "—"]
     ]);
@@ -453,6 +456,9 @@ async function runRelease(nonce) {
     run.results.payment = released.payment ?? released;
     const timeline = await call(companyPartyKey(), "GET", `/v1/payments/${run.results.paymentId}/timeline`);
     run.results.binding = timeline.binding;
+    run.results.settlementTimeline = timeline;
+    run.results.quote = timeline.quote ?? run.results.quote;
+    run.results.compliance = timeline.compliance ?? run.results.compliance;
     stageSet("deliveryAutomation", "release", "COMPLETED", `Provider settlement and ${run.results.payment.payoutCurrency} credit completed.`, [
       ["PAYMENT", run.results.payment.state], ["ESCROW", timeline.binding?.state ?? "—"], ["EVENTS", String(timeline.events?.length ?? 0)]
     ]);

@@ -231,6 +231,29 @@ redirect into this same product instead of exposing a second visual system.
 See the [LocalNet runbook](docs/LOCALNET_RUNBOOK.md) for ports, lifecycle
 commands, generated artifacts and troubleshooting.
 
+### Public Algorand TestNet acceptance
+
+The public profile keeps PostgreSQL, MinIO and the private two-organization
+Fabric network, but replaces Algorand LocalNet with the deployed TestNet ARC-4
+application and Circle TestNet USDC. It uses a separate Compose project,
+separate databases and owner-only generated secrets; switching profiles does
+not delete the LocalNet volumes.
+
+After creating and funding the guarded disposable provider accounts described
+in the TestNet manifest, run:
+
+```bash
+corepack pnpm testnet:e2e     # reset only TestNet acceptance data and prove both journeys
+corepack pnpm testnet:status  # show the active network and real adapters
+corepack pnpm testnet:down    # stop only the TestNet application stack
+corepack pnpm local:up        # return to the preserved LocalNet demo
+```
+
+`testnet:e2e` refuses the wrong network, application, asset, open key-file
+permissions, underfunded provider accounts, non-HTTPS public endpoints and
+Algorand mainnet. Faucet-sized acceptance amounts exercise the same escrow,
+evidence, permit and accounting code while conserving zero-value test assets.
+
 The product has two marketplace roles. Infrastructure proof is embedded in
 their transaction context instead of presented as additional people:
 
@@ -244,7 +267,7 @@ Anchor services. They do not log in, choose work or appear as user roles.
 
 1. Open `:4175` in two tabs: enter one as **Company** and the other as **Freelancer**. Both poll the same shared deal cursor; its business records remain in PostgreSQL/MinIO and the cursor survives UI-service restarts.
 2. Company publishes the work; freelancer applies; the agent shortlists; then the company explicitly assigns the applicant.
-3. Both parties approve the exact contract hash. Anchor automatically runs the official-source check, live FX, compliance and real LocalNet ARC-4 funding.
+3. Both parties approve the exact contract hash. Anchor automatically runs the official-source check, live FX, compliance and real ARC-4 funding on whichever explicitly selected profile is active.
 4. Freelancer uploads the actual deliverable. Company grants review access, runs advisory validation, approves on Fabric and releases escrow.
 5. Inspect the contextual service proof in the same deal room; there is no separate provider or administrator persona.
 
@@ -376,9 +399,16 @@ Anchor's ARC-4 escrow is deployed on Algorand TestNet as
 using Circle's official zero-value TestNet USDC
 [ASA `10458941`](https://lora.algokit.io/testnet/asset/10458941). The opt-in
 public lifecycle passed on 4 September 2026, including release, refund, replay
-protection and stranded-transaction recovery. Inspect the confirmed
-[evidence-bound release](https://lora.algokit.io/testnet/transaction/T5426Z7ZHRGR5VR5BC7YO52B46PM764DIKYWUQEIRO37CRMFNG3Q)
-or the sanitized [deployment and acceptance manifest](services/algorand-executor/testnet/deployment-manifest.json).
+protection and stranded-transaction recovery. The full API → Fabric → executor
+acceptance also completed both business corridors against that public app:
+
+- [Poland → India evidence-bound release](https://lora.algokit.io/testnet/transaction/DRFGEQGXQ4UZYWGVVRLPSJ5Q6YP764DEVVMLC4J5DAEOVMHUN6XQ), confirmed in round `66973168`.
+- [India → United Kingdom evidence-bound release](https://lora.algokit.io/testnet/transaction/2DZ5HLLLLOIZSABXHGQXAZJ2M4U3QUMWJRNAPRETERNNNXJZFORQ), confirmed in round `66973196`.
+
+Both runs used real Fabric approvals, the short-lived signed release permit,
+the durable executor journal, Circle TestNet USDC and separate balanced
+`PL-IN-INWARD` / `IN-GB-OUTWARD` PostgreSQL books. Inspect the sanitized
+[deployment and acceptance manifest](services/algorand-executor/testnet/deployment-manifest.json).
 Test ALGO and TestNet USDC have no monetary value.
 
 ## Implementation status
@@ -397,13 +427,14 @@ Test ALGO and TestNet USDC have no monetary value.
 | ARC-4 escrow and isolated Algorand executor | ✅ Implemented and tested |
 | Fabric-to-executor release contract | ✅ Cross-service integration tested |
 | Fully automated real Fabric + Algorand LocalNet journeys | ✅ Browser workflow and both API corridors complete with confirmed transactions |
-| Public Algorand TestNet deployment and lifecycle | ✅ App `770960502`; official USDC; explorer-confirmed release/refund/recovery |
+| Full Fabric + public Algorand TestNet journeys | ✅ Both inward and outward API workflows complete against app `770960502` and official USDC, with explorer-confirmed releases |
 | Production OIDC deployment and custody hardening | ⏭️ Explicitly deferred |
 
 Both paths are free and deterministic. The fast preview is convenient for UI
-evaluation; `local:e2e` is the acceptance path for real local infrastructure and
-blockchain proof. The public TestNet proof is complete but remains opt-in so
-evaluation never depends on a faucet or external service.
+evaluation; `local:e2e` is the offline acceptance path for real local
+infrastructure and blockchain proof. `testnet:e2e` is the public-chain
+acceptance path and remains explicit so normal evaluation never depends on a
+faucet or external service.
 
 ## Repository map
 

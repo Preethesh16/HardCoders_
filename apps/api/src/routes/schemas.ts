@@ -230,6 +230,7 @@ export const HealthSchema = Type.Object({
   status: Type.Union([Type.Literal('ok'), Type.Literal('degraded')]),
   version: Type.String(),
   profile: Type.Union([Type.Literal('demo'), Type.Literal('local'), Type.Literal('testnet')]),
+  network: Type.Union([Type.Literal('localnet'), Type.Literal('testnet')]),
   adapters: Type.Object({
     storage: Type.String(),
     ai: Type.String(),

@@ -13,6 +13,8 @@ const companyCountry = process.env.ANCHOR_COMPANY_COUNTRY ?? 'GB';
 const fundingCurrency = process.env.ANCHOR_FUNDING_CURRENCY ?? 'GBP';
 const freelancerCountry = process.env.ANCHOR_FREELANCER_COUNTRY ?? 'IN';
 const payoutCurrency = process.env.ANCHOR_PAYOUT_CURRENCY ?? 'INR';
+const jobBudget = process.env.ANCHOR_JOB_BUDGET ?? '12000';
+const proposalPriceAmount = process.env.ANCHOR_PROPOSAL_PRICE ?? '11800';
 const freelancerUserId = process.env.ANCHOR_FREELANCER_USER_ID ?? 'USER-IN-FREELANCER';
 const orderedRoute = `${companyCountry} → ${freelancerCountry}`;
 const countryNames = { PL: 'Poland', IN: 'India', GB: 'United Kingdom', DE: 'Germany', RU: 'Russia', KP: 'North Korea' };
@@ -55,11 +57,11 @@ await writeFile(jobDraft, [
   `Description: Deliver a production-shaped TypeScript reconciliation engine, automated tests, operating guide, and proof dashboard for the ${companyCountry} to ${freelancerCountry} corridor.`,
   'Acceptance criteria: All integration tests pass; Fabric and Algorand references reconcile; No personal data appears on either ledger',
   'Skills: TypeScript, PostgreSQL, Hyperledger Fabric, Algorand',
-  `Budget ${fundingCurrency}: 12000`,
+  `Budget ${fundingCurrency}: ${jobBudget}`,
   'Delivery date: 2026-10-31',
 ].join('\n'));
 await writeFile(proposalDraft, [
-  `Proposed price ${fundingCurrency}: 11800`,
+  `Proposed price ${fundingCurrency}: ${proposalPriceAmount}`,
   'Delivery days: 16',
   `Tax residence: ${countryNames[freelancerCountry] ?? freelancerCountry}`,
   `Payout country: ${countryNames[freelancerCountry] ?? freelancerCountry}`,
@@ -250,7 +252,7 @@ try {
     description: `Deliver a production-shaped TypeScript reconciliation engine, automated tests, operating guide, and proof dashboard for the ${companyCountry} to ${freelancerCountry} corridor.`,
     acceptanceCriteria: 'All integration tests pass\nFabric and Algorand references reconcile\nNo personal data appears on either ledger',
     skills: 'TypeScript, PostgreSQL, Hyperledger Fabric, Algorand',
-    budget: '12000.00', deliveryDate: '2026-10-31', payerCountry: companyCountry, fundingCurrency,
+    budget: jobBudget, deliveryDate: '2026-10-31', payerCountry: companyCountry, fundingCurrency,
   });
   await freelancer.waitFor('document.querySelector("[data-workspace-form=apply]") !== null', 'Published job did not appear for the Freelancer.', 20_000);
   const payoutCountryOptions = await freelancer.evaluate(`Array.from(document.querySelector('[name="payoutCountry"]')?.options ?? []).map(option => option.value).filter(Boolean).sort()`);
@@ -264,7 +266,7 @@ try {
   if (!["success", "warning"].includes(freelancerExtraction.tone)) throw new Error(`Freelancer proposal was not extracted: ${JSON.stringify(freelancerExtraction)}`);
   await sleep(3_600);
   const extractedPrice = await freelancer.evaluate('document.querySelector("[data-workspace-form=apply] [name=proposedPrice]")?.value');
-  if (extractedPrice !== '11800') {
+  if (Number(extractedPrice) !== Number(proposalPriceAmount)) {
     const extractionDebug = await freelancer.evaluate(`({
       phase: document.querySelector('[data-workspace-form=apply]') ? 'FORM_VISIBLE' : 'FORM_MISSING',
       tone: document.querySelector('[data-workspace-form=apply] [data-extraction-status]')?.dataset.tone,
@@ -277,7 +279,7 @@ try {
   const retainedProposalFile = await freelancer.evaluate('document.querySelector("[data-draft-file-name]")?.textContent');
   if (retainedProposalFile !== 'freelancer-proposal.txt') throw new Error(`Freelancer proposal selection was not retained: ${retainedProposalFile}`);
   await freelancer.submit('[data-workspace-form="apply"]', {
-    proposedPrice: '11800.00', deliveryDays: '16',
+    proposedPrice: proposalPriceAmount, deliveryDays: '16',
     residenceCountry: freelancerCountry, payoutCountry: freelancerCountry, payoutCurrency,
     availability: 'Available immediately for 32 hours per week',
     approach: 'Start with executable acceptance tests, implement reconciliation invariants, and provide signed evidence for every milestone.',
@@ -338,6 +340,30 @@ try {
   await freelancer.waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'Freelancer journey rail did not complete.', 15_000);
   await company.waitFor('document.querySelector("[data-transfer-screen][data-state=completed] .deal-complete-confirmation") !== null', 'Company payment confirmation did not render the completed release.', 15_000);
   await freelancer.waitFor('document.querySelector("[data-transfer-screen][data-state=completed] .deal-complete-confirmation") !== null', 'Freelancer payment confirmation did not render the completed release.', 15_000);
+  await company.waitFor('document.querySelector(".settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Company settlement receipt did not reconcile every amount.', 15_000);
+  await freelancer.waitFor('document.querySelector(".settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Freelancer settlement receipt did not reconcile every amount.', 15_000);
+  const settlementReceipt = await company.evaluate(`({
+    conservationChecks: Array.from(document.querySelectorAll('.conservation-proof article b')).map(element => element.textContent),
+    analyticsCards: document.querySelectorAll('.settlement-kpis article').length,
+    proofStages: document.querySelectorAll('.settlement-journey article[data-complete="true"]').length,
+    feeImpactRows: document.querySelectorAll('.fee-impact article').length,
+    commands: document.querySelectorAll('.provider-command-list > div').length,
+    events: document.querySelectorAll('.settlement-audit li').length,
+    text: document.querySelector('.settlement-receipt')?.innerText ?? ''
+  })`);
+  if (settlementReceipt.conservationChecks.length !== 4
+    || settlementReceipt.conservationChecks.some(value => !/^0(?:[.,]0+)?\s/u.test(value ?? ''))
+    || settlementReceipt.analyticsCards !== 4
+    || settlementReceipt.proofStages !== 7
+    || settlementReceipt.feeImpactRows !== 2
+    || settlementReceipt.commands < 4
+    || settlementReceipt.events < 10
+    || !/REGULATIONS FETCHED/iu.test(settlementReceipt.text)
+    || !/RATE OBSERVED/iu.test(settlementReceipt.text)
+    || !/HYPERLEDGER FABRIC/iu.test(settlementReceipt.text)
+    || !/ALGORAND ARC-4/iu.test(settlementReceipt.text)) {
+    throw new Error(`Completed settlement receipt is incomplete: ${JSON.stringify(settlementReceipt)}`);
+  }
   const companyGuide = await company.evaluate(`({ title: document.querySelector('#dealCompanionTitle')?.textContent, copy: document.querySelector('#dealCompanionCopy')?.textContent, image: document.querySelector('#dealCompanionCharacter')?.getAttribute('src') })`);
   const freelancerGuide = await freelancer.evaluate(`({ title: document.querySelector('#dealCompanionTitle')?.textContent, copy: document.querySelector('#dealCompanionCopy')?.textContent, image: document.querySelector('#dealCompanionCharacter')?.getAttribute('src') })`);
   if (companyGuide.title !== 'DEAL COMPLETE' || !companyGuide.copy?.includes(payoutCurrency) || !companyGuide.image?.includes('company')) throw new Error(`Company live guide is not transaction-derived: ${JSON.stringify(companyGuide)}`);

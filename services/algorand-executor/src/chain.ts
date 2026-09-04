@@ -251,6 +251,27 @@ export class RealAlgorandChain implements AlgorandChain {
     assertExpectedInput(input, this.config);
     const originTreasury = this.#originTreasuries.get(input.binding.originProviderAddress);
     if (originTreasury === undefined) throw conflict("The escrow origin treasury has no configured signer.");
+    if (input.action === "fund") {
+      let availableMinor: bigint;
+      try {
+        const holding = await this.#algod.accountAssetInformation(
+          originTreasury.account.addr,
+          this.config.ALGORAND_ASSET_ID,
+        ).do();
+        availableMinor = holding.assetHolding?.amount ?? 0n;
+      } catch (error) {
+        if (error instanceof BoundedHttpError && error.response.status === 404) {
+          throw conflict("The origin provider treasury is not opted into the configured settlement asset.");
+        }
+        throw unavailable("The origin provider settlement-asset balance is unavailable; funding was not signed.");
+      }
+      const requiredMinor = BigInt(input.binding.amount.amountMinor);
+      if (availableMinor < requiredMinor) {
+        throw conflict(
+          `The origin provider treasury has insufficient settlement assets: ${availableMinor.toString()} available, ${requiredMinor.toString()} required. Funding was not signed.`,
+        );
+      }
+    }
     if (input.action === "release") {
       if (!input.release || !input.fabricClaimTransactionId
         || input.release.fabricClaimTransactionId !== input.fabricClaimTransactionId) {

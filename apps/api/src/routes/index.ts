@@ -107,6 +107,7 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
     status: 'ok' as const,
     version: context.config.version,
     profile: context.config.profile,
+    network: context.config.algorand.network,
     adapters: {
       storage: context.objects.mode,
       ai: context.ai.mode,

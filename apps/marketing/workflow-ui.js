@@ -52,6 +52,18 @@
 
   const countryNames = { PL: "Poland", IN: "India", GB: "United Kingdom", DE: "Germany", RU: "Russia", KP: "North Korea" };
   const countryCurrencies = { PL: "PLN", IN: "INR", GB: "GBP", DE: "EUR", RU: "RUB", KP: "KPW" };
+  // Circle's public faucet supplies small, zero-value TestNet balances. Keep
+  // public-network demonstrations within a transparent notional cap instead
+  // of silently scaling the real fiat amount committed to the agreement.
+  const testnetBudgetLimits = { PLN: 15, INR: 350, GBP: 3, EUR: 4, RUB: 350, KPW: 3500 };
+
+  function isPublicTestnet() {
+    return String(model.runtime?.network ?? "").toLowerCase() === "testnet";
+  }
+
+  function testnetBudgetLimit(currency) {
+    return isPublicTestnet() ? testnetBudgetLimits[String(currency ?? "").toUpperCase()] : undefined;
+  }
 
   function dealRoute() {
     const r = results();
@@ -173,9 +185,16 @@
     const proposalDetail = applications().length ? `${applications().length} proposals · agent ranked` : "Waiting for proposals";
     const agreementDetail = agreement() ? `Hash ${shortRef(agreement().contractHash ?? agreement().artifactHash, 6)}` : "Generate from approved sources";
     const settlementHeld = phase === "AUTOMATION_FAILED" && !r.binding;
+    const heldDetail = r.payment?.state === "ESCROW_CREATED"
+      ? "Escrow created · funding not confirmed"
+      : r.payment?.state === "FIAT_FUNDED"
+        ? "Fiat journaled · escrow not funded"
+        : r.quote
+          ? "Quote stored · funding not started"
+          : "Stopped before signing";
     const escrowDetail = r.binding
       ? `${money(r.binding.amountUsdcMinor, r.binding.scale ?? 6, "USDC")} · ${r.binding.network}`
-      : settlementHeld ? "Stopped before quote or signing" : "Rules, FX and funding";
+      : settlementHeld ? heldDetail : "Rules, FX and funding";
     const evidenceDetail = r.submission ? `Fabric ${shortRef(r.submission.evidenceId, 7)}` : "Validate evidence, decide, release";
     const companyPhases = [
       ["01", "Company setup", companyPolicyProfile() ? `Identity authorized · policy v${companyPolicyProfile().version}` : "Identity authorized · policy pending", ["onboard"], phase === "COMPANY_ONBOARDING"],
@@ -259,15 +278,17 @@
     const profile = companyPolicyProfile() ?? {};
     const payerCountry = profile.country ?? companyVerificationProfile()?.country ?? "GB";
     const fundingCurrency = countryCurrencies[payerCountry] ?? profile.fundingCurrency ?? "GBP";
+    const publicLimit = testnetBudgetLimit(fundingCurrency);
     return `<section class="workspace-card action-card"><header><span>COMPANY INPUT · REQUIRED</span><b>NEW BRIEF</b></header><form class="workspace-form" data-workspace-form="job">
       ${documentAutofill("JOB_BRIEF")}
       <div class="selected-talent"><small>AUTHORIZED COMPANY · JOB-LEVEL PAYER PROFILE</small><strong>${escape(companyVerificationProfile()?.legalName ?? "Verified demo company")}</strong><span>Choose the payer country for this job. Anchor switches to that country's signed demo entity and reuses the approved policy source; corridor law is evaluated after freelancer selection.</span></div>
       <label><span>WORK TITLE</span><input name="title" required minlength="4" autocomplete="off" placeholder="e.g. Build a settlement reconciliation service"></label>
       <label><span>SCOPE OF WORK</span><textarea name="description" required minlength="20" placeholder="Explain the problem, expected outcome and what must be delivered"></textarea></label>
       <label><span>ACCEPTANCE CRITERIA</span><textarea name="acceptanceCriteria" required minlength="10" placeholder="List the objective checks used to accept the final work"></textarea></label>
-      <div class="field-grid"><label><span>REQUIRED SKILLS</span><input name="skills" required placeholder="TypeScript, PostgreSQL, reconciliation"></label><label><span>FUNDING AMOUNT</span><input name="budget" type="number" min="1" step="0.01" required placeholder="12000.00"></label></div>
+      <div class="field-grid"><label><span>REQUIRED SKILLS</span><input name="skills" required placeholder="TypeScript, PostgreSQL, reconciliation"></label><label><span>FUNDING AMOUNT</span><input name="budget" data-budget-input type="number" min="1" ${publicLimit ? `max="${publicLimit}"` : ""} step="0.01" required placeholder="${publicLimit ?? "12000.00"}"></label></div>
       <div class="field-grid corridor-inputs"><label><span>PAYER COUNTRY</span><select name="payerCountry" data-country-select="fundingCurrency" required>${countryOptions(payerCountry)}</select></label><label><span>FUNDING CURRENCY</span><select name="fundingCurrency" required>${currencyOptions(fundingCurrency)}</select></label></div>
       <label><span>TARGET DELIVERY DATE</span><input name="deliveryDate" type="date" required></label>
+      ${publicLimit ? `<p class="form-hint" data-testnet-budget-hint>PUBLIC TESTNET FAUCET LIMIT · MAX ${publicLimit} ${escape(fundingCurrency)} FOR THIS LIVE ON-CHAIN DEMO. USE LOCALNET FOR LARGE NOTIONAL VALUES.</p>` : ""}
       <button type="submit">PUBLISH OPPORTUNITY <b>→</b></button><p class="form-hint">Country and currency are deal inputs. The server still enforces their mapping and uses an authorized, signed demo payer identity for the selected jurisdiction.</p>
     </form></section>`;
   }
@@ -459,6 +480,196 @@
     return `<section class="workspace-card payout-card ${completed ? "complete" : ""}"><header><span>SECURED PAYOUT</span><b>${completed ? "COMPLETED" : escape(payment?.state ?? binding?.state ?? "PENDING")}</b></header><div class="payout-route"><span><small>AGREED PRICE</small><b>${escape(agreedFunding ? money(agreedFunding.amountMinor, agreedFunding.scale, agreedFunding.currency) : route.fundingCurrency ?? "PENDING")}</b></span><i>→</i><span><small>ESCROW LOCKS</small><b>${escape(binding ? money(binding.amountUsdcMinor, binding.scale ?? 6, "USDC") : "USDC · PENDING")}</b></span><i>→</i><span><small>YOU RECEIVE</small><b>${escape(payout ? money(payout.amountMinor, payout.scale, payout.currency) : route.payoutCurrency ?? "PENDING")}</b></span></div>${quote || compliance || binding ? `<div class="payout-reasoning"><span><small>WHY THIS AMOUNT</small><b>${escape(quote ? `${quote.legs?.length ?? 0} persisted FX legs · ${quote.rateSource}` : "Waiting for FX quote")}</b></span><span><small>WHY IT CAN SETTLE</small><b>${escape(compliance ? `${compliance.outcome} · ${compliance.appliedRules?.length ?? 0} rules` : "Compliance pending")}</b></span><span><small>WHERE IT IS LOCKED</small><b>${escape(binding ? `${binding.network} · app ${binding.applicationId} · asset ${binding.assetId}` : "Escrow pending")}</b></span></div>` : ""}<p>${completed ? `The local ${escape(payout?.currency ?? route.payoutCurrency ?? "payout")} credit is linked to the approved Fabric evidence and confirmed provider release.` : "The quoted USDC amount is fixed when funded, so later FX movement cannot change this escrow."}</p></section>`;
   }
 
+  function formatInstant(value) {
+    if (!value) return "—";
+    const instant = new Date(value);
+    if (!Number.isFinite(instant.getTime())) return String(value);
+    return `${instant.toLocaleString("en-GB", {
+      day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false, timeZone: "UTC"
+    })} UTC`;
+  }
+
+  function minorRemainder(total, deduction, net) {
+    try {
+      return BigInt(total ?? 0) - BigInt(deduction ?? 0) - BigInt(net ?? 0);
+    } catch {
+      return null;
+    }
+  }
+
+  function absoluteMinorDifference(left, right) {
+    try {
+      const difference = BigInt(left ?? 0) - BigInt(right ?? 0);
+      return difference < 0n ? -difference : difference;
+    } catch {
+      return null;
+    }
+  }
+
+  function percentageOfMinor(part, total) {
+    try {
+      const denominator = BigInt(total ?? 0);
+      if (denominator <= 0n) return 0;
+      const basisPoints = Number((BigInt(part ?? 0) * 10_000n) / denominator);
+      return Math.max(0, Math.min(100, basisPoints / 100));
+    } catch {
+      return 0;
+    }
+  }
+
+  function durationLabel(milliseconds) {
+    if (!Number.isFinite(milliseconds) || milliseconds < 0) return "—";
+    const seconds = Math.round(milliseconds / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return `${minutes}m ${remainder}s`;
+  }
+
+  function auditEventSummary(event) {
+    const detail = event?.detail ?? {};
+    switch (event?.kind) {
+      case "CONTRACT_DRAFTED": return `Agreement ${shortRef(detail.contractHash, 8)} · ${detail.amountCurrency ?? ""} commitment created`;
+      case "CONTRACT_APPROVED": return `${detail.party ?? "Party"} approval · ${detail.state ?? "recorded"}`;
+      case "CORRIDOR_RESOLVED": return `${detail.originCountry ?? "?"} → ${detail.destinationCountry ?? "?"} · ${detail.bookId ?? "book pending"}`;
+      case "REGULATIONS_REFRESHED": return `${detail.regulatoryPlanOutcome ?? detail.coverageOutcome ?? "checked"} · corpus ${shortRef(detail.approvedCorpusHash, 8)}`;
+      case "FX_QUOTED": return `${detail.rateSource ?? "rate source"} · quote ${shortRef(detail.quoteId, 8)}`;
+      case "COMPLIANCE_EVALUATED": return `${detail.outcome ?? "evaluated"} · ${detail.rulesVersion ?? "ruleset"}`;
+      case "PAYMENT_CREATED": return `${detail.state ?? "created"} · hashes bind quote + compliance`;
+      case "FIAT_FUNDED": return `${money(detail.fundingMinor, 2, detail.fundingCurrency)} debited into ${detail.bookId ?? "the corridor book"}`;
+      case "ESCROW_CREATED": return `${detail.network ?? "Algorand"} app ${detail.applicationId ?? "—"} · ASA ${detail.assetId ?? "—"}`;
+      case "USDC_LOCKED": return `${money(detail.lockedMinor, 6, "USDC")} locked · tx ${shortRef(detail.transactionId, 7)}`;
+      case "WORK_SUBMITTED": return `Version ${detail.version ?? "—"} · Fabric ${shortRef(detail.fabricTxId, 8)}`;
+      case "WORK_EVALUATED": return `${detail.source ?? "Agent"} advisory score ${detail.score ?? "—"}/100`;
+      case "WORK_APPROVED": return `${detail.decision ?? "Decision"} · Fabric ${shortRef(detail.fabricTxId, 8)}`;
+      case "RELEASE_AUTHORIZED": return `Generation ${detail.generation ?? "—"} · permit expires ${formatInstant(detail.expiresAt)}`;
+      case "USDC_RELEASED": return `${money(detail.releasedMinor, 6, "USDC")} released · tx ${shortRef(detail.transactionId, 7)}`;
+      case "PAYOUT_CREDITED": return `${money(detail.payoutMinor, 2, detail.payoutCurrency)} credited to the beneficiary book`;
+      case "PAYMENT_COMPLETED": return `Payment ${shortRef(detail.paymentId, 8)} closed after reconciliation`;
+      default: return String(event?.kind ?? "AUDIT EVENT").replaceAll("_", " ");
+    }
+  }
+
+  function settlementReceipt() {
+    const r = results();
+    const timeline = r.settlementTimeline ?? {};
+    const payment = timeline.payment ?? r.payment ?? {};
+    const quote = timeline.quote ?? r.quote ?? {};
+    const compliance = timeline.compliance ?? r.compliance ?? {};
+    const corridor = timeline.corridor ?? {};
+    const binding = timeline.binding ?? r.binding ?? {};
+    const reconciliation = timeline.reconciliation ?? {};
+    const events = Array.isArray(timeline.events) ? timeline.events : [];
+    const commands = Array.isArray(timeline.commands) ? timeline.commands : [];
+    const regulation = r.regulation ?? {};
+    const plan = r.regulatoryPlan ?? regulation.plan ?? regulation.regulatoryPlan ?? {};
+    const categories = Array.isArray(plan.categories) ? plan.categories : [];
+    const observations = Array.isArray(regulation.report?.observations) ? regulation.report.observations : [];
+    const fees = Array.isArray(quote.fees) ? quote.fees : [];
+    const legs = Array.isArray(quote.legs) ? quote.legs : [];
+    const originFee = fees.find(item => item.code === "ORIGIN_AND_PLATFORM")?.amount ?? { amountMinor: "0", scale: 6, currency: "USD" };
+    const destinationFee = fees.find(item => item.code === "DESTINATION_OFFRAMP")?.amount ?? { amountMinor: "0", scale: quote.payoutAmount?.scale ?? 2, currency: quote.payoutAmount?.currency ?? payment.payoutCurrency };
+    const releaseEvent = events.findLast?.(event => event.kind === "USDC_RELEASED") ?? events.find(event => event.kind === "USDC_RELEASED");
+    const regulationEvent = events.findLast?.(event => event.kind === "REGULATIONS_REFRESHED") ?? events.find(event => event.kind === "REGULATIONS_REFRESHED");
+    const complianceEvent = events.findLast?.(event => event.kind === "COMPLIANCE_EVALUATED") ?? events.find(event => event.kind === "COMPLIANCE_EVALUATED");
+    const fxEvent = events.findLast?.(event => event.kind === "FX_QUOTED") ?? events.find(event => event.kind === "FX_QUOTED");
+    const expectedEscrow = quote.settlementAmount?.amountMinor ?? binding.amountUsdcMinor ?? "0";
+    const observedEscrow = reconciliation.observed?.amountUsdcMinor ?? binding.amountUsdcMinor ?? "0";
+    const releasedEscrow = releaseEvent?.detail?.releasedMinor ?? binding.releasedMinor ?? expectedEscrow;
+    const escrowDifference = absoluteMinorDifference(expectedEscrow, observedEscrow);
+    const releaseDifference = absoluteMinorDifference(expectedEscrow, releasedEscrow);
+    const originRemainder = minorRemainder(quote.grossSettlementAmount?.amountMinor, originFee.amountMinor, quote.settlementAmount?.amountMinor);
+    const destinationRemainder = minorRemainder(quote.grossPayoutAmount?.amountMinor, destinationFee.amountMinor, quote.payoutAmount?.amountMinor);
+    const fullyAccounted = reconciliation.status === "MATCHED"
+      && reconciliation.observed?.booksBalanced === true
+      && escrowDifference === 0n
+      && releaseDifference === 0n
+      && originRemainder === 0n
+      && destinationRemainder === 0n;
+    const route = dealRoute();
+    const sourceRows = observations.length ? observations.map(observation => {
+      const content = `<b>${escape(observation.authority ?? observation.sourceId ?? "Official source")}</b><span>${escape(observation.status ?? "CHECKED")} · ${escape(formatInstant(observation.checkedAt ?? regulation.report?.checkedAt))}</span>`;
+      return observation.sourceUri ? `<a href="${escape(observation.sourceUri)}" target="_blank" rel="noopener">${content}</a>` : `<div>${content}</div>`;
+    }).join("") : `<div><b>REGULATION CORPUS</b><span>${escape(regulationEvent ? formatInstant(regulationEvent.occurredAt) : "No source observation projected")}</span></div>`;
+    const categoryRows = categories.length ? categories.map(category => `<article><header><b>${escape(String(category.category ?? "OBLIGATION").replaceAll("_", " "))}</b><em data-state="${escape(String(category.status ?? "PENDING").toLowerCase())}">${escape(category.status ?? "PENDING")}</em></header><p>${escape(category.requirements?.[0] ?? category.reasons?.[0] ?? category.reason ?? "Deal-derived rule evaluated.")}</p><small>${escape(category.moduleIds?.join(" · ") ?? `${category.sourceReferences?.length ?? 0} source references`)}</small></article>`).join("") : `<p class="settlement-empty">No obligation categories were projected.</p>`;
+    const rules = Array.isArray(compliance.appliedRules) ? compliance.appliedRules : [];
+    const auditEvents = events.filter(event => event.kind !== "DOCUMENT_RECORDED");
+    const documentCount = events.filter(event => event.kind === "DOCUMENT_RECORDED").length;
+    const explorerBase = timeline.explorerBaseUrl;
+    const commandRows = commands.length ? commands.map(command => {
+      const transaction = command.transactionId
+        ? explorerBase ? `<a href="${escape(`${explorerBase}/transaction/${command.transactionId}`)}" target="_blank" rel="noopener">${escape(shortRef(command.transactionId, 9))} ↗</a>` : `<code>${escape(shortRef(command.transactionId, 9))}</code>`
+        : "—";
+      return `<div><span><small>${escape(String(command.action ?? "COMMAND").toUpperCase())}</small><b>${escape(command.status ?? "UNKNOWN")}</b></span><span><small>TRANSACTION</small>${transaction}</span><span><small>CONFIRMED</small><b>${escape(command.confirmedRound ? `ROUND ${command.confirmedRound}` : formatInstant(command.updatedAt))}</b></span></div>`;
+    }).join("") : `<p class="settlement-empty">No provider commands were projected.</p>`;
+    const eventRows = auditEvents.length ? auditEvents.map(event => `<li><i></i><div><span><b>${escape(String(event.kind).replaceAll("_", " "))}</b><time>${escape(formatInstant(event.occurredAt))}</time></span><p>${escape(auditEventSummary(event))}</p><small>${escape(event.actorRole ?? "SYSTEM")}</small></div></li>`).join("") : `<li><div><p>No audit events were projected.</p></div></li>`;
+    const submissionEvent = events.find(event => event.kind === "WORK_SUBMITTED");
+    const approvalEvent = events.find(event => event.kind === "WORK_APPROVED");
+    const eventInstants = auditEvents
+      .map(event => new Date(event.occurredAt).getTime())
+      .filter(Number.isFinite)
+      .sort((left, right) => left - right);
+    const processingDuration = eventInstants.length > 1
+      ? durationLabel(eventInstants.at(-1) - eventInstants[0])
+      : "—";
+    const confirmedCommands = commands.filter(command => command.transactionId || command.confirmedRound).length;
+    const sourceCount = observations.length || categories.reduce((total, category) => total + (category.sourceReferences?.length ?? 0), 0);
+    const originFeePercent = percentageOfMinor(originFee.amountMinor, quote.grossSettlementAmount?.amountMinor);
+    const destinationFeePercent = percentageOfMinor(destinationFee.amountMinor, quote.grossPayoutAmount?.amountMinor);
+    const proofChecks = [
+      reconciliation.observed?.booksBalanced === true,
+      escrowDifference === 0n,
+      releaseDifference === 0n,
+      originRemainder === 0n,
+      destinationRemainder === 0n,
+    ];
+    const proofChecksPassed = proofChecks.filter(Boolean).length;
+    const journeyDefinitions = [
+      { label: "AGREEMENT", kinds: ["CONTRACT_APPROVED"], copy: "Exact bilateral hash approved" },
+      { label: "RULES", kinds: ["REGULATIONS_REFRESHED", "COMPLIANCE_EVALUATED"], copy: "Corridor obligations evaluated" },
+      { label: "FX LOCK", kinds: ["FX_QUOTED"], copy: "Reference rates committed" },
+      { label: "ESCROW", kinds: ["USDC_LOCKED"], copy: "Stable value secured on Algorand" },
+      { label: "EVIDENCE", kinds: ["WORK_SUBMITTED", "WORK_APPROVED"], copy: "Fabric proof accepted" },
+      { label: "RELEASE", kinds: ["USDC_RELEASED"], copy: "Provider treasury received USDC" },
+      { label: "PAYOUT", kinds: ["PAYOUT_CREDITED", "PAYMENT_COMPLETED"], copy: "Local fiat credit reconciled" },
+    ];
+    const journeyRows = journeyDefinitions.map((stage, index) => {
+      const matched = auditEvents.filter(event => stage.kinds.includes(event.kind));
+      const event = matched.at(-1);
+      return `<article data-complete="${event ? "true" : "false"}"><i>${event ? "✓" : String(index + 1).padStart(2, "0")}</i><div><small>${escape(stage.label)}</small><b>${escape(stage.copy)}</b><time>${escape(event ? formatInstant(event.occurredAt) : "Not recorded")}</time></div></article>`;
+    }).join("");
+
+    return `<section class="settlement-receipt" aria-label="Complete transaction summary">
+      <header><div><small>END-TO-END SETTLEMENT INTELLIGENCE</small><h3>${escape(`${countryLabel(route.originCountry)} → ${countryLabel(route.destinationCountry)}`)}</h3><p>One dynamic view of the exact quote, policy decision, evidence approval, stablecoin escrow and local payout generated by this deal.</p></div><span data-state="${fullyAccounted ? "matched" : "mismatched"}">${fullyAccounted ? "RECONCILED · 100% ACCOUNTED" : "MISMATCH FOUND"}</span></header>
+      <section class="settlement-identifiers"><div><small>PAYMENT</small><b>${escape(payment.id)}</b></div><div><small>CORRIDOR</small><b>${escape(`${route.originCountry} → ${route.destinationCountry} · ${payment.direction ?? corridor.direction ?? "—"}`)}</b></div><div><small>BOOK</small><b>${escape(payment.bookId ?? "—")}</b></div><div><small>COMPLETED</small><b>${escape(formatInstant(payment.updatedAt))}</b></div></section>
+      <section class="settlement-command-center">
+        <div class="settlement-value-story"><small>THE SETTLEMENT, AT A GLANCE</small><div><span><em>COMPANY COMMITTED</em><b>${escape(money(quote.fundingAmount?.amountMinor, quote.fundingAmount?.scale, quote.fundingAmount?.currency))}</b></span><i>→</i><span class="stable-value"><em>VALUE LOCKED</em><b>${escape(money(quote.settlementAmount?.amountMinor, quote.settlementAmount?.scale, "USDC"))}</b><small>ASA ${escape(binding.assetId ?? "—")}</small></span><i>→</i><span><em>FREELANCER RECEIVED</em><b>${escape(money(quote.payoutAmount?.amountMinor, quote.payoutAmount?.scale, quote.payoutAmount?.currency))}</b></span></div><p>The payer and beneficiary remain in local fiat. Licensed-provider simulation accounts alone handle the public TestNet settlement rail.</p></div>
+        <div class="settlement-kpis" aria-label="Settlement analytics">
+          <article><small>PROCESSING WINDOW</small><b>${escape(processingDuration)}</b><span>first to final persisted event</span></article>
+          <article><small>POLICY COVERAGE</small><b>${escape(`${categories.length} modules`)}</b><span>${escape(`${sourceCount} official source${sourceCount === 1 ? "" : "s"}`)}</span></article>
+          <article><small>TRUST EVENTS</small><b>${escape(`${auditEvents.length} recorded`)}</b><span>${escape(`${documentCount} private document hash${documentCount === 1 ? "" : "es"}`)}</span></article>
+          <article><small>ON-CHAIN PROOF</small><b>${escape(`${confirmedCommands}/${commands.length} confirmed`)}</b><span>${escape(binding.network ?? "network pending")}</span></article>
+        </div>
+      </section>
+      <section class="settlement-journey" aria-label="Settlement proof map"><header><div><small>WHY THE PAYMENT MOVED</small><h4>Seven gates. One authorized release.</h4></div><b>${escape(`${proofChecksPassed}/${proofChecks.length} RECONCILIATION CHECKS`)}</b></header><div>${journeyRows}</div></section>
+      <div class="settlement-section-title"><span>MONEY FLOW + DEDUCTIONS</span><p>Every displayed amount comes from the persisted quote and settlement record.</p></div>
+      <section class="settlement-money-flow" aria-label="Money and fee flow">
+        <article class="flow-value source-value"><small>01 · LOCAL FUNDING</small><b>${escape(money(quote.fundingAmount?.amountMinor, quote.fundingAmount?.scale, quote.fundingAmount?.currency))}</b><p>Company fiat book debited</p></article>
+        <div class="flow-conversion"><span><small>${escape(legs[0]?.pair ?? "ORIGIN FX")}</small><b>${escape(legs[0] ? `× ${rate(legs[0].rateUnits, legs[0].rateScale)}` : "RATE PENDING")}</b></span><i>→</i><span class="flow-fee"><small>LESS DISCLOSED FEE</small><b>${escape(money(originFee.amountMinor, originFee.scale, originFee.currency))}</b><em>${escape(`${fees.find(item => item.code === "ORIGIN_AND_PLATFORM")?.basisPoints ?? 0} bps`)}</em></span></div>
+        <article class="flow-value escrow-value"><small>02 · STABLE VALUE LOCK</small><b>${escape(money(quote.settlementAmount?.amountMinor, quote.settlementAmount?.scale, "USDC"))}</b><p>${escape(`${binding.network ?? "Algorand"} · App ${binding.applicationId ?? "—"}`)}</p></article>
+        <div class="flow-conversion"><span><small>${escape(legs[1]?.pair ?? "PAYOUT FX")}</small><b>${escape(legs[1] ? `× ${rate(legs[1].rateUnits, legs[1].rateScale)}` : "RATE PENDING")}</b></span><i>→</i><span class="flow-fee"><small>LESS OFF-RAMP FEE</small><b>${escape(money(destinationFee.amountMinor, destinationFee.scale, destinationFee.currency))}</b><em>${escape(`${fees.find(item => item.code === "DESTINATION_OFFRAMP")?.basisPoints ?? 0} bps`)}</em></span></div>
+        <article class="flow-value payout-value"><small>03 · LOCAL PAYOUT</small><b>${escape(money(quote.payoutAmount?.amountMinor, quote.payoutAmount?.scale, quote.payoutAmount?.currency))}</b><p>Beneficiary fiat book credited</p></article>
+      </section>
+      <section class="fee-impact" aria-label="Fee impact analytics"><header><div><small>DISCLOSED FEE IMPACT</small><h4>Nothing disappears between the quote and payout.</h4></div><span>${escape(quote.feeScheduleVersion ?? "VERSIONED FEE SCHEDULE")}</span></header><div><article><div><span>ORIGIN + PLATFORM</span><b>${escape(`${originFeePercent.toFixed(2)}% · ${money(originFee.amountMinor, originFee.scale, originFee.currency)}`)}</b></div><i><b style="--fill:${originFeePercent}%"></b></i><p>Measured against the gross USD settlement value before USDC is locked.</p></article><article><div><span>DESTINATION OFF-RAMP</span><b>${escape(`${destinationFeePercent.toFixed(2)}% · ${money(destinationFee.amountMinor, destinationFee.scale, destinationFee.currency)}`)}</b></div><i><b style="--fill:${destinationFeePercent}%"></b></i><p>Measured against the gross destination-currency value before local credit.</p></article></div></section>
+      <section class="conservation-proof"><header><span>NO-MISSING-MONEY PROOF</span><b data-state="${fullyAccounted ? "matched" : "mismatched"}">${fullyAccounted ? "ALL CHECKS = 0" : "INVESTIGATE"}</b></header><div><article><small>QUOTE → ESCROW DIFFERENCE</small><b>${escape(escrowDifference === null ? "—" : money(escrowDifference.toString(), 6, "USDC"))}</b><p>Expected settlement amount versus observed on-chain escrow amount.</p></article><article><small>ESCROW → RELEASE DIFFERENCE</small><b>${escape(releaseDifference === null ? "—" : money(releaseDifference.toString(), 6, "USDC"))}</b><p>Locked settlement amount versus release event amount.</p></article><article><small>UNEXPLAINED ORIGIN VALUE</small><b>${escape(originRemainder === null ? "—" : money((originRemainder < 0n ? -originRemainder : originRemainder).toString(), 6, "USD"))}</b><p>Gross USD − disclosed origin fee − escrow amount.</p></article><article><small>UNEXPLAINED PAYOUT VALUE</small><b>${escape(destinationRemainder === null ? "—" : money((destinationRemainder < 0n ? -destinationRemainder : destinationRemainder).toString(), quote.payoutAmount?.scale ?? 2, quote.payoutAmount?.currency))}</b><p>Gross payout − disclosed off-ramp fee − beneficiary credit.</p></article></div><footer><b>${escape(reconciliation.status ?? "NOT CHECKED")}</b><span>${escape(reconciliation.detail ?? "Reconciliation evidence is unavailable.")}</span><em>${escape(formatInstant(reconciliation.checkedAt))}</em></footer><p class="network-fee-note">Algorand network fees are paid separately by the provider executor in TestAlgo. They are not removed from the USDC escrow or the freelancer payout.</p></section>
+      <div class="settlement-detail-grid"><section class="settlement-panel"><header><span>CORRIDOR RULE DECISION</span><b>${escape(compliance.outcome ?? plan.outcome ?? "—")}</b></header><div class="receipt-time-grid"><span><small>REGULATIONS FETCHED</small><b>${escape(formatInstant(regulation.report?.checkedAt ?? regulationEvent?.detail?.checkedAt ?? regulationEvent?.occurredAt))}</b></span><span><small>COMPLIANCE DECIDED</small><b>${escape(formatInstant(compliance.evaluatedAt ?? complianceEvent?.occurredAt))}</b></span><span><small>RULESET</small><b>${escape(compliance.rulesVersion ?? "—")}</b></span><span><small>CORPUS HASH</small><b>${escape(shortRef(regulation.report?.approvedCorpusHash ?? regulationEvent?.detail?.approvedCorpusHash, 10))}</b></span></div><div class="receipt-obligations">${categoryRows}</div><div class="receipt-rule-tags">${rules.map(rule => `<span>${escape(rule)}</span>`).join("") || "<span>NO RULE IDS PROJECTED</span>"}</div></section>
+      <section class="settlement-panel"><header><span>FX QUOTE PROVENANCE</span><b>${escape(quote.rateSource ?? "—")}</b></header><div class="receipt-time-grid"><span><small>RATE OBSERVED</small><b>${escape(formatInstant(quote.rateObservedAt))}</b></span><span><small>QUOTE CREATED</small><b>${escape(formatInstant(quote.quotedAt ?? fxEvent?.occurredAt))}</b></span><span><small>QUOTE EXPIRY</small><b>${escape(formatInstant(quote.expiresAt))}</b></span><span><small>QUOTE HASH</small><b>${escape(shortRef(quote.canonicalHash, 10))}</b></span></div><div class="receipt-sources">${sourceRows}</div></section></div>
+      <section class="settlement-panel blockchain-proof"><header><span>TRUST RAIL PROOF</span><b>${escape(`${binding.network ?? "—"} · ${commands.length} COMMANDS`)}</b></header><div class="trust-proof-grid"><article><small>HYPERLEDGER FABRIC</small><b>WORK EVIDENCE + BUYER DECISION</b><p>Submission tx ${escape(shortRef(submissionEvent?.detail?.fabricTxId, 10))}</p><p>Approval tx ${escape(shortRef(approvalEvent?.detail?.fabricTxId ?? r.fabricDecisionTxId, 10))}</p><code>${escape(shortRef(approvalEvent?.detail?.evidenceHash, 12))}</code></article><article><small>ALGORAND ARC-4</small><b>PROVIDER ESCROW + RELEASE</b><p>App ${escape(binding.applicationId)} · ASA ${escape(binding.assetId)}</p><p>${escape(shortRef(binding.originProviderAddress, 9))} → ${escape(shortRef(binding.destinationProviderAddress, 9))}</p><code>${escape(shortRef(binding.bindingHash, 12))}</code></article></div><div class="provider-command-list">${commandRows}</div></section>
+      <details class="settlement-audit"><summary><span>OPEN COMPLETE BACKEND EVENT TIMELINE</span><b>${escape(`${auditEvents.length} EVENTS · ${documentCount} DOCUMENT HASHES`)}</b></summary><ol>${eventRows}</ol></details>
+    </section>`;
+  }
+
   function moneyTransferScreen() {
     const payment = results().payment;
     const binding = results().binding;
@@ -478,7 +689,7 @@
       <dl class="transfer-proof"><div><dt>FABRIC DECISION</dt><dd>${escape(shortRef(results().fabricDecisionTxId, 10))}</dd></div><div><dt>ESCROW DEAL</dt><dd>${escape(shortRef(binding?.dealId, 10))}</dd></div><div><dt>NETWORK</dt><dd>${escape(binding?.network ?? "LOCALNET")}</dd></div></dl>
       ${completed ? `<section class="deal-complete-confirmation"><i>✓</i><div><small>PAYMENT CONFIRMATION</small><h4>DEAL COMPLETE.</h4><p>${escape(`${money(payoutAmount?.amountMinor, payoutAmount?.scale, payoutCurrency)} credited after Fabric-approved evidence released escrow ${shortRef(binding?.dealId, 8)}.`)}</p></div>${role === "COMPANY" ? '<button type="button" data-start-new-deal>START A NEW DEAL →</button>' : '<span>COMPANY + FREELANCER OBLIGATIONS CLOSED</span>'}</section>` : ""}
       <p class="transfer-explainer">The characters visualize the real provider-mediated flow. The company and freelancer remain fiat-only; neither user receives cryptocurrency or signs a blockchain transaction.</p>
-    </section>`;
+    </section>${completed ? settlementReceipt() : ""}`;
   }
 
   function showTransferScreen(phase) {
@@ -645,15 +856,21 @@
   function render() {
     const company = role === "COMPANY";
     const route = dealRoute();
+    const network = String(model.runtime?.network ?? results().binding?.network ?? "unknown").toLowerCase();
+    const networkLabel = network === "testnet" ? "PUBLIC TESTNET" : network === "localnet" ? "REAL LOCALNET" : "NETWORK UNKNOWN";
     $("#portalWorkflow").dataset.role = role.toLowerCase();
     $("#workspaceEyebrow").textContent = company ? "COMPANY / HIRING COMMAND" : "FREELANCER / OPPORTUNITY DESK";
     $("#workspaceTitle").textContent = company ? "HIRE WITH PROOF BUILT IN." : "FIND WORK. GET PAID LOCALLY.";
     $("#workspaceIntro").textContent = company ? "Publish a real brief, compare multiple proposals, define the agreement and release only against approved evidence." : "Discover verified work, submit your own terms, review the private agreement and deliver into secured escrow.";
     $("#workspaceRailTitle").textContent = company ? "COMPANY JOURNEY" : "YOUR JOURNEY";
     $("#railRoleHint").textContent = company ? "YOU CONTROL COMPANY DECISIONS" : "YOU CONTROL FREELANCER ACTIONS";
+    $("#workspaceNetwork").textContent = networkLabel;
+    $("#workspaceNetworkStack").textContent = network === "testnet"
+      ? "POSTGRES · MINIO · FABRIC · CIRCLE TESTNET USDC"
+      : "POSTGRES · MINIO · FABRIC · ALGORAND";
     $("#portalNetworkRoute").textContent = route.originCountry && route.destinationCountry
-      ? `NETWORK LIVE · ${route.originCountry} → ${route.destinationCountry}`
-      : route.originCountry ? `NETWORK LIVE · ${route.originCountry} → PAYEE PENDING` : "NETWORK LIVE · ROUTE PENDING";
+      ? `${networkLabel} · ${route.originCountry} → ${route.destinationCountry}`
+      : route.originCountry ? `${networkLabel} · ${route.originCountry} → PAYEE PENDING` : `${networkLabel} · ROUTE PENDING`;
     const resetButton = $("#workflowReset");
     resetButton.hidden = !company || !model.run;
     resetButton.textContent = model.run?.phase === "COMPLETED" ? "START NEW DEAL" : "RESET CURRENT DEAL";
@@ -677,6 +894,18 @@
       const currency = country.form?.elements.namedItem(country.dataset.countrySelect);
       const expected = country.selectedOptions[0]?.dataset.currency;
       if (currency instanceof HTMLSelectElement && expected) currency.value = expected;
+      const budget = country.form?.querySelector("[data-budget-input]");
+      const hint = country.form?.querySelector("[data-testnet-budget-hint]");
+      const limit = testnetBudgetLimit(expected);
+      if (budget instanceof HTMLInputElement) {
+        if (limit) {
+          budget.max = String(limit);
+          budget.placeholder = String(limit);
+        } else {
+          budget.removeAttribute("max");
+        }
+      }
+      if (hint && limit) hint.textContent = `PUBLIC TESTNET FAUCET LIMIT · MAX ${limit} ${expected} FOR THIS LIVE ON-CHAIN DEMO. USE LOCALNET FOR LARGE NOTIONAL VALUES.`;
     }));
     document.querySelectorAll("[data-workspace-form]").forEach(form => {
       form.addEventListener("input", () => { form.dataset.dirty = "true"; });
@@ -793,6 +1022,10 @@
     }
     if (kind === "job") {
       if (countryCurrencies[data.get("payerCountry")] !== data.get("fundingCurrency")) return setStatus("PAYER COUNTRY AND FUNDING CURRENCY DO NOT MATCH_", "error");
+      const publicLimit = testnetBudgetLimit(data.get("fundingCurrency"));
+      if (publicLimit && Number(data.get("budget")) > publicLimit) {
+        return setStatus(`PUBLIC TESTNET FAUCET LIMIT · USE ${publicLimit} ${data.get("fundingCurrency")} OR LESS, OR SWITCH TO LOCALNET FOR LARGE NOTIONALS_`, "error");
+      }
       return executeByIds(["job"], { title: data.get("title"), description: data.get("description"), acceptanceCriteria: data.get("acceptanceCriteria"), skills: String(data.get("skills")).split(",").map(value => value.trim()).filter(Boolean), deliveryDate: data.get("deliveryDate"), payerCountry: data.get("payerCountry"), fundingCurrency: data.get("fundingCurrency"), budget: { amountMinor: String(Math.round(Number(data.get("budget")) * 100)), currency: data.get("fundingCurrency"), scale: 2 } });
     }
     if (kind === "apply") {
