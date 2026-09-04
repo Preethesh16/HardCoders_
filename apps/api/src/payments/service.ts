@@ -24,6 +24,7 @@ import type { AppContext } from '../context.js';
 import { conflict, notFound, unprocessable } from '../errors.js';
 import {
   complianceResults,
+  contractMilestones,
   escrowBindings,
   fxQuoteLegs,
   fxQuotes,
@@ -72,6 +73,7 @@ export const RELEASE_AUTHORIZATION_TTL_SECONDS = 600;
 
 export interface CreatePaymentInput {
   readonly contractId: string;
+  readonly milestoneId?: string;
   readonly fundingAmount: Money;
   readonly purposeCode?: string;
 }
@@ -112,15 +114,25 @@ export class PaymentService {
     requireRole(principal, 'company_member', 'supplier', 'platform_admin', 'payments_service');
     const contract = await this.requireContract(input.contractId);
     requireOwnership(principal, contract.buyerOrganizationId);
-    if (!['RULES_VERIFIED', 'FX_LOCKED'].includes(contract.state)) {
+    if (!['RULES_VERIFIED', 'FX_LOCKED', 'ESCROW_FUNDED', 'IN_PROGRESS'].includes(contract.state)) {
       throw conflict(`Contract ${contract.id} must be approved by both parties before payment.`);
     }
-    const agreedAmount = money(contract.amountMinor, contract.amountCurrency, contract.amountScale);
+    const milestones = await this.context.store.findMany(contractMilestones, { contractId: contract.id }, { orderBy: 'ordinal' });
+    const milestone = input.milestoneId
+      ? milestones.find((candidate) => candidate.id === input.milestoneId)
+      : milestones.length === 1 ? milestones[0] : undefined;
+    if (!milestone) throw unprocessable('A valid contract milestone is required for this escrow.');
+    if (!['PENDING', 'QUOTED'].includes(milestone.state)) {
+      const existing = await this.context.store.findOne(paymentInstructions, { contractId: contract.id, milestoneId: milestone.id });
+      if (existing) return this.hydrate(existing);
+      throw conflict(`Milestone ${milestone.id} cannot create an escrow from state ${milestone.state}.`);
+    }
+    const agreedAmount = money(milestone.amountMinor, milestone.amountCurrency, milestone.amountScale);
     if (!sameDenomination(agreedAmount, input.fundingAmount)
       || agreedAmount.amountMinor !== input.fundingAmount.amountMinor) {
-      throw unprocessable('Payment funding must exactly match the bilaterally approved contract amount.');
+      throw unprocessable('Payment funding must exactly match the bilaterally approved milestone allocation.');
     }
-    const existing = await this.context.store.findOne(paymentInstructions, { contractId: contract.id });
+    const existing = await this.context.store.findOne(paymentInstructions, { contractId: contract.id, milestoneId: milestone.id });
     if (existing) return this.hydrate(existing);
 
     const { origin, destination } = await this.parties(contract.buyerOrganizationId, contract.providerOrganizationId);
@@ -148,6 +160,7 @@ export class PaymentService {
       actor: this.actor(principal),
       contractId: contract.id,
       detail: {
+        milestoneId: milestone.id,
         corridorId: corridor.policy.id,
         bookId,
         direction: corridor.policy.direction,
@@ -238,6 +251,7 @@ export class PaymentService {
     const payment = await this.context.store.insert(paymentInstructions, {
       id: this.context.ids.next('PAY'),
       contractId: contract.id,
+      milestoneId: milestone.id,
       corridorId: corridor.policy.id,
       direction: corridor.policy.direction,
       bookId,
@@ -253,7 +267,10 @@ export class PaymentService {
       createdAt: now,
       updatedAt: now,
     });
-    await this.context.store.update(workContracts, { id: contract.id }, { state: 'FX_LOCKED', updatedAt: now });
+    await this.context.store.update(contractMilestones, { id: milestone.id }, { state: 'QUOTED', updatedAt: now });
+    if (contract.state === 'RULES_VERIFIED') {
+      await this.context.store.update(workContracts, { id: contract.id }, { state: 'FX_LOCKED', updatedAt: now });
+    }
     await this.context.timeline.append({
       kind: 'PAYMENT_CREATED',
       actor: this.actor(principal),
@@ -261,6 +278,8 @@ export class PaymentService {
       paymentId: payment.id,
       detail: {
         paymentId: payment.id,
+        milestoneId: milestone.id,
+        milestoneOrdinal: milestone.ordinal,
         corridorId: corridor.policy.id,
         bookId,
         state: payment.state,
@@ -284,119 +303,132 @@ export class PaymentService {
     const payment = await this.requirePayment(paymentId);
     const contract = await this.requireContract(payment.contractId);
     requireOwnership(principal, contract.buyerOrganizationId);
-    if (payment.state === 'USDC_LOCKED' || payment.state === 'WORK_PENDING') {
+    if (payment.state === 'WORK_PENDING') {
       return this.hydrate(payment);
     }
-    if (payment.state !== 'QUOTED') {
+    if (!['QUOTED', 'FIAT_FUNDED', 'ESCROW_CREATED', 'USDC_LOCKED'].includes(payment.state)) {
       throw conflict(`Payment ${paymentId} cannot be funded from state ${payment.state}.`);
     }
 
     const { quote, compliance, corridor } = await this.hydrate(payment);
-    assertQuoteCurrent({ id: quote.id, expiresAt: quote.expiresAt }, this.context.clock.now());
-    if (compliance.outcome !== 'PASSED') {
-      throw conflict('Funding requires a passed compliance decision.');
-    }
     const providers = this.providers(payment.bookId);
-    this.assertFundingGate(payment, contract, quote, compliance, corridor, providers);
+    if (payment.state !== 'USDC_LOCKED') {
+      assertQuoteCurrent({ id: quote.id, expiresAt: quote.expiresAt }, this.context.clock.now());
+      if (compliance.outcome !== 'PASSED') {
+        throw conflict('Funding requires a passed compliance decision.');
+      }
+      this.assertFundingGate(payment, contract, quote, compliance, corridor, providers);
+    }
     // Resolve and validate any previously persisted binding before a fiat book
     // entry is posted or the executor is asked to sign a transaction.
     const binding = await this.binding(payment, contract, providers, quote);
+    let current = payment;
 
-    const accounts = await this.accounts(payment, contract, providers, quote);
-    // 1. The buyer's funding currency leaves their book.
-    await this.context.ledger.post({
-      bookId: payment.bookId,
-      direction: payment.direction as 'INWARD' | 'OUTWARD',
-      reference: `${payment.id}:FIAT_FUNDING`,
-      memo: `Simulated ${quote.fundingAmount.currency} debit for ${payment.id}`,
-      paymentId: payment.id,
-      lines: [
-        { accountId: accounts.customerFunding, side: 'DEBIT', amount: quote.fundingAmount },
-        { accountId: accounts.originFunding, side: 'CREDIT', amount: quote.fundingAmount },
-      ],
-    });
-    // 2. The origin provider converts to USD and takes its fee.
-    const originFee = quote.fees.find((fee) => fee.code === 'ORIGIN_AND_PLATFORM')!.amount;
-    const usdConversionLines = [
-      { accountId: accounts.originSettlementUsd, side: 'DEBIT' as const, amount: quote.grossSettlementAmount },
-      ...(BigInt(originFee.amountMinor) > 0n
-        ? [{ accountId: accounts.feeIncomeUsd, side: 'CREDIT' as const, amount: originFee }]
-        : []),
-      { accountId: accounts.escrowControlUsd, side: 'CREDIT' as const, amount: quote.settlementAmount },
-    ];
-    await this.context.ledger.post({
-      bookId: payment.bookId,
-      direction: payment.direction as 'INWARD' | 'OUTWARD',
-      reference: `${payment.id}:USD_CONVERSION`,
-      memo: `Simulated ${quote.fundingAmount.currency} to USD conversion for ${payment.id}`,
-      paymentId: payment.id,
-      // A percentage fee can legitimately round to zero at the currency's
-      // fixed scale (notably in faucet-sized TestNet demonstrations). Zero is
-      // not a journal movement, so omit that line while preserving balance.
-      lines: usdConversionLines,
-    });
-    let current = await this.transition(payment, 'FIAT_FUNDED');
-    await this.context.timeline.append({
-      kind: 'FIAT_FUNDED',
-      actor: this.actor(principal),
-      contractId: contract.id,
-      paymentId: payment.id,
-      detail: {
-        paymentId: payment.id,
+    if (current.state === 'QUOTED') {
+      const accounts = await this.accounts(payment, contract, providers, quote);
+      // 1. The buyer's funding currency leaves their book.
+      await this.context.ledger.post({
         bookId: payment.bookId,
-        fundingMinor: quote.fundingAmount.amountMinor,
-        fundingCurrency: quote.fundingAmount.currency,
-        settlementUsdMinor: quote.settlementAmount.amountMinor,
-      },
-    });
+        direction: payment.direction as 'INWARD' | 'OUTWARD',
+        reference: `${payment.id}:FIAT_FUNDING`,
+        memo: `Simulated ${quote.fundingAmount.currency} debit for ${payment.id}`,
+        paymentId: payment.id,
+        lines: [
+          { accountId: accounts.customerFunding, side: 'DEBIT', amount: quote.fundingAmount },
+          { accountId: accounts.originFunding, side: 'CREDIT', amount: quote.fundingAmount },
+        ],
+      });
+      // 2. The origin provider converts to USD and takes its fee.
+      const originFee = quote.fees.find((fee) => fee.code === 'ORIGIN_AND_PLATFORM')!.amount;
+      const usdConversionLines = [
+        { accountId: accounts.originSettlementUsd, side: 'DEBIT' as const, amount: quote.grossSettlementAmount },
+        ...(BigInt(originFee.amountMinor) > 0n
+          ? [{ accountId: accounts.feeIncomeUsd, side: 'CREDIT' as const, amount: originFee }]
+          : []),
+        { accountId: accounts.escrowControlUsd, side: 'CREDIT' as const, amount: quote.settlementAmount },
+      ];
+      await this.context.ledger.post({
+        bookId: payment.bookId,
+        direction: payment.direction as 'INWARD' | 'OUTWARD',
+        reference: `${payment.id}:USD_CONVERSION`,
+        memo: `Simulated ${quote.fundingAmount.currency} to USD conversion for ${payment.id}`,
+        paymentId: payment.id,
+        // A percentage fee can legitimately round to zero at the currency's
+        // fixed scale (notably in faucet-sized TestNet demonstrations). Zero is
+        // not a journal movement, so omit that line while preserving balance.
+        lines: usdConversionLines,
+      });
+      current = await this.transition(current, 'FIAT_FUNDED');
+      await this.context.timeline.append({
+        kind: 'FIAT_FUNDED',
+        actor: this.actor(principal),
+        contractId: contract.id,
+        paymentId: payment.id,
+        detail: {
+          paymentId: payment.id,
+          bookId: payment.bookId,
+          fundingMinor: quote.fundingAmount.amountMinor,
+          fundingCurrency: quote.fundingAmount.currency,
+          settlementUsdMinor: quote.settlementAmount.amountMinor,
+        },
+      });
+    }
 
     // 3. Create and fund the on-chain escrow between the two provider treasuries.
-    const created = await this.context.escrow.create(binding.input, `${idempotencyKey}:CREATE`);
-    await this.recordCommand(payment.id, 'create', `${idempotencyKey}:CREATE`, binding.input, created);
-    current = await this.transition(current, 'ESCROW_CREATED');
-    await this.context.store.update(escrowBindings, { paymentId: payment.id }, {
-      state: 'CREATED',
-      updatedAt: this.context.clock.now().toISOString(),
-    });
-    await this.context.timeline.append({
-      kind: 'ESCROW_CREATED',
-      actor: this.actor(principal),
-      contractId: contract.id,
-      paymentId: payment.id,
-      detail: {
+    if (current.state === 'FIAT_FUNDED') {
+      const created = await this.context.escrow.create(binding.input, `${idempotencyKey}:CREATE`);
+      await this.recordCommand(payment.id, 'create', `${idempotencyKey}:CREATE`, binding.input, created);
+      current = await this.transition(current, 'ESCROW_CREATED');
+      await this.context.store.update(escrowBindings, { paymentId: payment.id }, {
+        state: 'CREATED',
+        updatedAt: this.context.clock.now().toISOString(),
+      });
+      await this.context.timeline.append({
+        kind: 'ESCROW_CREATED',
+        actor: this.actor(principal),
+        contractId: contract.id,
         paymentId: payment.id,
-        dealId: binding.input.dealId,
-        network: binding.input.network,
-        applicationId: binding.input.applicationId,
-        assetId: binding.input.assetId,
-        transactionId: created.transactionId,
-        escrowBindingHash: binding.hash,
-      },
-    });
+        detail: {
+          paymentId: payment.id,
+          dealId: binding.input.dealId,
+          network: binding.input.network,
+          applicationId: binding.input.applicationId,
+          assetId: binding.input.assetId,
+          transactionId: created.transactionId,
+          escrowBindingHash: binding.hash,
+        },
+      });
+    }
 
-    const funded = await this.context.escrow.fund(binding.input.dealId, `${idempotencyKey}:FUND`);
-    await this.recordCommand(payment.id, 'fund', `${idempotencyKey}:FUND`, { dealId: binding.input.dealId }, funded);
-    await this.context.store.update(escrowBindings, { paymentId: payment.id }, {
-      state: funded.escrow.state,
-      updatedAt: this.context.clock.now().toISOString(),
-    });
-    current = await this.transition(current, 'USDC_LOCKED');
-    await this.context.timeline.append({
-      kind: 'USDC_LOCKED',
-      actor: this.actor(principal),
-      contractId: contract.id,
-      paymentId: payment.id,
-      detail: {
+    if (current.state === 'ESCROW_CREATED') {
+      const funded = await this.context.escrow.fund(binding.input.dealId, `${idempotencyKey}:FUND`);
+      await this.recordCommand(payment.id, 'fund', `${idempotencyKey}:FUND`, { dealId: binding.input.dealId }, funded);
+      await this.context.store.update(escrowBindings, { paymentId: payment.id }, {
+        state: funded.escrow.state,
+        updatedAt: this.context.clock.now().toISOString(),
+      });
+      current = await this.transition(current, 'USDC_LOCKED');
+      await this.context.timeline.append({
+        kind: 'USDC_LOCKED',
+        actor: this.actor(principal),
+        contractId: contract.id,
         paymentId: payment.id,
-        dealId: binding.input.dealId,
-        lockedMinor: funded.escrow.lockedMinor,
-        transactionId: funded.transactionId,
-      },
-    });
+        detail: {
+          paymentId: payment.id,
+          dealId: binding.input.dealId,
+          lockedMinor: funded.escrow.lockedMinor,
+          transactionId: funded.transactionId,
+        },
+      });
+    }
 
-    current = await this.transition(current, 'WORK_PENDING');
+    if (current.state === 'USDC_LOCKED') current = await this.transition(current, 'WORK_PENDING');
     await this.context.store.update(workContracts, { id: contract.id }, {
       state: 'ESCROW_FUNDED',
+      updatedAt: this.context.clock.now().toISOString(),
+    });
+    await this.context.store.update(contractMilestones, { id: payment.milestoneId }, {
+      state: 'FUNDED',
       updatedAt: this.context.clock.now().toISOString(),
     });
     return this.hydrate(current);
@@ -421,7 +453,7 @@ export class PaymentService {
       throw conflict(`Payment ${paymentId} cannot be released from state ${payment.state}.`);
     }
 
-    const approved = await this.submissions.latestApproved(contract.id);
+    const approved = await this.submissions.latestApproved(contract.id, payment.milestoneId);
     if (!approved?.fabricTxId) {
       throw conflict('A release needs a Fabric-recorded buyer approval for the current work version.');
     }
@@ -572,7 +604,7 @@ export class PaymentService {
     const command = {
       evidenceId: evidence.evidenceId,
       escrowBinding: escrowInput,
-      milestoneId: contract.milestoneId,
+      milestoneId: payment.milestoneId,
       amountMinor: escrowInput.amount.amountMinor,
       intentId: `${payment.id}-G${generation}`,
       bindingHash: bindingRow.bindingHash,
@@ -700,8 +732,15 @@ export class PaymentService {
     const completed = await this.context.escrow.complete(escrowInput.dealId, `${idempotencyKey}:COMPLETE`);
     await this.recordCommand(payment.id, 'complete', `${idempotencyKey}:COMPLETE`, { dealId: escrowInput.dealId }, completed);
     current = await this.transition(current, 'COMPLETED');
-    await this.context.store.update(workContracts, { id: contract.id }, {
+    await this.context.store.update(contractMilestones, { id: payment.milestoneId }, {
       state: 'COMPLETED',
+      updatedAt: this.context.clock.now().toISOString(),
+    });
+    const milestoneStates = await this.context.store.findMany(contractMilestones, { contractId: contract.id });
+    const allMilestonesComplete = milestoneStates.every((milestone) =>
+      milestone.id === payment.milestoneId || milestone.state === 'COMPLETED');
+    await this.context.store.update(workContracts, { id: contract.id }, {
+      state: allMilestonesComplete ? 'COMPLETED' : 'ESCROW_FUNDED',
       updatedAt: this.context.clock.now().toISOString(),
     });
     await this.reconcile(payment.id);
@@ -710,7 +749,7 @@ export class PaymentService {
       actor: this.actor(principal),
       contractId: contract.id,
       paymentId: payment.id,
-      detail: { paymentId: payment.id, dealId: escrowInput.dealId, transactionId: released.transactionId },
+      detail: { paymentId: payment.id, milestoneId: payment.milestoneId, allMilestonesComplete, dealId: escrowInput.dealId, transactionId: released.transactionId },
     });
     return this.hydrate(await this.requirePayment(paymentId));
   }
@@ -761,6 +800,10 @@ export class PaymentService {
       });
     }
     const refundedPayment = await this.transition(payment, 'REFUNDED');
+    await this.context.store.update(contractMilestones, { id: payment.milestoneId }, {
+      state: 'REFUNDED',
+      updatedAt: this.context.clock.now().toISOString(),
+    });
     await this.context.timeline.append({
       kind: 'PAYMENT_REFUNDED',
       actor: this.actor(principal),
@@ -836,6 +879,8 @@ export class PaymentService {
     const commands = await this.context.store.findMany(providerCommands, { paymentId }, { orderBy: 'createdAt' });
     const binding = await this.context.store.findOne(escrowBindings, { paymentId });
     const submissions = await this.submissions.list(contract.id);
+    const milestones = await this.context.store.findMany(contractMilestones, { contractId: contract.id }, { orderBy: 'ordinal' });
+    const milestonePayments = await this.context.store.findMany(paymentInstructions, { contractId: contract.id }, { orderBy: 'createdAt' });
     const routeDecisions = await this.context.store.findMany(
       settlementRouteDecisions,
       { paymentId },
@@ -853,6 +898,9 @@ export class PaymentService {
       commands,
       binding,
       submissions,
+      milestone: milestones.find((milestone) => milestone.id === payment.milestoneId) ?? null,
+      milestones,
+      milestonePayments,
       settlementRoute: routeDecisions[0]?.decision ?? null,
       settlementRouteHistory: routeDecisions.map((row) => row.decision),
       settlementProviderQuotes: routeQuotes.map((row) => row.quote),
@@ -1192,7 +1240,11 @@ export class PaymentService {
     corridor: CorridorPolicy,
     providers: CorridorProviders,
   ): void {
-    const agreed = money(contract.amountMinor, contract.amountCurrency, contract.amountScale);
+    // A contract can contain several independently funded milestones. The
+    // payment row is the immutable milestone allocation copied after the
+    // schedule was agreed; comparing against the whole contract would reject
+    // every proper partial escrow.
+    const agreed = money(payment.fundingAmountMinor, payment.fundingCurrency, payment.fundingScale);
     const expectedBook = bookIdFor(corridor);
     const expectedLive = this.context.config.fx.mode === 'frankfurter';
     const sourceMatchesMode = expectedLive
@@ -1234,7 +1286,12 @@ export class PaymentService {
       throw new Error('A real Algorand executor requires a deployment manifest.');
     }
     const input: EscrowBindingInput = {
-      dealId: contract.id,
+      // Each contract milestone owns a distinct on-chain escrow. Keeping both
+      // identifiers in the canonical deal key makes the separation visible
+      // in executor persistence and Algorand box commitments.
+      dealId: payment.milestoneId === contract.milestoneId
+        ? contract.id
+        : `${contract.id}:${payment.milestoneId}`,
       agreementHash: contract.contractHash,
       originProviderAddress: providers.origin.address,
       destinationProviderAddress: providers.destination.address,

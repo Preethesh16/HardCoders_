@@ -16,6 +16,7 @@ import {
   aiEvaluations,
   applications,
   companyPolicyProfiles,
+  contractMilestones,
   contractApprovals,
   jobs,
   memberships,
@@ -24,7 +25,7 @@ import {
   users,
   workContracts,
 } from '../db/schema.js';
-import { money, type Money } from '../money.js';
+import { money, sameDenomination, type Money } from '../money.js';
 import { requireOwnership, requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import type { Select } from '../db/store.js';
 import { objectKeyFor } from '../storage/object-store.js';
@@ -45,6 +46,16 @@ export interface CreateJobInput {
   readonly fundingCurrency: string;
   readonly destinationCountry: string;
   readonly budget: Money;
+  readonly milestones?: readonly JobMilestoneInput[];
+}
+
+export interface JobMilestoneInput {
+  readonly title: string;
+  readonly description: string;
+  readonly deliverable: string;
+  readonly acceptanceCriteria: readonly string[];
+  readonly amount: Money;
+  readonly dueDate?: string;
 }
 
 export interface ApplyInput {
@@ -222,6 +233,48 @@ export class MarketplaceService {
     if (input.fundingCurrency !== input.budget.currency) {
       throw unprocessable('The job funding currency must match the budget denomination.');
     }
+    const suppliedMilestones = input.milestones?.length ? input.milestones : [{
+      title: input.title,
+      description: input.description,
+      deliverable: 'The complete project deliverable described in the job brief.',
+      acceptanceCriteria: input.acceptanceCriteria?.length
+        ? input.acceptanceCriteria
+        : ['The buyer reviews the submitted milestone and records a decision.'],
+      amount: input.budget,
+      ...(input.targetDeliveryDate ? { dueDate: input.targetDeliveryDate } : {}),
+    }];
+    if (suppliedMilestones.length > 5) throw unprocessable('A job supports between one and five milestones.');
+    let milestoneTotal = 0n;
+    const milestones = suppliedMilestones.map((milestone, index) => {
+      const title = milestone.title.trim();
+      const description = milestone.description.trim();
+      const deliverable = milestone.deliverable.trim();
+      const acceptanceCriteria = [...new Set(milestone.acceptanceCriteria.map((value) => value.trim()).filter(Boolean))];
+      if (!title || !description || !deliverable || acceptanceCriteria.length === 0) {
+        throw unprocessable(`Milestone ${index + 1} needs a title, description, deliverable and acceptance criteria.`);
+      }
+      if (!sameDenomination(milestone.amount, input.budget) || BigInt(milestone.amount.amountMinor) <= 0n) {
+        throw unprocessable(`Milestone ${index + 1} must use a positive ${input.budget.currency}/${input.budget.scale} amount.`);
+      }
+      if (milestone.dueDate !== undefined && !isIsoDate(milestone.dueDate)) {
+        throw unprocessable(`Milestone ${index + 1} has an invalid due date.`);
+      }
+      milestoneTotal += BigInt(milestone.amount.amountMinor);
+      return {
+        ordinal: index + 1,
+        title: title.slice(0, 200),
+        description: description.slice(0, 4_000),
+        deliverable: deliverable.slice(0, 2_000),
+        acceptanceCriteria: acceptanceCriteria.slice(0, 16),
+        amountMinor: milestone.amount.amountMinor,
+        currency: milestone.amount.currency,
+        scale: milestone.amount.scale,
+        dueDate: milestone.dueDate ?? null,
+      };
+    });
+    if (milestoneTotal !== BigInt(input.budget.amountMinor)) {
+      throw unprocessable('The milestone allocations must add up exactly to the total job budget.');
+    }
 
     const job = await this.context.store.insert(jobs, {
       id: this.context.ids.next('JOB'),
@@ -238,6 +291,7 @@ export class MarketplaceService {
       budgetAmountMinor: input.budget.amountMinor,
       budgetCurrency: input.budget.currency,
       budgetScale: input.budget.scale,
+      milestones,
       status: 'OPEN',
       createdAt: this.context.clock.now().toISOString(),
     });
@@ -252,6 +306,8 @@ export class MarketplaceService {
         destinationCountry: job.destinationCountry,
         budgetMinor: job.budgetAmountMinor,
         budgetCurrency: job.budgetCurrency,
+        milestoneCount: job.milestones.length,
+        milestoneScheduleHash: canonicalHash(job.milestones),
       },
     });
     return job;
@@ -547,13 +603,34 @@ export class MarketplaceService {
         payerCountry: job.payerCountry,
         payoutCountry: application.payoutCountry,
         corridorBookId: corridor.bookId,
-        milestoneCount: 1,
+        milestoneCount: job.milestones.length || 1,
       },
     });
 
     const now = this.context.clock.now().toISOString();
     const contractId = this.context.ids.next('WC');
-    const milestoneId = this.context.ids.next('MS');
+    const jobMilestones = job.milestones.length ? job.milestones : [{
+      ordinal: 1,
+      title: job.title,
+      description: job.description,
+      deliverable: 'The complete project deliverable described in the job brief.',
+      acceptanceCriteria: job.acceptanceCriteria ?? ['The buyer reviews the submitted milestone and records a decision.'],
+      amountMinor: job.budgetAmountMinor,
+      currency: job.budgetCurrency,
+      scale: job.budgetScale,
+      dueDate: job.targetDeliveryDate,
+    }];
+    const originalTotal = jobMilestones.reduce((total, milestone) => total + BigInt(milestone.amountMinor), 0n);
+    let allocated = 0n;
+    const scheduledMilestones = jobMilestones.map((milestone, index) => {
+      const amountMinor = index === jobMilestones.length - 1
+        ? BigInt(amount.amountMinor) - allocated
+        : BigInt(milestone.amountMinor) * BigInt(amount.amountMinor) / originalTotal;
+      allocated += amountMinor;
+      if (amountMinor <= 0n) throw unprocessable('The agreed price is too small to allocate a positive escrow to every milestone.');
+      return { ...milestone, id: this.context.ids.next('MS'), amountMinor: amountMinor.toString(), currency: amount.currency, scale: amount.scale };
+    });
+    const milestoneId = scheduledMilestones[0]!.id;
     const baselineTerms: AgreementTermsInput = {
       policies: ['Work and payment records remain private to the selected parties.'],
       legalClauses: ['This prototype agreement is for demonstration and is not legal advice.'],
@@ -569,6 +646,7 @@ export class MarketplaceService {
       application,
       amount,
       input: baselineTerms,
+      milestones: scheduledMilestones,
       draftingSummary: drafted.summary,
     });
     const contract = await this.context.store.insert(workContracts, {
@@ -601,6 +679,24 @@ export class MarketplaceService {
       createdAt: now,
       updatedAt: now,
     });
+    for (const milestone of scheduledMilestones) {
+      await this.context.store.insert(contractMilestones, {
+        id: milestone.id,
+        contractId: contract.id,
+        ordinal: milestone.ordinal,
+        title: milestone.title,
+        description: milestone.description,
+        deliverable: milestone.deliverable,
+        acceptanceCriteria: [...milestone.acceptanceCriteria],
+        amountMinor: milestone.amountMinor,
+        amountCurrency: milestone.currency,
+        amountScale: milestone.scale,
+        dueDate: milestone.dueDate,
+        state: 'PENDING',
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
     const jobApplications = await this.context.store.findMany(applications, { jobId: job.id });
     for (const candidate of jobApplications) {
       await this.context.store.update(applications, { id: candidate.id }, {
@@ -619,6 +715,8 @@ export class MarketplaceService {
         agreementArtifactHash: agreement.artifactHash,
         agreementVersion: agreement.version,
         milestoneId,
+        milestoneCount: scheduledMilestones.length,
+        milestoneScheduleHash: canonicalHash(scheduledMilestones.map(({ id, ...milestone }) => ({ id, ...milestone }))),
         amountMinor: contract.amountMinor,
         amountCurrency: contract.amountCurrency,
         payerCountry: contract.payerCountry,
@@ -650,6 +748,7 @@ export class MarketplaceService {
     }
     const job = await this.requireJob(contract.jobId);
     const application = await this.requireApplication(contract.applicationId);
+    const milestones = await this.context.store.findMany(contractMilestones, { contractId }, { orderBy: 'ordinal' });
     const [profile] = await this.context.store.findMany(companyPolicyProfiles, {
       organizationId: contract.buyerOrganizationId,
     }, { orderBy: 'version', direction: 'desc', limit: 1 });
@@ -729,6 +828,18 @@ export class MarketplaceService {
       application,
       amount: this.contractAmount(contract),
       input: agreementInput,
+      milestones: milestones.map((milestone) => ({
+        id: milestone.id,
+        ordinal: milestone.ordinal,
+        title: milestone.title,
+        description: milestone.description,
+        deliverable: milestone.deliverable,
+        acceptanceCriteria: milestone.acceptanceCriteria,
+        amountMinor: milestone.amountMinor,
+        currency: milestone.amountCurrency,
+        scale: milestone.amountScale,
+        dueDate: milestone.dueDate,
+      })),
       sources,
       ...(profile ? { profile } : {}),
       draftingSummary: drafted.summary,
@@ -821,6 +932,10 @@ export class MarketplaceService {
     job: Job;
     application: Application;
     amount: Money;
+    milestones: readonly {
+      id: string; ordinal: number; title: string; description: string; deliverable: string;
+      acceptanceCriteria: readonly string[]; amountMinor: string; currency: string; scale: number; dueDate: string | null;
+    }[];
     input: AgreementTermsInput;
     sources?: readonly AgreementClauseSource[];
     profile?: CompanyPolicyProfile;
@@ -863,6 +978,19 @@ export class MarketplaceService {
       `Company policy profile: ${args.profile?.id ?? 'Explicit deal input'}`,
       `Company policy profile hash: ${args.profile?.profileHash ?? 'Not available'}`,
       '',
+      '## Milestone escrow schedule',
+      '',
+      ...args.milestones.flatMap((milestone) => [
+        `### Milestone ${milestone.ordinal}: ${milestone.title}`,
+        '',
+        `Milestone reference: ${milestone.id}`,
+        `Description: ${milestone.description}`,
+        `Required deliverable: ${milestone.deliverable}`,
+        `Escrow allocation: ${milestone.amountMinor} ${milestone.currency} minor units (scale ${milestone.scale})`,
+        `Due date: ${milestone.dueDate ?? 'Not specified'}`,
+        `Acceptance checks: ${milestone.acceptanceCriteria.join(' | ')}`,
+        '',
+      ]),
       ...section('Company policies', terms.policies),
       ...section('Legal clauses', terms.legalClauses),
       ...section('Acceptance criteria', terms.acceptanceCriteria),
@@ -915,6 +1043,7 @@ export class MarketplaceService {
         skills: args.application.proposedSkills,
       },
       agreedAmount: args.amount,
+      milestones: args.milestones,
       companyTerms: terms,
       companyPolicyProfile: args.profile ? {
         id: args.profile.id,
@@ -984,6 +1113,12 @@ export class MarketplaceService {
 
   async approvals(contractId: string) {
     return this.context.store.findMany(contractApprovals, { contractId }, { orderBy: 'approvedAt' });
+  }
+
+  async milestones(principal: Principal, contractId: string) {
+    const contract = await this.requireContract(contractId);
+    requireReadAccess(principal, contract.buyerOrganizationId, contract.providerOrganizationId);
+    return this.context.store.findMany(contractMilestones, { contractId }, { orderBy: 'ordinal' });
   }
 
   async requireJob(jobId: string): Promise<Job> {

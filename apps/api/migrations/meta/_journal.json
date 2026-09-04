@@ -71,6 +71,13 @@
       "when": 1788528300000,
       "tag": "0009_dynamic_settlement_router",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788529300000,
+      "tag": "0010_milestone_escrows",
+      "breakpoints": true
     }
   ]
 }

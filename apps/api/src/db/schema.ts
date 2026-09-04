@@ -229,6 +229,17 @@ export const jobs = pgTable('jobs', {
   budgetAmountMinor: minor('budget_amount_minor').notNull(),
   budgetCurrency: currency('budget_currency').notNull(),
   budgetScale: smallint('budget_scale').notNull(),
+  milestones: jsonb('milestones').$type<Array<{
+    ordinal: number;
+    title: string;
+    description: string;
+    deliverable: string;
+    acceptanceCriteria: string[];
+    amountMinor: string;
+    currency: string;
+    scale: number;
+    dueDate: string | null;
+  }>>().notNull(),
   status: varchar('status', { length: 24 }).notNull(),
   createdAt: instant('created_at').notNull(),
 }, (table) => [index('jobs_organization_idx').on(table.organizationId)]);
@@ -334,6 +345,27 @@ export const contractApprovals = pgTable('contract_approvals', {
   approvedAt: instant('approved_at').notNull(),
 }, (table) => [uniqueIndex('contract_approvals_party_idx').on(table.contractId, table.party)]);
 
+/** Immutable milestone schedule copied from the job into the approved deal. */
+export const contractMilestones = pgTable('contract_milestones', {
+  id: id(),
+  contractId: ref('contract_id').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  deliverable: text('deliverable').notNull(),
+  acceptanceCriteria: jsonb('acceptance_criteria').$type<string[]>().notNull(),
+  amountMinor: minor('amount_minor').notNull(),
+  amountCurrency: currency('amount_currency').notNull(),
+  amountScale: smallint('amount_scale').notNull(),
+  dueDate: varchar('due_date', { length: 10 }),
+  state: varchar('state', { length: 24 }).notNull(),
+  createdAt: instant('created_at').notNull(),
+  updatedAt: instant('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('contract_milestones_ordinal_idx').on(table.contractId, table.ordinal),
+  index('contract_milestones_state_idx').on(table.contractId, table.state),
+]);
+
 /** A snapshot of the versioned corridor rules that were applied, as of a decision. */
 export const corridorPolicies = pgTable('corridor_policies', {
   id: id(),
@@ -427,6 +459,7 @@ export const fxQuoteLegs = pgTable('fx_quote_legs', {
 export const paymentInstructions = pgTable('payment_instructions', {
   id: id(),
   contractId: ref('contract_id').notNull(),
+  milestoneId: ref('milestone_id').notNull(),
   corridorId: ref('corridor_id').notNull(),
   direction: varchar('direction', { length: 8 }).notNull(),
   bookId: varchar('book_id', { length: 32 }).notNull(),
@@ -441,7 +474,10 @@ export const paymentInstructions = pgTable('payment_instructions', {
   payoutScale: smallint('payout_scale').notNull(),
   createdAt: instant('created_at').notNull(),
   updatedAt: instant('updated_at').notNull(),
-}, (table) => [index('payment_instructions_contract_idx').on(table.contractId)]);
+}, (table) => [
+  uniqueIndex('payment_instructions_milestone_idx').on(table.contractId, table.milestoneId),
+  index('payment_instructions_contract_idx').on(table.contractId),
+]);
 
 export const escrowBindings = pgTable('escrow_bindings', {
   id: id(),
@@ -632,6 +668,7 @@ export const uploadedObjects = pgTable('uploaded_objects', {
 export const workSubmissions = pgTable('work_submissions', {
   id: id(),
   contractId: ref('contract_id').notNull(),
+  milestoneId: ref('milestone_id').notNull(),
   evidenceId: ref('evidence_id').notNull(),
   version: integer('version').notNull(),
   objectId: ref('object_id').notNull(),
@@ -643,7 +680,7 @@ export const workSubmissions = pgTable('work_submissions', {
   decidedAt: instant('decided_at'),
   submittedAt: instant('submitted_at').notNull(),
 }, (table) => [
-  uniqueIndex('work_submissions_version_idx').on(table.contractId, table.version),
+  uniqueIndex('work_submissions_version_idx').on(table.contractId, table.milestoneId, table.version),
   index('work_submissions_evidence_idx').on(table.evidenceId),
 ]);
 
@@ -676,6 +713,7 @@ export const schema = {
   aiEvaluations,
   aiEvaluationCitations,
   workContracts,
+  contractMilestones,
   contractApprovals,
   corridorPolicies,
   complianceResults,

@@ -139,6 +139,44 @@ describe('document-to-form extraction', () => {
     expect(proposal.fields).toMatchObject({ proposedPricePln: 240000 });
   });
 
+  it('round-trips the structured marker embedded in an Anchor-generated PDF', async () => {
+    const source = [
+      'Title: Milestone settlement build',
+      'Scope of work: Deliver two independently accepted stages.',
+      'Acceptance criteria: Each milestone passes its checks',
+      'Required skills: TypeScript; Algorand',
+      'Budget: 3',
+      'Payer country: United Kingdom',
+      'Funding currency: GBP',
+      'Target delivery date: 2026-11-30',
+      'Milestone 1 title: Architecture proof',
+      'Milestone 1 description: Define the trust boundaries.',
+      'Milestone 1 deliverable: Architecture PDF',
+      'Milestone 1 acceptance criteria: Threat model included; interfaces documented',
+      'Milestone 1 amount: 1',
+      'Milestone 1 due date: 2026-10-31',
+      'Milestone 2 title: Working implementation',
+      'Milestone 2 description: Implement and test the approved design.',
+      'Milestone 2 deliverable: Source archive and test report',
+      'Milestone 2 acceptance criteria: Tests pass',
+      'Milestone 2 amount: 2',
+      'Milestone 2 due date: 2026-11-30',
+    ].join('\n');
+    const pdf = Buffer.from(`%PDF-1.4\n%ANCHOR_JOB_BRIEF_BASE64:${Buffer.from(source).toString('base64')}\n%%EOF\n`, 'latin1');
+    const result = await extractFormDraft(
+      { mode: 'fixture', baseUrl: 'https://api.openai.com/v1', model: 'fixture' },
+      { purpose: 'JOB_BRIEF', fileName: 'anchor-company-job-brief.pdf', contentType: 'application/pdf', contentBase64: pdf.toString('base64') },
+    );
+
+    expect(result.fields).toMatchObject({
+      title: 'Milestone settlement build', payerCountry: 'GB', fundingCurrency: 'GBP', budgetPln: 3,
+      milestones: [
+        { title: 'Architecture proof', amount: 1, dueDate: '2026-10-31' },
+        { title: 'Working implementation', amount: 2, dueDate: '2026-11-30' },
+      ],
+    });
+  });
+
   it('sends the document as a Responses API file input and requests strict structured output', async () => {
     let sent: Record<string, any> | undefined;
     vi.stubGlobal('fetch', vi.fn(async (_url: URL, init: RequestInit) => {

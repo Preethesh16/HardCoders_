@@ -22,6 +22,16 @@ export interface JobBriefFields {
   readonly payerCountry: DemoCountry | null;
   readonly fundingCurrency: DemoCurrency | null;
   readonly destinationCountry: DemoCountry | null;
+  readonly milestones: readonly MilestoneDraftFields[];
+}
+
+export interface MilestoneDraftFields {
+  readonly title: string | null;
+  readonly description: string | null;
+  readonly deliverable: string | null;
+  readonly acceptanceCriteria: readonly string[];
+  readonly amount: number | null;
+  readonly dueDate: string | null;
 }
 
 export interface ProposalFields {
@@ -168,10 +178,33 @@ function strings(value: unknown, maximum: number): string[] {
   }))].slice(0, maximum);
 }
 
+function embeddedPdfText(bytes: Buffer): string {
+  const raw = bytes.toString('latin1');
+  const match = /%ANCHOR_JOB_BRIEF_BASE64:([A-Za-z0-9+/=]+)/u.exec(raw);
+  if (!match?.[1]) return '';
+  try { return Buffer.from(match[1], 'base64').toString('utf8').slice(0, 100_000); } catch { return ''; }
+}
+
+function milestoneFields(sourceText: string): MilestoneDraftFields[] {
+  const output: MilestoneDraftFields[] = [];
+  for (let ordinal = 1; ordinal <= 5; ordinal += 1) {
+    const prefix = `milestone ${ordinal}`;
+    const title = valueFor(sourceText, [`${prefix} title`]);
+    const description = valueFor(sourceText, [`${prefix} description`, `${prefix} scope`]);
+    const deliverable = valueFor(sourceText, [`${prefix} deliverable`, `${prefix} output`]);
+    const acceptanceCriteria = list(valueFor(sourceText, [`${prefix} acceptance criteria`, `${prefix} acceptance`]));
+    const amount = number(valueFor(sourceText, [`${prefix} amount`, `${prefix} allocation`, `${prefix} budget`]));
+    const dueDate = valueFor(sourceText, [`${prefix} due date`, `${prefix} delivery date`]);
+    if (!title && !description && !deliverable && acceptanceCriteria.length === 0 && amount === null && !dueDate) continue;
+    output.push({ title, description, deliverable, acceptanceCriteria, amount, dueDate });
+  }
+  return output;
+}
+
 function fixtureFields(request: FormExtractionRequest, bytes: Buffer): JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields | CompanyIdentityFields {
   const sourceText = TEXT_EXTENSIONS.includes(extension(request.fileName) as typeof TEXT_EXTENSIONS[number])
     ? bytes.toString('utf8').slice(0, 100_000)
-    : '';
+    : extension(request.fileName) === '.pdf' ? embeddedPdfText(bytes) : '';
   if (request.purpose === 'COMPANY_IDENTITY') {
     return {
       legalName: valueFor(sourceText, ['legal name', 'company name']),
@@ -210,6 +243,7 @@ function fixtureFields(request: FormExtractionRequest, bytes: Buffer): JobBriefF
       payerCountry: country(valueFor(sourceText, ['payer country', 'company country', 'origin country'])),
       fundingCurrency: currency(valueFor(sourceText, ['funding currency', 'payer currency', 'company currency'])),
       destinationCountry: country(valueFor(sourceText, ['destination country', 'target country'])),
+      milestones: milestoneFields(sourceText),
     };
   }
   if (request.purpose === 'FREELANCER_PROPOSAL') return {
@@ -292,8 +326,20 @@ function schemaFor(purpose: FormExtractionPurpose): Record<string, unknown> {
         payerCountry: { type: ['string', 'null'], enum: ['PL', 'IN', 'GB', 'DE', 'RU', 'KP', null] },
         fundingCurrency: { type: ['string', 'null'], enum: ['PLN', 'INR', 'GBP', 'EUR', 'RUB', 'KPW', null] },
         destinationCountry: { type: ['string', 'null'], enum: ['PL', 'IN', 'GB', 'DE', 'RU', 'KP', null] },
+        milestones: { type: 'array', maxItems: 5, items: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            title: nullableString,
+            description: nullableString,
+            deliverable: nullableString,
+            acceptanceCriteria: { type: 'array', items: { type: 'string' } },
+            amount: nullableNumber,
+            dueDate: { type: ['string', 'null'], description: 'YYYY-MM-DD or null' },
+          },
+          required: ['title', 'description', 'deliverable', 'acceptanceCriteria', 'amount', 'dueDate'],
+        } },
       },
-      required: ['title', 'description', 'acceptanceCriteria', 'skills', 'budgetPln', 'deliveryDate', 'payerCountry', 'fundingCurrency', 'destinationCountry'],
+      required: ['title', 'description', 'acceptanceCriteria', 'skills', 'budgetPln', 'deliveryDate', 'payerCountry', 'fundingCurrency', 'destinationCountry', 'milestones'],
     };
   }
   if (purpose === 'AGREEMENT_TERMS') {
@@ -369,6 +415,19 @@ function normalizeFields(purpose: FormExtractionPurpose, value: unknown): JobBri
       payerCountry: country(text(record['payerCountry'], 32)),
       fundingCurrency: currency(text(record['fundingCurrency'], 8)),
       destinationCountry: country(text(record['destinationCountry'], 32)),
+      milestones: Array.isArray(record['milestones']) ? record['milestones'].slice(0, 5).map((entry) => {
+        const milestone = typeof entry === 'object' && entry !== null && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
+        const dueDate = text(milestone['dueDate'], 10);
+        const amount = milestone['amount'];
+        return {
+          title: text(milestone['title'], 200),
+          description: text(milestone['description'], 4_000),
+          deliverable: text(milestone['deliverable'], 2_000),
+          acceptanceCriteria: strings(milestone['acceptanceCriteria'], 16),
+          amount: typeof amount === 'number' && Number.isFinite(amount) && amount > 0 ? amount : null,
+          dueDate: dueDate && /^\d{4}-\d{2}-\d{2}$/u.test(dueDate) ? dueDate : null,
+        };
+      }) : [],
     };
   }
   if (purpose === 'AGREEMENT_TERMS') {
@@ -430,7 +489,7 @@ export async function extractFormDraft(
       : request.purpose === 'COMPANY_POLICY'
       ? 'Extract the company onboarding policy into the requested fields, including only explicitly stated company country, funding currency, operational policies, legal clauses, commercial standards, and authorized approver roles. Preserve the meaning of obligations and never invent legal terms.'
       : request.purpose === 'JOB_BRIEF'
-      ? 'Extract a company job brief into the requested fields, including an explicitly stated payer company country and funding currency. Never invent missing facts or infer a destination from the work description. The destination country is a preference only; the selected freelancer profile determines the actual payout corridor.'
+      ? 'Extract a company job brief into the requested fields, including an explicitly stated payer company country, funding currency, and one to five milestone objects. For every milestone preserve its title, description, required deliverable, acceptance criteria, allocated amount and due date. Never invent missing facts or infer a destination from the work description. The destination country is a preference only; the selected freelancer profile determines the actual payout corridor.'
       : request.purpose === 'FREELANCER_PROPOSAL'
         ? 'Extract a freelancer proposal into the requested fields, including explicitly stated tax residence, payout country, and payout currency. Never invent or infer missing locations or currencies. Return the numeric proposed price exactly as written; the proposed price is denominated in the payer currency shown in the job, while payoutCurrency is the freelancer receiving currency.'
         : 'Extract agreement inputs into commercial terms, objective acceptance criteria, company policies, and legal clauses. Preserve obligations accurately and never invent missing terms.';
@@ -462,6 +521,8 @@ export async function extractFormDraft(
     const extracted = normalizeFields(request.purpose, JSON.parse(responseText(payload)));
     const fields = TEXT_EXTENSIONS.includes(extension(request.fileName) as typeof TEXT_EXTENSIONS[number])
       ? mergeWithLabeledText(request.purpose, extracted, fixtureFields(request, bytes))
+      : request.purpose === 'JOB_BRIEF' && extension(request.fileName) === '.pdf' && embeddedPdfText(bytes)
+        ? mergeWithLabeledText(request.purpose, extracted, fixtureFields(request, bytes))
       : extracted;
     return {
       purpose: request.purpose,

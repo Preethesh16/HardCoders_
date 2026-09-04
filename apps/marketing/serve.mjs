@@ -22,6 +22,7 @@ import {
   extractForm,
   authorizePortal,
 } from "./workflow.mjs";
+import { createJobBriefPdf } from "./job-brief-pdf.mjs";
 
 function sendJson(res, status, payload) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -167,6 +168,22 @@ const server = createServer(async (req, res) => {
     try {
       const role = req.headers["x-anchor-role"] === "FREELANCER" ? "freelancer" : "company";
       sendJson(res, 200, await extractForm(role, await readJson(req)));
+    } catch (error) {
+      sendJson(res, 400, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  if (requestPath === "/api/workflow/job-brief.pdf" && req.method === "POST") {
+    try {
+      if (req.headers["x-anchor-role"] !== "COMPANY") throw new Error("Only the Company portal can generate a job brief.");
+      const pdf = createJobBriefPdf(await readJson(req));
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": 'attachment; filename="anchor-company-job-brief.pdf"',
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end(pdf);
     } catch (error) {
       sendJson(res, 400, { error: { message: String(error.message ?? error) } });
     }

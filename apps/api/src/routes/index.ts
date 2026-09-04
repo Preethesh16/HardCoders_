@@ -187,6 +187,14 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
         fundingCurrency: body.fundingCurrency,
         destinationCountry: body.destinationCountry,
         budget: money(body.budget.amountMinor, body.budget.currency, body.budget.scale),
+        ...(body.milestones === undefined ? {} : { milestones: body.milestones.map((milestone) => ({
+          title: milestone.title,
+          description: milestone.description,
+          deliverable: milestone.deliverable,
+          acceptanceCriteria: milestone.acceptanceCriteria,
+          amount: money(milestone.amount.amountMinor, milestone.amount.currency, milestone.amount.scale),
+          ...(milestone.dueDate === undefined ? {} : { dueDate: milestone.dueDate }),
+        })) }),
       }),
     });
   });
@@ -294,6 +302,10 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
       run: async () => marketplace.approveContract(principal, request.params.id, body),
     });
   });
+
+  app.get<{ Params: { id: string } }>('/v1/contracts/:id/milestones', {
+    schema: { params: IdParams, response: errorResponses },
+  }, async (request) => ({ milestones: await marketplace.milestones(principalOf(request), request.params.id) }));
 
   app.post<{ Params: { id: string } }>('/v1/contracts/:id/agreement', {
     schema: { params: IdParams, body: PrepareAgreementBody, response: errorResponses },
@@ -655,6 +667,7 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
       statusCode: 201,
       run: async () => payments.create(principal, {
         contractId: body.contractId,
+        ...(body.milestoneId === undefined ? {} : { milestoneId: body.milestoneId }),
         fundingAmount: money(body.fundingAmount.amountMinor, body.fundingAmount.currency, body.fundingAmount.scale),
         ...(body.purposeCode === undefined ? {} : { purposeCode: body.purposeCode }),
       }),

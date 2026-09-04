@@ -11,16 +11,18 @@ import { assertTransition } from '@optiwork/domain';
 import type { WorkContractState } from '@optiwork/contracts';
 import type { AppContext } from '../context.js';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.js';
-import { documentHashes, uploadedObjects, workContracts, workSubmissions } from '../db/schema.js';
+import { contractMilestones, documentHashes, uploadedObjects, workContracts, workSubmissions } from '../db/schema.js';
 import { requireOwnership, requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import { ALLOWED_CONTENT_TYPES, MAX_OBJECT_BYTES, objectKeyFor } from '../storage/object-store.js';
 import { buyerOrganizationRef, workEvidenceHash } from '../fabric/evidence-reader.js';
 import type { Select } from '../db/store.js';
 import { sha256Text } from '../runtime.js';
+import { canonicalHash } from '../canonical.js';
 
 export type Submission = Select<typeof workSubmissions>;
 
 export interface SubmitWorkInput {
+  readonly milestoneId?: string;
   readonly fileName: string;
   readonly contentType: string;
   readonly contentBase64: string;
@@ -77,6 +79,17 @@ export class SubmissionService {
     if (!['ESCROW_FUNDED', 'IN_PROGRESS', 'REVISION_REQUIRED'].includes(contract.state)) {
       throw conflict(`Contract ${contractId} is not accepting a submission in state ${contract.state}.`);
     }
+    const milestones = await this.context.store.findMany(contractMilestones, { contractId }, { orderBy: 'ordinal' });
+    const milestone = input.milestoneId
+      ? milestones.find((candidate) => candidate.id === input.milestoneId)
+      : milestones.length === 1 ? milestones[0] : undefined;
+    if (!milestone) throw unprocessable('A valid funded milestone is required for this delivery.');
+    const legacySingleMilestoneFunded = milestones.length === 1
+      && milestone.state === 'PENDING'
+      && ['ESCROW_FUNDED', 'IN_PROGRESS', 'REVISION_REQUIRED'].includes(contract.state);
+    if (!legacySingleMilestoneFunded && !['FUNDED', 'REVISION_REQUIRED'].includes(milestone.state)) {
+      throw conflict(`Milestone ${milestone.id} is not accepting a delivery in state ${milestone.state}.`);
+    }
     // Deliverables may be source archives, design files, media, binaries or
     // another client-declared type. We constrain control characters and size,
     // but intentionally do not maintain a brittle MIME allowlist.
@@ -89,7 +102,7 @@ export class SubmissionService {
 
     const previous = await this.context.store.findMany(
       workSubmissions,
-      { contractId },
+      { contractId, milestoneId: milestone.id },
       { orderBy: 'version', direction: 'desc', limit: 1 },
     );
     const latest = previous[0];
@@ -125,10 +138,20 @@ export class SubmissionService {
     const evidenceId = latest?.evidenceId ?? this.context.ids.next('EV');
     const record = await this.context.fabric.recordSubmission(this.fabricActor(principal), {
       dealId: contract.id,
-      milestoneId: contract.milestoneId,
+      milestoneId: milestone.id,
       evidenceId,
       contractHash: contract.contractHash,
-      milestoneHash: contract.milestoneHash,
+      milestoneHash: canonicalHash({
+        milestoneId: milestone.id,
+        contractHash: contract.contractHash,
+        ordinal: milestone.ordinal,
+        title: milestone.title,
+        deliverable: milestone.deliverable,
+        acceptanceCriteria: milestone.acceptanceCriteria,
+        amountMinor: milestone.amountMinor,
+        amountCurrency: milestone.amountCurrency,
+        amountScale: milestone.amountScale,
+      }),
       fileHash: stored.sha256,
       subjectRef,
       buyerOrganizationRef: buyerOrganizationRef(contract.buyerOrganizationId),
@@ -139,6 +162,7 @@ export class SubmissionService {
     const submission = await this.context.store.insert(workSubmissions, {
       id: this.context.ids.next('SUB'),
       contractId,
+      milestoneId: milestone.id,
       evidenceId,
       version,
       objectId,
@@ -155,6 +179,10 @@ export class SubmissionService {
     // including the first one after funding and every later revision.
     await this.advance(contract.state as WorkContractState, contractId, 'IN_PROGRESS');
     await this.advance('IN_PROGRESS', contractId, 'WORK_SUBMITTED');
+    await this.context.store.update(contractMilestones, { id: milestone.id }, {
+      state: 'SUBMITTED',
+      updatedAt: now,
+    });
     await this.context.timeline.append({
       kind: 'WORK_SUBMITTED',
       actor: this.actor(principal),
@@ -162,6 +190,8 @@ export class SubmissionService {
       detail: {
         contractId,
         submissionId: submission.id,
+        milestoneId: milestone.id,
+        milestoneOrdinal: milestone.ordinal,
         version,
         fileHash: stored.sha256,
         byteLength: stored.byteLength,
@@ -312,6 +342,10 @@ export class SubmissionService {
       : input.decision === 'REVISION_REQUIRED' ? 'REVISION_REQUIRED' : 'DISPUTED';
     await this.advance(contract.state as WorkContractState, contract.id, 'VALIDATION_RECORDED');
     await this.advance('VALIDATION_RECORDED', contract.id, nextState);
+    await this.context.store.update(contractMilestones, { id: submission.milestoneId }, {
+      state: input.decision === 'APPROVED' ? 'APPROVED' : input.decision === 'REVISION_REQUIRED' ? 'REVISION_REQUIRED' : 'DISPUTED',
+      updatedAt: now,
+    });
 
     await this.context.timeline.append({
       kind: input.decision === 'APPROVED' ? 'WORK_APPROVED' : 'WORK_REVISION_REQUESTED',
@@ -320,6 +354,7 @@ export class SubmissionService {
       detail: {
         contractId: contract.id,
         submissionId,
+        milestoneId: submission.milestoneId,
         version: submission.version,
         decision: input.decision,
         fabricTxId: record.fabricTxId,
@@ -332,10 +367,10 @@ export class SubmissionService {
     return { submission: updated ?? submission, fabricTxId: record.fabricTxId, advisory };
   }
 
-  async latestApproved(contractId: string): Promise<Submission | null> {
+  async latestApproved(contractId: string, milestoneId?: string): Promise<Submission | null> {
     const rows = await this.context.store.findMany(
       workSubmissions,
-      { contractId, buyerDecision: 'APPROVED' },
+      { contractId, ...(milestoneId ? { milestoneId } : {}), buyerDecision: 'APPROVED' },
       { orderBy: 'version', direction: 'desc', limit: 1 },
     );
     return rows[0] ?? null;

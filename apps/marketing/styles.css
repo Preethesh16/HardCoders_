@@ -1045,6 +1045,124 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
   #portalWorkflow .stage-state{grid-column:2}
 }
 
+/* Role-aware workflow notifications. The inbox lives in the shared portal
+   header while its contents are derived from persisted deal events. */
+.portal-world.open .portal-user .notification-button{
+  position:relative;
+  width:42px;
+  height:42px;
+  padding:9px;
+  display:grid;
+  place-items:center;
+  background:#17372d;
+  color:#fff;
+  border:2px solid #365446;
+  border-radius:4px;
+  box-shadow:none;
+}
+.portal-world.open .notification-button:hover,
+.portal-world.open .notification-button:focus-visible{
+  color:var(--acid);
+  border-color:var(--acid);
+  outline:0;
+}
+.notification-button svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:square;stroke-linejoin:miter}
+.portal-world.open .portal-user .notification-button #notificationBadge{
+  position:absolute;
+  top:-7px;
+  right:-7px;
+  min-width:20px;
+  height:20px;
+  margin:0;
+  padding:0 4px;
+  display:grid;
+  place-items:center;
+  background:#d94a36;
+  color:#fff;
+  border:2px solid #071712;
+  border-radius:10px;
+  font:6px "Press Start 2P",monospace;
+}
+.notification-popover{
+  position:absolute;
+  z-index:52;
+  top:62px;
+  right:220px;
+  width:min(430px,calc(100vw - 24px));
+  max-height:min(620px,calc(100svh - 82px));
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr) auto;
+  overflow:hidden;
+  background:#fff;
+  color:#10271f;
+  border:1px solid #cfd9d1;
+  border-radius:10px;
+  box-shadow:0 18px 55px rgba(7,23,18,.24);
+}
+.notification-popover[hidden],.notification-toast[hidden]{display:none!important}
+.notification-popover>header{display:flex;align-items:center;justify-content:space-between;padding:17px 18px;background:#0b2b22;color:#fff;border-bottom:3px solid var(--acid)}
+.notification-popover>header div{display:grid;gap:6px}
+.notification-popover>header small{color:#9bb2a6;font:5px "Press Start 2P",monospace}
+.notification-popover>header strong{color:var(--acid);font:9px "Press Start 2P",monospace}
+.notification-popover>header button{width:31px;height:31px;padding:0;background:#173f34;color:#fff;border:1px solid #587366;border-radius:4px;font:20px/1 var(--mono);cursor:pointer}
+.notification-popover>header button:focus-visible,.notification-popover>footer button:focus-visible{outline:3px solid var(--acid);outline-offset:2px}
+.notification-list{overflow:auto;overscroll-behavior:contain}
+.notification-list article{position:relative;display:grid;grid-template-columns:9px minmax(0,1fr);gap:12px;padding:17px 18px;border-bottom:1px solid #e2e9e4;background:#fff}
+.notification-list article[data-read="false"]{background:#f4faed}
+.notification-list article>i{width:8px;height:8px;margin-top:4px;background:#aab8af;border-radius:50%}
+.notification-list article[data-read="false"]>i{background:var(--acid);box-shadow:0 0 0 3px #17372d}
+.notification-list article[data-tone="success"]>i{background:#1d9a5d}
+.notification-list article[data-tone="funding"]>i{background:#48b9ca}
+.notification-list article[data-tone="proposal"]>i{background:#7e5bc4}
+.notification-list article header{display:flex;gap:12px;align-items:start;justify-content:space-between}
+.notification-list article header strong{color:#17372d;font:6px/1.5 "Press Start 2P",monospace}
+.notification-list article time{flex:none;color:#718078;font:9px var(--mono)}
+.notification-list article div>b{display:block;margin-top:8px;color:#193b30;font:600 13px/1.4 var(--sans)}
+.notification-list article p{margin:5px 0 0;color:#68776f;font:11px/1.55 var(--mono)}
+.notification-empty{margin:0;padding:45px 24px;text-align:center;color:#748179;font:11px/1.7 var(--mono)}
+.notification-popover>footer{display:flex;align-items:center;justify-content:space-between;padding:13px 17px;background:#f2f6f2;border-top:1px solid #dbe4dd}
+.notification-popover>footer span{color:#68776f;font:5px "Press Start 2P",monospace}
+.notification-popover>footer button{padding:9px 10px;background:#17372d;color:#fff;border:0;border-radius:4px;font:5px "Press Start 2P",monospace;cursor:pointer}
+.notification-toast{
+  position:fixed;
+  z-index:60;
+  top:82px;
+  right:24px;
+  width:min(390px,calc(100vw - 28px));
+  padding:15px;
+  display:grid;
+  grid-template-columns:36px minmax(0,1fr) auto;
+  gap:12px;
+  align-items:center;
+  text-align:left;
+  background:#fff;
+  color:#17372d;
+  border:1px solid #ccd8cf;
+  border-left:5px solid var(--acid);
+  border-radius:8px;
+  box-shadow:0 16px 44px rgba(7,23,18,.24);
+  cursor:pointer;
+  opacity:0;
+  transform:translateY(-10px);
+  transition:opacity .18s ease,transform .18s ease;
+}
+.notification-toast.visible{opacity:1;transform:translateY(0)}
+.notification-toast>i{width:34px;height:34px;display:grid;place-items:center;background:#17372d;color:var(--acid);border-radius:4px;font:8px "Press Start 2P",monospace;font-style:normal}
+.notification-toast>span{display:grid;gap:4px;min-width:0}
+.notification-toast small{color:#718078;font:5px "Press Start 2P",monospace}
+.notification-toast strong{overflow:hidden;color:#17372d;font:7px/1.5 "Press Start 2P",monospace;text-overflow:ellipsis;white-space:nowrap}
+.notification-toast em{overflow:hidden;color:#637269;font:11px var(--mono);font-style:normal;text-overflow:ellipsis;white-space:nowrap}
+.notification-toast>b{color:#17372d;font:10px "Press Start 2P",monospace}
+@media(max-width:900px){.notification-popover{right:12px}}
+@media(max-width:620px){
+  .portal-world.open .portal-user{gap:7px}
+  .portal-world.open .portal-user .notification-button{width:38px;height:38px;padding:8px}
+  .notification-popover{top:58px;right:7px;width:calc(100vw - 14px);max-height:calc(100svh - 70px)}
+  .notification-toast{top:72px;right:10px;width:calc(100vw - 20px)}
+  .notification-list article{padding:15px 14px}
+}
+@media(prefers-reduced-motion:reduce){.notification-toast{transition:none}}
+
 /* Review-first document extraction for the two human entry stages. */
 #portalWorkflow .document-autofill{
   position:relative;
@@ -1517,3 +1635,124 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
   #portalWorkflow .settlement-next-deal>button{min-width:0;width:100%}
 }
 @media(prefers-reduced-motion:reduce){#portalWorkflow .settlement-analytics-page{animation:none}#portalWorkflow .settlement-next-deal>button:hover{transform:none}}
+
+/* Completed analytics is intentionally limited to six decision-ready
+   sections. Identical polling responses no longer rebuild this tree, and the
+   page itself has no entrance animation to restart when live data changes. */
+#portalWorkflow .settlement-analytics-page{animation:none}
+#portalWorkflow .settlement-receipt-minimal{margin-top:0}
+#portalWorkflow .analytics-intelligence>header{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;padding:28px;border-bottom:1px solid #dce5de}
+#portalWorkflow .analytics-intelligence>header small{font:6px/1.6 "Press Start 2P",monospace;color:#61766b}
+#portalWorkflow .analytics-intelligence>header h3{max-width:760px;margin:10px 0 8px;font:18px/1.5 "Press Start 2P",monospace;text-wrap:balance}
+#portalWorkflow .analytics-intelligence>header p{max-width:800px;margin:0;color:#576a60;font:13px/1.65 var(--mono);text-wrap:pretty}
+#portalWorkflow .analytics-intelligence>header>span{flex:none;padding:10px 12px;border-radius:7px;font:6px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .settlement-receipt-minimal .blockchain-proof{margin-top:24px}
+#portalWorkflow .analytics-milestone-proof{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));border-top:1px solid #e1e8e2;background:#f7f9f7}
+#portalWorkflow .analytics-milestone-proof article{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;min-width:0;padding:15px 17px;border-right:1px solid #e1e8e2;background:#fff}
+#portalWorkflow .analytics-milestone-proof article>i{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#1f8358;color:#fff;font:6px "Press Start 2P",monospace;font-style:normal}
+#portalWorkflow .analytics-milestone-proof small,#portalWorkflow .analytics-milestone-proof b,#portalWorkflow .analytics-milestone-proof p,#portalWorkflow .analytics-milestone-proof code{display:block}
+#portalWorkflow .analytics-milestone-proof small{color:#73847b;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .analytics-milestone-proof b{margin-top:6px;color:#173e32;font:700 12px/1.45 var(--sans)}
+#portalWorkflow .analytics-milestone-proof p{margin:5px 0;color:#62736a;font:10px/1.5 var(--mono)}
+#portalWorkflow .analytics-milestone-proof code{overflow:hidden;color:#23825a;font:9px/1.5 var(--mono);text-overflow:ellipsis;white-space:nowrap}
+#portalWorkflow .analytics-money-section{margin:0 24px 24px;overflow:hidden;border:1px solid #cbd8cf;border-radius:10px;background:#fff}
+#portalWorkflow .analytics-money-section>.settlement-section-title{padding:18px 20px;background:#f3f7f3;border-bottom:1px solid #dce5de}
+#portalWorkflow .analytics-money-section .settlement-money-flow{margin:0;border:0;border-radius:0}
+#portalWorkflow .analytics-reconciliation{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid #dce5de;background:#f7f9f7}
+#portalWorkflow .analytics-reconciliation>span{min-width:0;padding:15px 17px;border-right:1px solid #dce5de}
+#portalWorkflow .analytics-reconciliation>span:last-child{border-right:0}
+#portalWorkflow .analytics-reconciliation small,#portalWorkflow .analytics-reconciliation b{display:block}
+#portalWorkflow .analytics-reconciliation small{color:#73847b;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .analytics-reconciliation b{margin-top:7px;overflow:hidden;color:#17603d;font:700 12px/1.45 var(--mono);font-variant-numeric:tabular-nums;text-overflow:ellipsis;white-space:nowrap}
+#portalWorkflow .analytics-money-section>.network-fee-note{border-top:1px solid #ead8a8}
+#portalWorkflow .analytics-fx-legs>div{display:grid;grid-template-columns:.7fr 1fr 1fr;gap:1px;border-bottom:1px solid #e1e8e2;background:#e1e8e2}
+#portalWorkflow .analytics-fx-legs>div:last-child{border-bottom:0}
+#portalWorkflow .analytics-fx-legs>div>span{min-width:0;padding:14px 16px;background:#fff}
+#portalWorkflow .analytics-fx-legs small,#portalWorkflow .analytics-fx-legs b{display:block}
+#portalWorkflow .analytics-fx-legs small{color:#73847b;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .analytics-fx-legs b{margin-top:7px;overflow:hidden;color:#17372d;font:700 10px/1.5 var(--mono);font-variant-numeric:tabular-nums;text-overflow:ellipsis;white-space:nowrap}
+#portalWorkflow .analytics-minimal-footer{display:flex;justify-content:flex-end;height:auto;padding:20px 24px;border-top:1px solid #dce5de;background:#eff8e8}
+#portalWorkflow .analytics-minimal-footer>button,#portalWorkflow .analytics-minimal-footer>span{padding:14px 16px;border:0;border-radius:7px;background:#17372d;color:#d9ff45;font:6px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .analytics-minimal-footer>button{display:flex;align-items:center;gap:20px;cursor:pointer}
+#portalWorkflow .analytics-minimal-footer>button b{font-size:13px}
+@media(max-width:1050px){#portalWorkflow .analytics-reconciliation{grid-template-columns:1fr 1fr}#portalWorkflow .analytics-reconciliation>span:nth-child(2){border-right:0}#portalWorkflow .analytics-reconciliation>span:nth-child(-n+2){border-bottom:1px solid #dce5de}}
+@media(max-width:780px){#portalWorkflow .analytics-intelligence>header{display:block;padding:22px}#portalWorkflow .analytics-intelligence>header>span{display:inline-block;margin-top:14px}#portalWorkflow .analytics-money-section{margin-inline:14px}#portalWorkflow .analytics-reconciliation,#portalWorkflow .analytics-fx-legs>div{grid-template-columns:1fr}#portalWorkflow .analytics-reconciliation>span,#portalWorkflow .analytics-fx-legs>div>span{border-right:0;border-bottom:1px solid #dce5de}#portalWorkflow .analytics-minimal-footer{justify-content:stretch;padding:16px 14px}#portalWorkflow .analytics-minimal-footer>button,#portalWorkflow .analytics-minimal-footer>span{width:100%;text-align:center}}
+
+/* Milestone authoring and release schedule. These panels stay inside the
+   existing clean dashboard language while making each independent escrow
+   leg obvious to a reviewer. */
+#portalWorkflow .milestone-editor{overflow:hidden;border:1px solid #cbd8cf;border-radius:12px;background:#eef5ee}
+#portalWorkflow [data-milestone-delivery][hidden],#portalWorkflow [data-single-delivery][hidden]{display:none!important}
+#portalWorkflow .delivery-mode-selector{overflow:hidden;border:1px solid #cbd8cf;border-radius:12px;background:#f7faf7}
+#portalWorkflow .delivery-mode-selector>header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px;border-bottom:1px solid #d8e2da;background:#173e32}
+#portalWorkflow .delivery-mode-selector>header small,#portalWorkflow .delivery-mode-selector>header b{font-family:"Press Start 2P",monospace}
+#portalWorkflow .delivery-mode-selector>header small{color:#a8bbb1;font-size:5px}
+#portalWorkflow .delivery-mode-selector>header b{color:#d9ff45;font-size:6px}
+#portalWorkflow .delivery-mode-selector>div{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#d8e2da}
+#portalWorkflow .delivery-mode-selector label{position:relative;display:block;cursor:pointer;background:#fff}
+#portalWorkflow .delivery-mode-selector input{position:absolute;opacity:0;pointer-events:none}
+#portalWorkflow .delivery-mode-selector label>span{display:block;min-height:84px;padding:18px;border:2px solid transparent;color:#173e32}
+#portalWorkflow .delivery-mode-selector label>span b,#portalWorkflow .delivery-mode-selector label>span small{display:block}
+#portalWorkflow .delivery-mode-selector label>span b{font:7px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .delivery-mode-selector label>span small{margin-top:9px;color:#697b71;font:12px/1.5 var(--sans)}
+#portalWorkflow .delivery-mode-selector input:checked+span{border-color:#94bd19;background:#eef8df;box-shadow:inset 5px 0 #b9e62e}
+#portalWorkflow .single-delivery-editor{display:grid;gap:14px;padding:20px;border:1px solid #cbd8cf;border-radius:12px;background:#eef5ee}
+#portalWorkflow .single-delivery-editor p{margin:0;color:#62736a;font:12px/1.55 var(--sans)}
+#portalWorkflow .milestone-editor>header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 20px;border-bottom:1px solid #cbd8cf;background:#173e32;color:#fff}
+#portalWorkflow .milestone-editor>header small,#portalWorkflow .milestone-editor>header h3{display:block;margin:0;font-family:"Press Start 2P",monospace!important}
+#portalWorkflow .milestone-editor>header small{margin-bottom:7px;color:#b7c8bf;font-size:6px}
+#portalWorkflow .milestone-editor>header h3{color:#d9ff45;font-size:10px;line-height:1.5}
+#portalWorkflow .milestone-editor>header span{max-width:260px;color:#a9beb3;font:6px/1.6 "Press Start 2P",monospace;text-align:right}
+#portalWorkflow .milestone-editor>div{display:grid;gap:14px;padding:14px}
+#portalWorkflow .milestone-input-card{display:grid;gap:15px;padding:20px;background:#fff;border:1px solid #d7e0da;border-radius:10px}
+#portalWorkflow .milestone-input-card>header{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1px solid #e2e9e4}
+#portalWorkflow .milestone-input-card>header i{display:grid;place-items:center;width:42px;height:42px;background:#d9ff45;border-radius:50%;color:#173e32;font:7px "Press Start 2P",monospace;font-style:normal}
+#portalWorkflow .milestone-input-card>header small,#portalWorkflow .milestone-input-card>header b{display:block;font-family:"Press Start 2P",monospace!important}
+#portalWorkflow .milestone-input-card>header small{margin-bottom:6px;color:#7b8c82;font-size:5px}
+#portalWorkflow .milestone-input-card>header b{color:#173e32;font-size:8px}
+#portalWorkflow .milestone-total{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:20px;background:#e8f2df;border:1px solid #c8d8c2;border-radius:10px}
+#portalWorkflow .milestone-total span small,#portalWorkflow .milestone-total span b{display:block}
+#portalWorkflow .milestone-total span small{margin-bottom:7px;color:#687c70;font:6px "Press Start 2P",monospace}
+#portalWorkflow .milestone-total span b{color:#173e32;font:700 20px var(--mono)}
+#portalWorkflow .milestone-total button{margin:0!important;background:#173e32!important;color:#d9ff45!important}
+#portalWorkflow .milestone-editor[data-over-limit="true"],#portalWorkflow .milestone-editor[data-over-limit="true"]+ .milestone-total{border-color:#db654d}
+#portalWorkflow .opportunity-milestones{display:grid;gap:1px;margin-top:20px;background:#dbe4de;border:1px solid #dbe4de;border-radius:9px;overflow:hidden}
+#portalWorkflow .opportunity-milestones article{display:grid;grid-template-columns:44px minmax(0,1fr);gap:15px;align-items:start;padding:16px;background:#f8faf8}
+#portalWorkflow .opportunity-milestones i{display:grid;place-items:center;width:36px;height:36px;background:#d9ff45;border-radius:50%;color:#173e32;font:6px "Press Start 2P",monospace;font-style:normal}
+#portalWorkflow .opportunity-milestones b,#portalWorkflow .opportunity-milestones p,#portalWorkflow .opportunity-milestones small{display:block}
+#portalWorkflow .opportunity-milestones b{color:#173e32;font:7px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .opportunity-milestones p{margin:6px 0;color:#52665b;font:13px/1.55 var(--sans)}
+#portalWorkflow .opportunity-milestones small{color:#76867d;font:11px/1.5 var(--mono)}
+#portalWorkflow .agreement-milestone-schedule{margin:20px 24px;border:1px solid #d7e1da;border-radius:9px;overflow:hidden}
+#portalWorkflow .agreement-milestone-schedule>header{display:flex;justify-content:space-between;gap:15px;padding:15px 17px;background:#173e32;color:#fff;font:6px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .agreement-milestone-schedule>header b{color:#d9ff45}
+#portalWorkflow .agreement-milestone-schedule article{display:grid;grid-template-columns:40px minmax(0,1fr);gap:13px;padding:15px 17px;border-top:1px solid #e1e8e3;background:#fff}
+#portalWorkflow .agreement-milestone-schedule article i{display:grid;place-items:center;width:32px;height:32px;background:#eaf4e4;border-radius:50%;color:#257b55;font:6px "Press Start 2P",monospace;font-style:normal}
+#portalWorkflow .agreement-milestone-schedule article b{color:#173e32;font:700 13px var(--sans)}
+#portalWorkflow .agreement-milestone-schedule article p{margin:5px 0;color:#5d7065;font:12px/1.55 var(--sans)}
+#portalWorkflow .agreement-milestone-schedule article small{color:#29805a;font:10px var(--mono)}
+#portalWorkflow .milestone-delivery-brief{margin:20px 20px 0;padding:20px;background:#eaf4e4;border-left:4px solid #a8d51d;border-radius:8px}
+#portalWorkflow .milestone-delivery-brief small{color:#718179;font:6px "Press Start 2P",monospace}
+#portalWorkflow .milestone-delivery-brief h3{margin:10px 0;color:#173e32;font:11px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .milestone-delivery-brief p{margin:0 0 8px;color:#53675b;font:13px/1.6 var(--sans)}
+#portalWorkflow .milestone-delivery-brief>b{color:#248158;font:700 16px var(--mono)}
+#portalWorkflow .milestone-delivery-brief ul{margin:13px 0 0;padding-left:19px;color:#5a6d62;font:12px/1.6 var(--sans)}
+#portalWorkflow .milestone-progress{overflow:hidden;margin-bottom:16px;background:#fff;border:1px solid #d8e2db;border-radius:11px}
+#portalWorkflow .milestone-progress>header,#portalWorkflow .milestone-settlement-summary>header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 20px;background:#173e32;color:#fff}
+#portalWorkflow .milestone-progress>header small,#portalWorkflow .milestone-progress>header h3,#portalWorkflow .milestone-settlement-summary>header small,#portalWorkflow .milestone-settlement-summary>header h4{display:block;margin:0;font-family:"Press Start 2P",monospace!important}
+#portalWorkflow .milestone-progress>header small,#portalWorkflow .milestone-settlement-summary>header small{margin-bottom:7px;color:#a8bbb1;font-size:5px}
+#portalWorkflow .milestone-progress>header h3,#portalWorkflow .milestone-settlement-summary>header h4{color:#d9ff45;font-size:8px;line-height:1.55}
+#portalWorkflow .milestone-progress>header>b,#portalWorkflow .milestone-settlement-summary>header>b{font:6px/1.5 "Press Start 2P",monospace;color:#fff}
+#portalWorkflow .milestone-progress>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+#portalWorkflow .milestone-progress article,#portalWorkflow .milestone-settlement-summary article{display:grid;grid-template-columns:36px minmax(0,1fr);gap:12px;padding:17px;border-right:1px solid #e0e7e2}
+#portalWorkflow .milestone-progress article>i,#portalWorkflow .milestone-settlement-summary article>i{display:grid;place-items:center;width:32px;height:32px;background:#edf2ee;border-radius:50%;color:#63776c;font:6px "Press Start 2P",monospace;font-style:normal}
+#portalWorkflow .milestone-progress article[data-state="active"]{background:#eff8e8;box-shadow:inset 0 3px #b9e62e}
+#portalWorkflow .milestone-progress article[data-state="active"]>i,#portalWorkflow .milestone-progress article[data-state="completed"]>i,#portalWorkflow .milestone-settlement-summary article[data-state="completed"]>i{background:#1f8358;color:#fff}
+#portalWorkflow .milestone-progress article small,#portalWorkflow .milestone-progress article b,#portalWorkflow .milestone-progress article p,#portalWorkflow .milestone-progress article code,#portalWorkflow .milestone-settlement-summary article small,#portalWorkflow .milestone-settlement-summary article b,#portalWorkflow .milestone-settlement-summary article p,#portalWorkflow .milestone-settlement-summary article code{display:block}
+#portalWorkflow .milestone-progress article small,#portalWorkflow .milestone-settlement-summary article small{margin-bottom:7px;color:#73847b;font:5px "Press Start 2P",monospace}
+#portalWorkflow .milestone-progress article b,#portalWorkflow .milestone-settlement-summary article b{color:#173e32;font:700 13px/1.4 var(--sans)}
+#portalWorkflow .milestone-progress article p,#portalWorkflow .milestone-settlement-summary article p{margin:6px 0;color:#62736a;font:11px/1.5 var(--sans)}
+#portalWorkflow .milestone-progress article code,#portalWorkflow .milestone-settlement-summary article code{overflow:hidden;color:#23825a;font:9px/1.5 var(--mono);text-overflow:ellipsis;white-space:nowrap}
+#portalWorkflow .milestone-settlement-summary{margin:22px 24px;border:1px solid #d8e2db;border-radius:10px;overflow:hidden}
+#portalWorkflow .milestone-settlement-summary>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));background:#fff}
+@media(max-width:700px){#portalWorkflow .delivery-mode-selector>header,#portalWorkflow .milestone-editor>header,#portalWorkflow .milestone-total{align-items:flex-start;flex-direction:column}#portalWorkflow .delivery-mode-selector>div{grid-template-columns:1fr}#portalWorkflow .milestone-editor>header span{text-align:left}#portalWorkflow .milestone-total button{width:100%}}

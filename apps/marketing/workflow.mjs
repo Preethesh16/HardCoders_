@@ -159,6 +159,25 @@ async function call(partyKey, method, path, body, suffix) {
   return parsed;
 }
 
+async function callWithReconciliationRetry(partyKey, method, path, body, suffix, attempts = 4) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await call(partyKey, method, path, body, suffix);
+    } catch (error) {
+      lastError = error;
+      const message = String(error?.message ?? error);
+      const safelyRetryable = /ambiguous|reconcilable|executor is unreachable/iu.test(message);
+      if (!safelyRetryable || attempt === attempts) throw error;
+      // Reuse the exact API and executor idempotency key. The executor first
+      // reconciles its persisted signed bytes and cannot prepare a second
+      // transaction for this command while its fence is unresolved.
+      await wait(4_000 * attempt);
+    }
+  }
+  throw lastError;
+}
+
 function selectedApplication() {
   return run?.results?.applications?.find(application => application.id === run.results.selectedApplicationId);
 }
@@ -240,6 +259,36 @@ function proposalMoney(application) {
     scale: application.proposedPriceScale ?? 2
   };
   return run.results.budget ?? DEFAULT_PLN;
+}
+
+function milestoneList() {
+  return run?.results?.milestones ?? [];
+}
+
+function activeMilestone() {
+  const milestones = milestoneList();
+  return milestones[run?.results?.activeMilestoneIndex ?? 0] ?? milestones[0] ?? null;
+}
+
+function activeMilestonePayment() {
+  const milestone = activeMilestone();
+  return run?.results?.milestonePayments?.find((entry) => entry.milestoneId === milestone?.id) ?? null;
+}
+
+function activateMilestone(index) {
+  const entry = run?.results?.milestonePayments?.[index];
+  if (!run || !entry) return;
+  run.results.activeMilestoneIndex = index;
+  run.results.paymentId = entry.payment.id;
+  run.results.payment = entry.payment;
+  run.results.binding = entry.timeline?.binding ?? entry.binding;
+  run.results.quote = entry.timeline?.quote ?? entry.quote;
+  run.results.compliance = entry.timeline?.compliance ?? entry.compliance;
+  run.results.settlementTimeline = entry.timeline;
+  delete run.results.submission;
+  delete run.results.submissionId;
+  delete run.results.workValidation;
+  persistRun();
 }
 
 function normalizeApplications(payload) {
@@ -381,33 +430,53 @@ async function runFundingAutomation(nonce) {
     ]);
     await wait(700);
     stageSet("automation", "fx", "RUNNING", "Resolving corridor, compliance and a live two-leg FX quote.");
-    const created = await call(companyPartyKey(), "POST", "/v1/payments", {
-      contractId: run.results.contractId,
-      fundingAmount: run.results.contractAmount,
-      purposeCode: plan?.facts?.purposeCode ?? PURPOSE_BY_ROUTE[route.key] ?? "B2B_SERVICES",
-    }, "auto-payment");
-    if (!run || run.nonce !== nonce) return;
-    run.results.payment = created.payment ?? created;
-    run.results.paymentId = run.results.payment.id;
-    run.results.quote = created.quote;
-    run.results.compliance = created.compliance;
+    const milestones = milestoneList();
+    if (milestones.length === 0) throw new Error("The approved agreement contains no payable milestones.");
+    run.results.milestonePayments = [];
+    for (const milestone of milestones) {
+      const created = await call(companyPartyKey(), "POST", "/v1/payments", {
+        contractId: run.results.contractId,
+        milestoneId: milestone.id,
+        fundingAmount: { amountMinor: milestone.amountMinor, currency: milestone.amountCurrency, scale: milestone.amountScale },
+        purposeCode: plan?.facts?.purposeCode ?? PURPOSE_BY_ROUTE[route.key] ?? "B2B_SERVICES",
+      }, `auto-payment-${milestone.ordinal}`);
+      if (!run || run.nonce !== nonce) return;
+      const payment = created.payment ?? created;
+      run.results.milestonePayments.push({ milestoneId: milestone.id, milestone, payment, quote: created.quote, compliance: created.compliance });
+    }
+    const firstPayment = run.results.milestonePayments[0];
+    run.results.payment = firstPayment.payment;
+    run.results.paymentId = firstPayment.payment.id;
+    run.results.quote = firstPayment.quote;
+    run.results.compliance = firstPayment.compliance;
     stageSet("automation", "rules", regulation.coverage?.outcome === "MANUAL_REVIEW" ? "REVIEW" : "COMPLETED", regulation.explanation?.summary ?? "Reviewed regulation corpus checked.", [
-      ["RULESET", created.compliance?.rulesVersion ?? "—"], ["CORPUS", regulation.report?.approvedCorpusHash ?? "—"]
+      ["RULESET", firstPayment.compliance?.rulesVersion ?? "—"], ["CORPUS", regulation.report?.approvedCorpusHash ?? "—"]
     ]);
     stageSet("automation", "fx", "COMPLETED", "Quote stored and bound to this payment.", [
-      ["SOURCE", created.quote?.rateSource ?? "—"], ["OBSERVED", created.quote?.rateObservedAt ?? "—"], ["EXPIRES", created.quote?.expiresAt ?? "—"]
+      ["ESCROWS", String(milestones.length)], ["SOURCE", firstPayment.quote?.rateSource ?? "—"], ["OBSERVED", firstPayment.quote?.rateObservedAt ?? "—"]
     ]);
     await wait(700);
-    stageSet("automation", "escrow", "RUNNING", "Locking the quote-fixed USD amount in ARC-4 escrow.");
-    const funded = await call(companyPartyKey(), "POST", `/v1/payments/${run.results.paymentId}/fund`, {}, "auto-fund");
-    run.results.payment = funded.payment ?? funded;
-    const timeline = await call(companyPartyKey(), "GET", `/v1/payments/${run.results.paymentId}/timeline`);
-    run.results.binding = timeline.binding;
-    run.results.settlementTimeline = timeline;
-    run.results.quote = timeline.quote ?? run.results.quote;
-    run.results.compliance = timeline.compliance ?? run.results.compliance;
-    stageSet("automation", "escrow", "COMPLETED", "Algorand confirmed the funded escrow.", [
-      ["DEAL", timeline.binding?.dealId ?? "—"], ["LOCKED", timeline.binding ? usdc(timeline.binding.amountUsdcMinor, timeline.binding.scale) : "—"], ["NETWORK", timeline.binding?.network ?? "—"]
+    stageSet("automation", "escrow", "RUNNING", `Creating and funding ${milestones.length} independently releasable ARC-4 escrows.`);
+    for (const entry of run.results.milestonePayments) {
+      const funded = await callWithReconciliationRetry(
+        companyPartyKey(),
+        "POST",
+        `/v1/payments/${entry.payment.id}/fund`,
+        {},
+        `auto-fund-${entry.milestone.ordinal}`,
+      );
+      const timeline = await call(companyPartyKey(), "GET", `/v1/payments/${entry.payment.id}/timeline`);
+      entry.payment = funded.payment ?? funded;
+      entry.timeline = timeline;
+      entry.binding = timeline.binding;
+      entry.quote = timeline.quote ?? entry.quote;
+      entry.compliance = timeline.compliance ?? entry.compliance;
+    }
+    const fundedSchedule = await call(companyPartyKey(), "GET", `/v1/contracts/${run.results.contractId}/milestones`);
+    run.results.milestones = fundedSchedule.milestones ?? run.results.milestones;
+    activateMilestone(0);
+    stageSet("automation", "escrow", "COMPLETED", `Algorand confirmed ${milestones.length} milestone escrows; each can release only against its own Fabric evidence.`, [
+      ["ESCROWS", String(milestones.length)], ["LOCKED", run.results.milestonePayments.map((entry) => usdc(entry.binding.amountUsdcMinor, entry.binding.scale)).join(" · ")], ["NETWORK", run.results.binding?.network ?? "—"]
     ]);
     run.automation.status = "COMPLETED";
     run.phase = "AWAITING_DELIVERY";
@@ -452,7 +521,13 @@ async function runRelease(nonce) {
   stageSet("deliveryAutomation", "release", "RUNNING", "Verifying Fabric approval and releasing the quote-fixed escrow amount.");
   try {
     await wait(700);
-    const released = await call(companyPartyKey(), "POST", `/v1/payments/${run.results.paymentId}/release`, {}, "auto-release");
+    const released = await callWithReconciliationRetry(
+      companyPartyKey(),
+      "POST",
+      `/v1/payments/${run.results.paymentId}/release`,
+      {},
+      `auto-release-${run.results.paymentId}`,
+    );
     if (!run || run.nonce !== nonce) return;
     run.results.payment = released.payment ?? released;
     const timeline = await call(companyPartyKey(), "GET", `/v1/payments/${run.results.paymentId}/timeline`);
@@ -460,11 +535,30 @@ async function runRelease(nonce) {
     run.results.settlementTimeline = timeline;
     run.results.quote = timeline.quote ?? run.results.quote;
     run.results.compliance = timeline.compliance ?? run.results.compliance;
+    run.results.lastSettlementTimeline = timeline;
+    if (Array.isArray(timeline.milestones)) run.results.milestones = timeline.milestones;
+    const paymentEntry = activeMilestonePayment();
+    if (paymentEntry) {
+      paymentEntry.payment = timeline.payment ?? run.results.payment;
+      paymentEntry.timeline = timeline;
+      paymentEntry.binding = timeline.binding;
+      paymentEntry.quote = timeline.quote;
+      paymentEntry.compliance = timeline.compliance;
+    }
     stageSet("deliveryAutomation", "release", "COMPLETED", `Provider settlement and ${run.results.payment.payoutCurrency} credit completed.`, [
       ["PAYMENT", run.results.payment.state], ["ESCROW", timeline.binding?.state ?? "—"], ["EVENTS", String(timeline.events?.length ?? 0)]
     ]);
     run.deliveryAutomation.status = "COMPLETED";
-    run.phase = "COMPLETED";
+    const nextIndex = (run.results.activeMilestoneIndex ?? 0) + 1;
+    if (nextIndex < milestoneList().length) {
+      run.results.completedMilestoneCount = nextIndex;
+      activateMilestone(nextIndex);
+      run.deliveryAutomation = { status: "IDLE", stages: {} };
+      run.phase = "AWAITING_DELIVERY";
+    } else {
+      run.results.completedMilestoneCount = milestoneList().length;
+      run.phase = "COMPLETED";
+    }
   } catch (error) {
     if (!run || run.nonce !== nonce) return;
     run.deliveryAutomation.status = "FAILED";
@@ -504,7 +598,8 @@ const EXECUTORS = {
       // Search preference only. The ordered settlement route is created later
       // from the selected applicant's verified payout profile.
       destinationCountry: profile.preferredTalentCountry,
-      budget: input.budget
+      budget: input.budget,
+      milestones: input.milestones,
     }, "job");
     const job = created.job ?? created;
     run.results.job = job;
@@ -543,6 +638,10 @@ const EXECUTORS = {
     run.results.contractId = contract.id;
     run.results.contractHash = contract.contractHash;
     run.results.contractAmount = amount;
+    const schedule = await call(companyPartyKey(), "GET", `/v1/contracts/${contract.id}/milestones`);
+    run.results.milestones = schedule.milestones ?? [];
+    run.results.activeMilestoneIndex = 0;
+    run.results.completedMilestoneCount = 0;
     run.phase = "AGREEMENT_DRAFT";
     return [["SELECTED", application.applicantDisplayName ?? application.applicantUserId], ["CONTRACT", contract.id], ["PRICE", `${amount.amountMinor} ${amount.currency} minor`]];
   },
@@ -595,19 +694,23 @@ const EXECUTORS = {
   },
   async submit(input) {
     if (run.phase !== "AWAITING_DELIVERY") throw new Error("Wait until the escrow has been funded.");
-    const created = await call(selectedPartyKey(), "POST", `/v1/contracts/${run.results.contractId}/submissions`, input, "deliverable");
+    const milestone = activeMilestone();
+    if (!milestone) throw new Error("No funded milestone is ready for delivery.");
+    const created = await call(selectedPartyKey(), "POST", `/v1/contracts/${run.results.contractId}/submissions`, {
+      ...input, milestoneId: milestone.id,
+    }, `deliverable-${milestone.ordinal}`);
     const submission = created.submission ?? created;
     run.results.submission = submission;
     run.results.submissionId = submission.id;
     run.phase = "VALIDATING_DELIVERY";
     validationPromise = runDeliveryValidation(run.nonce);
-    return [["SUBMISSION", submission.id], ["FILE", input.fileName], ["SHA-256", submission.fileHash], ["NEXT", "AUTOMATIC VALIDATION"]];
+    return [["MILESTONE", `${milestone.ordinal} · ${milestone.title}`], ["SUBMISSION", submission.id], ["FILE", input.fileName], ["SHA-256", submission.fileHash], ["NEXT", "AUTOMATIC VALIDATION"]];
   },
   async "approve-work"(input) {
     if (run.phase !== "AWAITING_WORK_APPROVAL") throw new Error("Wait for advisory delivery validation to finish.");
     const decided = await call(companyPartyKey(), "POST", `/v1/submissions/${run.results.submissionId}/approve`, {
       decision: input.decision ?? "APPROVED", comment: input.comment ?? "Reviewed against the private agreement and accepted."
-    }, "approve-work");
+    }, `approve-work-${activeMilestone()?.ordinal ?? 1}`);
     run.results.submission = decided.submission ?? run.results.submission;
     run.results.fabricDecisionTxId = decided.fabricTxId;
     run.phase = "RELEASING";
@@ -684,16 +787,18 @@ export async function runAction(id, input = {}) {
   const action = ACTIONS.find(item => item.id === id);
   const execute = EXECUTORS[id];
   if (!action || !execute) return { ok: false, id, error: `Unknown workflow action ${id}.` };
-  if (run.actions[id]?.status === "DONE") return { ok: true, id, replay: true, facts: run.actions[id].facts };
-  run.actions[id] = { status: "RUNNING", startedAt: new Date().toISOString() };
+  const repeatable = id === "submit" || id === "approve-work";
+  const actionId = repeatable ? `${id}:${activeMilestone()?.id ?? "pending"}` : id;
+  if (run.actions[actionId]?.status === "DONE") return { ok: true, id, replay: true, facts: run.actions[actionId].facts };
+  run.actions[actionId] = { status: "RUNNING", startedAt: new Date().toISOString() };
   persistRun();
   try {
     const facts = await execute(input);
-    run.actions[id] = { status: "DONE", facts, completedAt: new Date().toISOString() };
+    run.actions[actionId] = { status: "DONE", facts, completedAt: new Date().toISOString() };
     persistRun();
     return { ok: true, id, label: action.label, actor: action.actor, facts };
   } catch (error) {
-    run.actions[id] = { status: "FAILED", error: String(error.message ?? error), failedAt: new Date().toISOString() };
+    run.actions[actionId] = { status: "FAILED", error: String(error.message ?? error), failedAt: new Date().toISOString() };
     persistRun();
     return { ok: false, id, label: action.label, actor: action.actor, error: String(error.message ?? error) };
   }

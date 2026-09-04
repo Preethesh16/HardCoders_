@@ -29,6 +29,19 @@ export const ErrorSchema = Type.Object({
 
 export const MoneyInput = MoneySchema;
 
+export const JobMilestoneInput = Type.Object({
+  title: Type.String({ minLength: 2, maxLength: 200 }),
+  description: Type.String({ minLength: 10, maxLength: 4_000 }),
+  deliverable: Type.String({ minLength: 3, maxLength: 2_000 }),
+  acceptanceCriteria: Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
+    minItems: 1,
+    maxItems: 16,
+    uniqueItems: true,
+  }),
+  amount: MoneyInput,
+  dueDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+}, { additionalProperties: false });
+
 export const CreateJobBody = Type.Object({
   title: Type.String({ minLength: 4, maxLength: 200 }),
   description: Type.String({ minLength: 20, maxLength: 8_000 }),
@@ -43,6 +56,7 @@ export const CreateJobBody = Type.Object({
   fundingCurrency: CurrencySchema,
   destinationCountry: CountryCodeSchema,
   budget: MoneyInput,
+  milestones: Type.Optional(Type.Array(JobMilestoneInput, { minItems: 1, maxItems: 5 })),
 }, { additionalProperties: false });
 
 export const CreateApplicationBody = Type.Object({
@@ -173,6 +187,7 @@ export const CreateQuoteBody = Type.Object({
 }, { additionalProperties: false });
 
 export const CreateSubmissionBody = Type.Object({
+  milestoneId: Type.Optional(IdentifierSchema),
   fileName: Type.String({ minLength: 1, maxLength: 200 }),
   contentType: Type.String({ minLength: 3, maxLength: 128 }),
   contentBase64: Type.String({ minLength: 4, maxLength: 24_000_000 }),
@@ -188,6 +203,7 @@ export const DecideSubmissionBody = Type.Object({
 
 export const CreatePaymentBody = Type.Object({
   contractId: IdentifierSchema,
+  milestoneId: Type.Optional(IdentifierSchema),
   fundingAmount: MoneyInput,
   purposeCode: Type.Optional(IdentifierSchema),
 }, { additionalProperties: false });

@@ -35,15 +35,19 @@ preflight() {
 }
 
 check_public_funding() {
-  local deployer origin deployer_algo origin_algo origin_usdc
+  local deployer origin application deployer_algo origin_algo origin_usdc application_algo application_minimum application_available
   deployer="$(jq -r '.deployer.address' "${ACCOUNTS}")"
   origin="$(jq -r '.originProviderTreasury.address' "${ACCOUNTS}")"
+  application="$(jq -r '.applicationAddress' "${STATE}/algorand-deployment.json")"
   deployer_algo="$(curl -fsS --max-time 30 "https://testnet-api.algonode.cloud/v2/accounts/${deployer}" | jq -r '.amount')"
   read -r origin_algo origin_usdc < <(curl -fsS --max-time 30 "https://testnet-api.algonode.cloud/v2/accounts/${origin}" | jq -r '[.amount, ((.assets // [] | map(select(."asset-id" == 10458941)) | .[0].amount) // 0)] | @tsv')
+  read -r application_algo application_minimum < <(curl -fsS --max-time 30 "https://testnet-api.algonode.cloud/v2/accounts/${application}" | jq -r '[.amount, ."min-balance"] | @tsv')
+  application_available=$((application_algo - application_minimum))
   (( deployer_algo >= 1000000 )) || die 'The disposable TestNet executor needs at least 1 TestAlgo for the acceptance run'
   (( origin_algo >= 100000 )) || die 'The TestNet origin treasury needs more TestAlgo for transaction fees'
   (( origin_usdc >= 5000000 )) || die 'The TestNet origin treasury needs at least 5 zero-value TestNet USDC'
-  log "public funding ready: executor $((deployer_algo / 1000000)) TestAlgo; origin $((origin_usdc / 1000000)) TestNet USDC"
+  (( application_available >= 250000 )) || die 'The TestNet ARC-4 application needs at least 0.25 TestAlgo above its current box minimum balance'
+  log "public funding ready: executor $((deployer_algo / 1000000)) TestAlgo; origin $((origin_usdc / 1000000)) TestNet USDC; app reserve ${application_available} microAlgo"
 }
 
 render_runtime() {

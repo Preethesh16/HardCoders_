@@ -11,12 +11,14 @@
   let inspectedStage = null;
   let transferAnimationUntil = 0;
   let transferAnimationTimer = null;
+  let transferVisualizationPaymentId = null;
   let completedPaymentId = null;
   let completedView = "workflow";
   let analyticsRevealTimer = null;
   let routeOptimizerPaymentId = null;
   let routeOptimizerUntil = 0;
   let routeOptimizerTimer = null;
+  let notificationToastTimer = null;
   const completionHoldMilliseconds = 4_500;
   const routeOptimizerHoldMilliseconds = 6_000;
 
@@ -25,7 +27,12 @@
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   })[character]);
   const results = () => model.run?.results ?? {};
-  const stepState = id => model.run?.actions?.[id];
+  const milestones = () => results().milestones ?? results().job?.milestones ?? [];
+  const usesMilestoneReleases = () => milestones().length > 1;
+  const activeMilestone = () => milestones()[results().activeMilestoneIndex ?? 0] ?? milestones()[0] ?? null;
+  const stepState = id => model.run?.actions?.[
+    (id === "submit" || id === "approve-work") && activeMilestone()?.id ? `${id}:${activeMilestone().id}` : id
+  ];
   const isDone = id => stepState(id)?.status === "DONE";
   const isFailed = id => stepState(id)?.status === "FAILED";
   const firstStep = (...ids) => model.steps.find(step => ids.includes(step.id));
@@ -157,6 +164,197 @@
   function selectedApplication() {
     const id = results().selectedApplicationId ?? (results().contract ? results().applicationId : null);
     return applications().find(application => application.id === id) ?? (id ? { id } : null);
+  }
+
+  function notificationStorageKey() {
+    return `anchor.workflow.notifications.${role.toLowerCase()}`;
+  }
+
+  function notificationState() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(notificationStorageKey()) ?? "null");
+      return {
+        items: Array.isArray(stored?.items) ? stored.items : [],
+        readIds: Array.isArray(stored?.readIds) ? stored.readIds : []
+      };
+    } catch {
+      return { items: [], readIds: [] };
+    }
+  }
+
+  function saveNotificationState(state) {
+    try {
+      localStorage.setItem(notificationStorageKey(), JSON.stringify({
+        items: state.items.slice(0, 50),
+        readIds: state.readIds.slice(0, 100)
+      }));
+    } catch { /* The workflow remains usable when browser storage is unavailable. */ }
+  }
+
+  function workflowNotifications() {
+    const run = model.run;
+    if (!run) return [];
+    const r = results();
+    const runKey = run.startedAt ?? r.job?.id ?? "current";
+    const action = id => run.actions?.[id];
+    const done = id => action(id)?.status === "DONE";
+    const createdAt = (id, fallback = run.startedAt) => action(id)?.completedAt ?? fallback ?? new Date(0).toISOString();
+    const list = [];
+    const add = (targetRole, id, title, summary, detail, timestamp, tone = "update") => {
+      if (targetRole !== role || !timestamp) return;
+      list.push({ id: `${runKey}:${targetRole}:${id}`, title, summary, detail, createdAt: timestamp, tone });
+    };
+    const job = r.job ?? {};
+    const route = dealRoute();
+    const actualApplication = applications().find(item => item.id === r.applicationId) ?? applications()[0];
+    const selected = selectedApplication();
+
+    if (done("job")) add(
+      "FREELANCER", `job:${job.id ?? "published"}`, "NEW OPPORTUNITY",
+      job.title ?? "A company published a new job",
+      `${countryLabel(route.originCountry)} company · ${money(job.budget?.amountMinor ?? job.budgetMinor, job.budget?.scale ?? job.budgetScale, job.fundingCurrency ?? job.budgetCurrency)} · review the brief and submit your proposal.`,
+      createdAt("job"), "opportunity"
+    );
+    if (done("apply")) add(
+      "COMPANY", `proposal:${r.applicationId ?? "submitted"}`, "NEW FREELANCER PROPOSAL",
+      `${actualApplication?.applicantDisplayName ?? "A freelancer"} applied for ${job.title ?? "your opportunity"}`,
+      `${proposalPrice(actualApplication)} · ${actualApplication?.deliveryDays ?? "—"} days · proposal/resume is ready for agent screening.`,
+      createdAt("apply", actualApplication?.submittedAt), "proposal"
+    );
+    if (done("select")) add(
+      "FREELANCER", `selection:${r.selectedApplicationId ?? "selected"}`, "YOU WERE SELECTED",
+      `${selected?.applicantDisplayName ?? "Your proposal"} was chosen by the company`,
+      `${job.title ?? "The opportunity"} now moves to a private bilateral agreement. Review the exact terms before accepting.`,
+      createdAt("select"), "success"
+    );
+    if (done("agreement-company-approve")) add(
+      "FREELANCER", `agreement-company:${agreement()?.contractHash ?? "approved"}`, "AGREEMENT READY",
+      "The company approved the private agreement",
+      `Review and accept the exact document hash ${shortRef(agreement()?.artifactHash ?? agreement()?.contractHash, 8)} before escrow can be funded.`,
+      createdAt("agreement-company-approve"), "agreement"
+    );
+    if (done("agreement-approve")) add(
+      "COMPANY", `agreement-freelancer:${agreement()?.contractHash ?? "approved"}`, "AGREEMENT ACCEPTED",
+      `${selected?.applicantDisplayName ?? "The freelancer"} accepted the exact terms`,
+      `Both approvals bind agreement ${shortRef(agreement()?.artifactHash ?? agreement()?.contractHash, 8)}. Compliance, FX and escrow automation may now proceed.`,
+      createdAt("agreement-approve"), "agreement"
+    );
+
+    const submissionActions = Object.entries(run.actions ?? {}).filter(([id, value]) => id.startsWith("submit:") && value?.status === "DONE");
+    for (const [id, value] of submissionActions) {
+      const milestoneId = id.slice("submit:".length);
+      const milestone = milestones().find(item => item.id === milestoneId);
+      add("COMPANY", `submission:${milestoneId}`, "WORK SUBMITTED", milestone?.title ?? r.submission?.fileName ?? "A deliverable is ready", `The private file is available for review. Its SHA-256 evidence was committed to Fabric for ${milestone?.title ?? "this delivery"}.`, value.completedAt, "delivery");
+    }
+    if (!submissionActions.length && done("submit")) add(
+      "COMPANY", `submission:${r.submission?.evidenceId ?? "work"}`, "WORK SUBMITTED",
+      r.submission?.fileName ?? "A deliverable is ready",
+      `The private file is available for review. Fabric evidence ${shortRef(r.submission?.evidenceId, 8)} protects the approval decision.`,
+      createdAt("submit", r.submission?.submittedAt), "delivery"
+    );
+
+    const paymentEntries = Array.isArray(r.milestonePayments) && r.milestonePayments.length
+      ? r.milestonePayments
+      : [{ milestone: activeMilestone(), timeline: r.settlementTimeline, payment: r.payment, quote: r.quote, binding: r.binding }];
+    for (const [index, entry] of paymentEntries.entries()) {
+      const timeline = entry.timeline ?? {};
+      const payment = timeline.payment ?? entry.payment ?? {};
+      const quote = timeline.quote ?? entry.quote ?? {};
+      const binding = timeline.binding ?? entry.binding ?? {};
+      const events = Array.isArray(timeline.events) ? timeline.events : [];
+      const fiatEvent = events.find(event => event.kind === "FIAT_FUNDED");
+      const lockedEvent = events.find(event => event.kind === "USDC_LOCKED");
+      const payoutEvent = events.findLast?.(event => event.kind === "PAYOUT_CREDITED") ?? events.find(event => event.kind === "PAYOUT_CREDITED");
+      const completedEvent = events.findLast?.(event => event.kind === "PAYMENT_COMPLETED") ?? events.find(event => event.kind === "PAYMENT_COMPLETED");
+      const paymentId = payment.id ?? binding.paymentKey ?? `payment-${index + 1}`;
+      const milestoneLabel = entry.milestone?.title ?? (paymentEntries.length > 1 ? `Milestone ${index + 1}` : job.title ?? "Deal");
+      if (fiatEvent || lockedEvent || ["USDC_LOCKED", "WORK_PENDING", "COMPLETED"].includes(payment.state)) {
+        const fundedAt = lockedEvent?.occurredAt ?? fiatEvent?.occurredAt ?? payment.updatedAt;
+        add("COMPANY", `funded-company:${paymentId}`, "MONEY DEDUCTED & ESCROWED", milestoneLabel, `${money(quote.fundingAmount?.amountMinor, quote.fundingAmount?.scale, quote.fundingAmount?.currency ?? route.fundingCurrency)} left the company ledger; ${money(binding.amountUsdcMinor ?? quote.settlementAmount?.amountMinor, binding.scale ?? quote.settlementAmount?.scale ?? 6, "USDC")} is locked on ${binding.network ?? model.runtime?.network ?? "Algorand"}.`, fundedAt, "funding");
+        add("FREELANCER", `funded-freelancer:${paymentId}`, "ESCROW SECURED", milestoneLabel, `${money(binding.amountUsdcMinor ?? quote.settlementAmount?.amountMinor, binding.scale ?? quote.settlementAmount?.scale ?? 6, "USDC")} is locked on the provider rail for this delivery. You never need a crypto wallet.`, fundedAt, "funding");
+      }
+      if (payoutEvent || completedEvent || payment.state === "COMPLETED") {
+        const payoutAt = completedEvent?.occurredAt ?? payoutEvent?.occurredAt ?? payment.updatedAt;
+        const payoutAmount = quote.payoutAmount ?? (payoutEvent ? { amountMinor: payoutEvent.detail?.payoutMinor, scale: payment.payoutScale ?? 2, currency: payoutEvent.detail?.payoutCurrency } : null);
+        add("COMPANY", `released:${paymentId}`, "PAYMENT RELEASED", milestoneLabel, `${money(payoutAmount?.amountMinor, payoutAmount?.scale, payoutAmount?.currency ?? route.payoutCurrency)} was credited after Fabric-approved evidence unlocked the Algorand escrow.`, payoutAt, "success");
+        add("FREELANCER", `received:${paymentId}`, paymentEntries.length > 1 ? "MILESTONE PAYMENT RECEIVED" : "TOTAL FUNDING RECEIVED", milestoneLabel, `${money(payoutAmount?.amountMinor, payoutAmount?.scale, payoutAmount?.currency ?? route.payoutCurrency)} reached your local payout ledger. The escrow, provider release and reconciliation are complete.`, payoutAt, "success");
+      }
+    }
+    return list.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  }
+
+  function notificationTime(value) {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "JUST NOW";
+    return parsed.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).toUpperCase();
+  }
+
+  function renderNotificationCenter() {
+    const state = notificationState();
+    const unread = state.items.filter(item => !state.readIds.includes(item.id));
+    const badge = $("#notificationBadge");
+    if (badge) {
+      badge.textContent = unread.length > 9 ? "9+" : String(unread.length);
+      badge.hidden = unread.length === 0;
+    }
+    const button = $("#notificationButton");
+    if (button) button.setAttribute("aria-label", unread.length ? `Open notifications, ${unread.length} unread` : "Open notifications");
+    const roleLabel = $("#notificationRole");
+    if (roleLabel) roleLabel.textContent = `${role} INBOX`;
+    const list = $("#notificationList");
+    if (!list) return;
+    list.innerHTML = state.items.length
+      ? state.items.map(item => `<article data-tone="${escape(item.tone)}" data-read="${state.readIds.includes(item.id)}"><i aria-hidden="true"></i><div><header><strong>${escape(item.title)}</strong><time datetime="${escape(item.createdAt)}">${escape(notificationTime(item.createdAt))}</time></header><b>${escape(item.summary)}</b><p>${escape(item.detail)}</p></div></article>`).join("")
+      : '<p class="notification-empty">No workflow alerts yet. New deal events will appear here automatically.</p>';
+  }
+
+  function showNotificationToast(item) {
+    const toast = $("#notificationToast");
+    if (!toast || !item) return;
+    clearTimeout(notificationToastTimer);
+    $("#notificationToastLabel").textContent = `${role} · NEW ALERT`;
+    $("#notificationToastTitle").textContent = item.title;
+    $("#notificationToastCopy").textContent = item.summary;
+    toast.hidden = false;
+    requestAnimationFrame(() => toast.classList.add("visible"));
+    notificationToastTimer = setTimeout(() => {
+      toast.classList.remove("visible");
+      setTimeout(() => { if (!toast.classList.contains("visible")) toast.hidden = true; }, 180);
+    }, 5_000);
+  }
+
+  function syncNotifications({ announce = true } = {}) {
+    const generated = workflowNotifications();
+    const state = notificationState();
+    const existing = new Map(state.items.map(item => [item.id, item]));
+    const fresh = generated.filter(item => !existing.has(item.id));
+    for (const item of generated) existing.set(item.id, item);
+    state.items = [...existing.values()].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)).slice(0, 50);
+    saveNotificationState(state);
+    renderNotificationCenter();
+    if (announce && fresh.length) showNotificationToast(fresh.at(-1));
+  }
+
+  function openNotificationCenter() {
+    const popover = $("#notificationPopover");
+    const button = $("#notificationButton");
+    if (!popover || !button) return;
+    popover.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    const state = notificationState();
+    state.readIds = [...new Set([...state.readIds, ...state.items.map(item => item.id)])];
+    saveNotificationState(state);
+    renderNotificationCenter();
+    $("#notificationClose")?.focus();
+  }
+
+  function closeNotificationCenter({ restoreFocus = false } = {}) {
+    const popover = $("#notificationPopover");
+    const button = $("#notificationButton");
+    if (!popover || !button) return;
+    popover.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    if (restoreFocus) button.focus();
   }
 
   function agreement() {
@@ -292,19 +490,23 @@
       <div class="selected-talent"><small>AUTHORIZED COMPANY · JOB-LEVEL PAYER PROFILE</small><strong>${escape(companyVerificationProfile()?.legalName ?? "Verified demo company")}</strong><span>Choose the payer country for this job. Anchor switches to that country's signed demo entity and reuses the approved policy source; corridor law is evaluated after freelancer selection.</span></div>
       <label><span>WORK TITLE</span><input name="title" required minlength="4" autocomplete="off" placeholder="e.g. Build a settlement reconciliation service"></label>
       <label><span>SCOPE OF WORK</span><textarea name="description" required minlength="20" placeholder="Explain the problem, expected outcome and what must be delivered"></textarea></label>
-      <label><span>ACCEPTANCE CRITERIA</span><textarea name="acceptanceCriteria" required minlength="10" placeholder="List the objective checks used to accept the final work"></textarea></label>
-      <div class="field-grid"><label><span>REQUIRED SKILLS</span><input name="skills" required placeholder="TypeScript, PostgreSQL, reconciliation"></label><label><span>FUNDING AMOUNT</span><input name="budget" data-budget-input type="number" min="1" ${publicLimit ? `max="${publicLimit}"` : ""} step="0.01" required placeholder="${publicLimit ?? "12000.00"}"></label></div>
+      <label><span>ACCEPTANCE CRITERIA</span><textarea name="acceptanceCriteria" required minlength="10" placeholder="List the overall checks that apply to the complete project"></textarea></label>
+      <label><span>REQUIRED SKILLS</span><input name="skills" required placeholder="TypeScript, PostgreSQL, reconciliation"></label>
       <div class="field-grid corridor-inputs"><label><span>PAYER COUNTRY</span><select name="payerCountry" data-country-select="fundingCurrency" required>${countryOptions(payerCountry)}</select></label><label><span>FUNDING CURRENCY</span><select name="fundingCurrency" required>${currencyOptions(fundingCurrency)}</select></label></div>
       <label><span>TARGET DELIVERY DATE</span><input name="deliveryDate" type="date" required></label>
+      <section class="delivery-mode-selector"><header><small>PAYMENT RELEASE MODEL</small><b>CHOOSE HOW THE WORK WILL BE DELIVERED</b></header><div role="radiogroup" aria-label="Payment release model"><label><input type="radio" name="deliveryMode" value="SINGLE" data-delivery-mode checked><span><b>ONE COMPLETE DELIVERY</b><small>One escrow · one work submission · one final release</small></span></label><label><input type="radio" name="deliveryMode" value="MILESTONES" data-delivery-mode><span><b>MILESTONE RELEASES</b><small>2–5 independent escrows released as each deliverable is approved</small></span></label></div></section>
+      <section class="single-delivery-editor" data-single-delivery><label><span>TOTAL PROJECT BUDGET · ${escape(fundingCurrency)}</span><input name="singleBudget" data-single-budget type="number" min="0.01" step="0.01" required placeholder="1.00"></label><p>Complete the work once, submit one final evidence file, and release the full escrow after company approval.</p><button type="button" data-download-job-brief>DOWNLOAD JOB BRIEF PDF ↓</button></section>
+      <section data-milestone-delivery hidden><div class="field-grid"><label><span>NUMBER OF MILESTONES</span><select name="milestoneCount" data-milestone-count>${[2, 3, 4, 5].map(count => `<option value="${count}" ${count === 2 ? "selected" : ""}>${count} milestones</option>`).join("")}</select></label></div><section class="milestone-editor" data-milestone-editor data-public-limit="${publicLimit ?? ""}"></section><div class="milestone-total"><span><small>TOTAL PROJECT FUNDING</small><b data-milestone-total>0.00 ${escape(fundingCurrency)}</b></span><button type="button" data-download-job-brief>DOWNLOAD MILESTONE BRIEF PDF ↓</button></div></section>
+      <input name="budget" data-budget-input type="hidden" value="0">
       ${publicLimit ? `<p class="form-hint" data-testnet-budget-hint>PUBLIC TESTNET FAUCET LIMIT · MAX ${publicLimit} ${escape(fundingCurrency)} FOR THIS LIVE ON-CHAIN DEMO. USE LOCALNET FOR LARGE NOTIONAL VALUES.</p>` : ""}
-      <button type="submit">PUBLISH OPPORTUNITY <b>→</b></button><p class="form-hint">Country and currency are deal inputs. The server still enforces their mapping and uses an authorized, signed demo payer identity for the selected jurisdiction.</p>
+      <button type="submit">PUBLISH OPPORTUNITY <b>→</b></button><p class="form-hint" data-delivery-mode-hint>One complete delivery creates one Algorand escrow and releases the full value only against the final approved Fabric evidence.</p>
     </form></section>`;
   }
 
   function applicationForm(job) {
     return `<section class="workspace-card action-card"><header><span>YOUR PROPOSAL</span><b>PRIVATE UNTIL SUBMITTED</b></header><form class="workspace-form" data-workspace-form="apply">
       ${documentAutofill("FREELANCER_PROPOSAL")}
-      <div class="field-grid"><label><span>PROPOSED PRICE · ${escape(job?.fundingCurrency ?? job?.budgetCurrency ?? "PAYER CURRENCY")}</span><input name="proposedPrice" type="number" min="1" step="0.01" required placeholder="10800.00"></label><label><span>DELIVERY · DAYS</span><input name="deliveryDays" type="number" min="1" max="365" required placeholder="21"></label></div>
+      <div class="field-grid"><label><span>PROPOSED PRICE · ${escape(job?.fundingCurrency ?? job?.budgetCurrency ?? "PAYER CURRENCY")}</span><input name="proposedPrice" type="number" min="0.01" step="0.01" required placeholder="10800.00"></label><label><span>DELIVERY · DAYS</span><input name="deliveryDays" type="number" min="1" max="365" required placeholder="21"></label></div>
       <div class="field-grid corridor-inputs"><label><span>TAX RESIDENCE</span><select name="residenceCountry" required><option value="" selected disabled>Choose residence</option><option value="PL">Poland</option><option value="IN">India</option><option value="GB">United Kingdom</option><option value="DE">Germany</option><option value="RU">Russia</option><option value="KP">North Korea</option></select></label><label><span>PAYOUT COUNTRY</span><select name="payoutCountry" data-country-select="payoutCurrency" required><option value="" selected disabled>Choose payout country</option><option value="PL" data-currency="PLN">Poland</option><option value="IN" data-currency="INR">India</option><option value="GB" data-currency="GBP">United Kingdom</option><option value="DE" data-currency="EUR">Germany</option><option value="RU" data-currency="RUB">Russia</option><option value="KP" data-currency="KPW">North Korea</option></select></label></div>
       <label><span>PAYOUT CURRENCY</span><select name="payoutCurrency" required><option value="" selected disabled>Derived from payout country</option><option value="PLN">PLN · Polish złoty</option><option value="INR">INR · Indian rupee</option><option value="GBP">GBP · Pound sterling</option><option value="EUR">EUR · Euro</option><option value="RUB">RUB · Russian ruble</option><option value="KPW">KPW · North Korean won</option></select></label>
       <label><span>AVAILABILITY</span><input name="availability" required minlength="3" placeholder="e.g. Available from Monday, 30 hours/week"></label>
@@ -325,7 +527,9 @@
   }
 
   function submissionForm() {
-    return `<section class="workspace-card action-card"><header><span>PRIVATE DELIVERY</span><b>ANY FILE TYPE</b></header><form class="workspace-form" data-workspace-form="submit">
+    const item = activeMilestone();
+    const milestoneBased = usesMilestoneReleases();
+    return `<section class="workspace-card action-card"><header><span>${milestoneBased ? `PRIVATE DELIVERY · MILESTONE ${escape(item?.ordinal ?? 1)} OF ${escape(milestones().length)}` : "PRIVATE DELIVERY · FINAL SUBMISSION"}</span><b>ANY FILE TYPE</b></header><div class="milestone-delivery-brief"><small>${milestoneBased ? "CURRENT RELEASE GATE" : "FULL ESCROW RELEASE GATE"}</small><h3>${escape(milestoneBased ? item?.title ?? "Agreed milestone" : "Complete project delivery")}</h3><p>${escape(item?.deliverable ?? item?.description ?? "Deliver the complete agreed work.")}</p><b>${escape(item ? money(item.amountMinor, item.amountScale, item.amountCurrency) : "")}</b>${item?.acceptanceCriteria?.length ? `<ul>${item.acceptanceCriteria.map(value => `<li>${escape(value)}</li>`).join("")}</ul>` : ""}</div><form class="workspace-form" data-workspace-form="submit">
       <label class="workspace-file"><span>DELIVERABLE / SOURCE / PROOF</span><input name="file" type="file" required><b>SELECT THE ACTUAL FILE</b><small>No extension restriction. Bytes go to MinIO; SHA-256 evidence goes to Fabric.</small></label>
       <label><span>DELIVERY NOTE</span><textarea name="note" maxlength="2000" required placeholder="Explain what is included and how the company should validate it"></textarea></label>
       <button type="submit">UPLOAD + COMMIT EVIDENCE <b>→</b></button>
@@ -335,7 +539,9 @@
   function opportunity(job) {
     if (!job) return `<section class="workspace-card empty-state"><span>⌁</span><h2>WAITING FOR A VERIFIED OPPORTUNITY</h2><p>A company brief will appear here when it is published. You will never see company-only creation controls.</p></section>`;
     const skills = Array.isArray(job.skills) ? job.skills : [];
-    return `<section class="workspace-card opportunity-card"><header><span>OPEN OPPORTUNITY</span><b>${escape(job.status ?? "OPEN")}</b></header><div><p class="mini-label">PAYER · ${escape(job.payerCountry ?? job.originCountry ?? job.organizationCountry ?? "COMPANY COUNTRY PENDING")} · ${escape(job.fundingCurrency ?? job.budgetCurrency ?? "FUNDING CURRENCY PENDING")}</p><h2>${escape(job.title)}</h2><p>${escape(job.description)}</p><div class="opportunity-meta"><span><small>BUDGET</small><b>${escape(money(job.budgetAmountMinor, job.budgetScale, job.budgetCurrency))}</b></span><span><small>SKILLS</small><b>${escape(skills.join(" · ") || "See brief")}</b></span></div></div></section>`;
+    const schedule = Array.isArray(job.milestones) ? job.milestones : [];
+    const milestoneBased = schedule.length > 1;
+    return `<section class="workspace-card opportunity-card"><header><span>OPEN OPPORTUNITY</span><b>${escape(job.status ?? "OPEN")}</b></header><div><p class="mini-label">PAYER · ${escape(job.payerCountry ?? job.originCountry ?? job.organizationCountry ?? "COMPANY COUNTRY PENDING")} · ${escape(job.fundingCurrency ?? job.budgetCurrency ?? "FUNDING CURRENCY PENDING")}</p><h2>${escape(job.title)}</h2><p>${escape(job.description)}</p><div class="opportunity-meta"><span><small>BUDGET</small><b>${escape(money(job.budgetAmountMinor, job.budgetScale, job.budgetCurrency))}</b></span><span><small>RELEASE MODEL</small><b>${milestoneBased ? `${escape(schedule.length)} milestone releases` : "One complete delivery"}</b></span><span><small>SKILLS</small><b>${escape(skills.join(" · ") || "See brief")}</b></span></div>${milestoneBased ? `<div class="opportunity-milestones">${schedule.map(item => `<article><i>${escape(String(item.ordinal).padStart(2, "0"))}</i><div><b>${escape(item.title)}</b><p>${escape(item.deliverable)}</p><small>${escape(money(item.amountMinor, item.scale ?? item.amountScale, item.currency ?? item.amountCurrency))} · due ${escape(item.dueDate)}</small></div></article>`).join("")}</div>` : ""}</div></section>`;
   }
 
   function applicantCards() {
@@ -362,7 +568,9 @@
     const approve = approvalParty === "COMPANY"
       ? `<button type="button" data-approve-company-agreement>I REVIEWED THIS HASH · COMPANY ACCEPTS <b>→</b></button>`
       : approvalParty === "FREELANCER" ? `<button type="button" data-approve-agreement>I REVIEWED THIS HASH · FREELANCER ACCEPTS <b>→</b></button>` : "";
-    return `<section class="workspace-card agreement-card"><header><span>PRIVATE LEGAL AGREEMENT</span><b>PARTIES ONLY</b></header><div class="agreement-document"><div class="document-icon">DOC<br><b>✓</b></div><div><small>${escape(item.fileName ?? "anchor-work-agreement.pdf")}</small><h2>SHARED BETWEEN COMPANY + SELECTED FREELANCER</h2><p>${escape(item.byteLength ? `${item.byteLength} encrypted bytes in MinIO` : "Encrypted source document stored in MinIO")}</p></div></div><div class="hash-panel"><small>AGREEMENT SHA-256</small><code>${escape(item.artifactHash ?? item.documentHash ?? item.sha256 ?? item.contractHash)}</code></div>${rows.length ? `<dl class="agreement-terms">${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${escape(value)}</dd></div>`).join("")}</dl>` : ""}${sourceList}<div class="document-actions"><a href="${downloadUrl}" target="_blank" rel="noopener">DOWNLOAD AUTHORIZED DOCUMENT ↗</a>${approve}</div></section>`;
+    const schedule = milestones();
+    const scheduleView = schedule.length > 1 ? `<section class="agreement-milestone-schedule"><header><span>CONTRACTUAL RELEASE SCHEDULE</span><b>${schedule.length} ESCROWS AFTER APPROVAL</b></header>${schedule.map(milestone => `<article><i>${escape(String(milestone.ordinal).padStart(2, "0"))}</i><div><b>${escape(milestone.title)}</b><p>${escape(milestone.deliverable)}</p><small>${escape(money(milestone.amountMinor, milestone.amountScale, milestone.amountCurrency))} · due ${escape(milestone.dueDate)}</small></div></article>`).join("")}</section>` : "";
+    return `<section class="workspace-card agreement-card"><header><span>PRIVATE LEGAL AGREEMENT</span><b>PARTIES ONLY</b></header><div class="agreement-document"><div class="document-icon">DOC<br><b>✓</b></div><div><small>${escape(item.fileName ?? "anchor-work-agreement.pdf")}</small><h2>SHARED BETWEEN COMPANY + SELECTED FREELANCER</h2><p>${escape(item.byteLength ? `${item.byteLength} encrypted bytes in MinIO` : "Encrypted source document stored in MinIO")}</p></div></div><div class="hash-panel"><small>AGREEMENT SHA-256</small><code>${escape(item.artifactHash ?? item.documentHash ?? item.sha256 ?? item.contractHash)}</code></div>${scheduleView}${rows.length ? `<dl class="agreement-terms">${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${escape(value)}</dd></div>`).join("")}</dl>` : ""}${sourceList}<div class="document-actions"><a href="${downloadUrl}" target="_blank" rel="noopener">DOWNLOAD AUTHORIZED DOCUMENT ↗</a>${approve}</div></section>`;
   }
 
   function automationCard() {
@@ -472,6 +680,21 @@
     return `<section class="workspace-card review-card"><header><span>YOUR DELIVERY RECORD</span><b>${escape(delivery?.status ?? submission.status ?? "SUBMITTED")}</b></header><div class="review-file"><i>FILE</i><span><small>${escape(submission.fileName ?? "Private deliverable")}</small><b>${escape(submission.byteLength ? `${submission.byteLength} bytes` : "Stored in MinIO")}</b></span><a href="/api/workflow/submission/download" target="_blank" rel="noopener">DOWNLOAD ↗</a></div><div class="hash-panel"><small>FABRIC EVIDENCE · SHA-256</small><code>${escape(submission.fileHash)}</code></div><div class="agent-verdict"><span><small>ADVISORY VALIDATION</small><b>${escape(advisory?.score !== undefined ? `${advisory.score}/100` : delivery?.status ?? "RUNNING")}</b></span><p>${escape(advisory?.summary ?? delivery?.stages?.validation?.detail ?? "The validation agent is checking the deliverable against the accepted criteria.")}</p></div><p class="advisory-note">Your private file remains in MinIO. Its Fabric evidence and the company decision are linked to the settlement release.</p></section>`;
   }
 
+  function milestoneProgress() {
+    const schedule = milestones();
+    if (schedule.length <= 1) return "";
+    const entries = results().milestonePayments ?? [];
+    const activeId = activeMilestone()?.id;
+    return `<section class="milestone-progress"><header><div><small>INDEPENDENT ESCROW SCHEDULE</small><h3>${schedule.length} proof-gated release${schedule.length === 1 ? "" : "s"}</h3></div><b>${escape(`${results().completedMilestoneCount ?? 0}/${schedule.length} RELEASED`)}</b></header><div>${schedule.map(item => {
+      const entry = entries.find(value => value.milestoneId === item.id);
+      const payment = entry?.timeline?.payment ?? entry?.payment;
+      const binding = entry?.timeline?.binding ?? entry?.binding;
+      const completed = item.state === "COMPLETED" || payment?.state === "COMPLETED" || binding?.state === "COMPLETED";
+      const state = completed ? "COMPLETED" : item.id === activeId ? "ACTIVE" : item.state ?? payment?.state ?? "PENDING";
+      return `<article data-state="${escape(state.toLowerCase())}"><i>${completed ? "✓" : escape(String(item.ordinal).padStart(2, "0"))}</i><div><small>${escape(state)}</small><b>${escape(item.title)}</b><p>${escape(money(item.amountMinor, item.amountScale, item.amountCurrency))} · ${escape(item.deliverable)}</p><code>${escape(binding?.dealId ? `ESCROW ${shortRef(binding.dealId, 7)}` : "ESCROW PENDING")}</code></div></article>`;
+    }).join("")}</div></section>`;
+  }
+
   function payoutCard() {
     const payment = results().payment;
     const binding = results().binding;
@@ -485,7 +708,9 @@
     const compliance = results().compliance;
     const route = dealRoute();
     const payout = quote?.payoutAmount ?? (payment?.payoutAmountMinor ? { amountMinor: payment.payoutAmountMinor, scale: payment.payoutScale, currency: payment.payoutCurrency } : null);
-    return `<section class="workspace-card payout-card ${completed ? "complete" : ""}"><header><span>SECURED PAYOUT</span><b>${completed ? "COMPLETED" : escape(payment?.state ?? binding?.state ?? "PENDING")}</b></header><div class="payout-route"><span><small>AGREED PRICE</small><b>${escape(agreedFunding ? money(agreedFunding.amountMinor, agreedFunding.scale, agreedFunding.currency) : route.fundingCurrency ?? "PENDING")}</b></span><i>→</i><span><small>ESCROW LOCKS</small><b>${escape(binding ? money(binding.amountUsdcMinor, binding.scale ?? 6, "USDC") : "USDC · PENDING")}</b></span><i>→</i><span><small>YOU RECEIVE</small><b>${escape(payout ? money(payout.amountMinor, payout.scale, payout.currency) : route.payoutCurrency ?? "PENDING")}</b></span></div>${quote || compliance || binding ? `<div class="payout-reasoning"><span><small>WHY THIS AMOUNT</small><b>${escape(quote ? `${quote.legs?.length ?? 0} persisted FX legs · ${quote.rateSource}` : "Waiting for FX quote")}</b></span><span><small>WHY IT CAN SETTLE</small><b>${escape(compliance ? `${compliance.outcome} · ${compliance.appliedRules?.length ?? 0} rules` : "Compliance pending")}</b></span><span><small>WHERE IT IS LOCKED</small><b>${escape(binding ? `${binding.network} · app ${binding.applicationId} · asset ${binding.assetId}` : "Escrow pending")}</b></span></div>` : ""}<p>${completed ? `The local ${escape(payout?.currency ?? route.payoutCurrency ?? "payout")} credit is linked to the approved Fabric evidence and confirmed provider release.` : "The quoted USDC amount is fixed when funded, so later FX movement cannot change this escrow."}</p></section>`;
+    const item = activeMilestone();
+    const milestoneBased = usesMilestoneReleases();
+    return `${milestoneProgress()}<section class="workspace-card payout-card ${completed ? "complete" : ""}"><header><span>${milestoneBased ? `SECURED PAYOUT · MILESTONE ${escape(item?.ordinal ?? 1)}` : "SECURED PAYOUT · FINAL RELEASE"}</span><b>${completed ? "COMPLETED" : escape(payment?.state ?? binding?.state ?? "PENDING")}</b></header><div class="payout-route"><span><small>${milestoneBased ? "MILESTONE ALLOCATION" : "AGREED PRICE"}</small><b>${escape(agreedFunding ? money(agreedFunding.amountMinor, agreedFunding.scale, agreedFunding.currency) : route.fundingCurrency ?? "PENDING")}</b></span><i>→</i><span><small>ESCROW LOCKS</small><b>${escape(binding ? money(binding.amountUsdcMinor, binding.scale ?? 6, "USDC") : "USDC · PENDING")}</b></span><i>→</i><span><small>${milestoneBased ? "THIS RELEASE PAYS" : "YOU RECEIVE"}</small><b>${escape(payout ? money(payout.amountMinor, payout.scale, payout.currency) : route.payoutCurrency ?? "PENDING")}</b></span></div>${quote || compliance || binding ? `<div class="payout-reasoning"><span><small>WHY THIS AMOUNT</small><b>${escape(quote ? `${quote.legs?.length ?? 0} persisted FX legs · ${quote.rateSource}` : "Waiting for FX quote")}</b></span><span><small>WHY IT CAN SETTLE</small><b>${escape(compliance ? `${compliance.outcome} · ${compliance.appliedRules?.length ?? 0} rules` : "Compliance pending")}</b></span><span><small>WHERE IT IS LOCKED</small><b>${escape(binding ? `${binding.network} · app ${binding.applicationId} · asset ${binding.assetId}` : "Escrow pending")}</b></span></div>` : ""}<p>${completed ? `The local ${escape(payout?.currency ?? route.payoutCurrency ?? "payout")} credit is linked to approved Fabric evidence and the confirmed provider release.` : milestoneBased ? "This milestone has a distinct quote-fixed escrow. Other milestone funds cannot be released by this evidence." : "The complete project value is quote-fixed in one escrow and releases once after final evidence approval."}</p></section>`;
   }
 
   function formatInstant(value) {
@@ -515,17 +740,6 @@
     }
   }
 
-  function percentageOfMinor(part, total) {
-    try {
-      const denominator = BigInt(total ?? 0);
-      if (denominator <= 0n) return 0;
-      const basisPoints = Number((BigInt(part ?? 0) * 10_000n) / denominator);
-      return Math.max(0, Math.min(100, basisPoints / 100));
-    } catch {
-      return 0;
-    }
-  }
-
   function durationLabel(milliseconds) {
     if (!Number.isFinite(milliseconds) || milliseconds < 0) return "—";
     const seconds = Math.round(milliseconds / 1000);
@@ -533,31 +747,6 @@
     const minutes = Math.floor(seconds / 60);
     const remainder = seconds % 60;
     return `${minutes}m ${remainder}s`;
-  }
-
-  function auditEventSummary(event) {
-    const detail = event?.detail ?? {};
-    switch (event?.kind) {
-      case "CONTRACT_DRAFTED": return `Agreement ${shortRef(detail.contractHash, 8)} · ${detail.amountCurrency ?? ""} commitment created`;
-      case "CONTRACT_APPROVED": return `${detail.party ?? "Party"} approval · ${detail.state ?? "recorded"}`;
-      case "CORRIDOR_RESOLVED": return `${detail.originCountry ?? "?"} → ${detail.destinationCountry ?? "?"} · ${detail.bookId ?? "book pending"}`;
-      case "REGULATIONS_REFRESHED": return `${detail.regulatoryPlanOutcome ?? detail.coverageOutcome ?? "checked"} · corpus ${shortRef(detail.approvedCorpusHash, 8)}`;
-      case "FX_QUOTED": return `${detail.rateSource ?? "rate source"} · quote ${shortRef(detail.quoteId, 8)}`;
-      case "COMPLIANCE_EVALUATED": return `${detail.outcome ?? "evaluated"} · ${detail.rulesVersion ?? "ruleset"}`;
-      case "PAYMENT_CREATED": return `${detail.state ?? "created"} · hashes bind quote + compliance`;
-      case "FIAT_FUNDED": return `${money(detail.fundingMinor, 2, detail.fundingCurrency)} debited into ${detail.bookId ?? "the corridor book"}`;
-      case "ESCROW_CREATED": return `${detail.network ?? "Algorand"} app ${detail.applicationId ?? "—"} · ASA ${detail.assetId ?? "—"}`;
-      case "USDC_LOCKED": return `${money(detail.lockedMinor, 6, "USDC")} locked · tx ${shortRef(detail.transactionId, 7)}`;
-      case "WORK_SUBMITTED": return `Version ${detail.version ?? "—"} · Fabric ${shortRef(detail.fabricTxId, 8)}`;
-      case "WORK_EVALUATED": return `${detail.source ?? "Agent"} advisory score ${detail.score ?? "—"}/100`;
-      case "WORK_APPROVED": return `${detail.decision ?? "Decision"} · Fabric ${shortRef(detail.fabricTxId, 8)}`;
-      case "SETTLEMENT_ROUTE_SELECTED": return `${detail.selectedProviderId ?? "No route"} · ${detail.candidates?.length ?? 0} provider quotes · ${shortRef(detail.routeHash, 8)}`;
-      case "RELEASE_AUTHORIZED": return `Generation ${detail.generation ?? "—"} · permit expires ${formatInstant(detail.expiresAt)}`;
-      case "USDC_RELEASED": return `${money(detail.releasedMinor, 6, "USDC")} released · tx ${shortRef(detail.transactionId, 7)}`;
-      case "PAYOUT_CREDITED": return `${money(detail.payoutMinor, 2, detail.payoutCurrency)} credited to the beneficiary book`;
-      case "PAYMENT_COMPLETED": return `Payment ${shortRef(detail.paymentId, 8)} closed after reconciliation`;
-      default: return String(event?.kind ?? "AUDIT EVENT").replaceAll("_", " ");
-    }
   }
 
   function settlementRouterPanel(timeline, compact = false) {
@@ -573,7 +762,7 @@
 
   function settlementRouteOptimizerScreen() {
     const r = results();
-    const timeline = r.settlementTimeline ?? {};
+    const timeline = r.settlementTimeline?.settlementRoute ? r.settlementTimeline : r.lastSettlementTimeline ?? r.settlementTimeline ?? {};
     const decision = timeline.settlementRoute;
     const events = Array.isArray(timeline.events) ? timeline.events : [];
     const routeEvent = events.findLast?.(event => event.kind === "SETTLEMENT_ROUTE_SELECTED") ?? events.find(event => event.kind === "SETTLEMENT_ROUTE_SELECTED");
@@ -608,42 +797,66 @@
     const corridor = timeline.corridor ?? {};
     const binding = timeline.binding ?? r.binding ?? {};
     const reconciliation = timeline.reconciliation ?? {};
-    const events = Array.isArray(timeline.events) ? timeline.events : [];
-    const commands = Array.isArray(timeline.commands) ? timeline.commands : [];
     const regulation = r.regulation ?? {};
     const plan = r.regulatoryPlan ?? regulation.plan ?? regulation.regulatoryPlan ?? {};
     const categories = Array.isArray(plan.categories) ? plan.categories : [];
     const observations = Array.isArray(regulation.report?.observations) ? regulation.report.observations : [];
+    const milestonePayments = Array.isArray(r.milestonePayments) ? r.milestonePayments : [];
+    const milestoneTimelines = milestonePayments.map(entry => entry.timeline ?? {}).filter(Boolean);
+    const events = milestoneTimelines.length
+      ? milestoneTimelines.flatMap(item => Array.isArray(item.events) ? item.events : [])
+      : Array.isArray(timeline.events) ? timeline.events : [];
+    const commands = milestoneTimelines.length
+      ? milestoneTimelines.flatMap(item => Array.isArray(item.commands) ? item.commands : [])
+      : Array.isArray(timeline.commands) ? timeline.commands : [];
+    const quoteSeries = (milestonePayments.length
+      ? milestonePayments.map(entry => entry.timeline?.quote ?? entry.quote)
+      : [quote]).filter(Boolean);
+    const sumMinor = values => values.reduce((total, value) => total + BigInt(value ?? 0), 0n).toString();
+    const aggregateAmount = (selector, fallback = {}) => {
+      const values = quoteSeries.map(selector).filter(value => value?.amountMinor !== undefined);
+      return values.length ? { ...values[0], amountMinor: sumMinor(values.map(value => value.amountMinor)) } : fallback;
+    };
+    const fundingAmount = aggregateAmount(item => item.fundingAmount, quote.fundingAmount);
+    const settlementAmount = aggregateAmount(item => item.settlementAmount, quote.settlementAmount);
+    const payoutAmount = aggregateAmount(item => item.payoutAmount, quote.payoutAmount);
+    const grossSettlementAmount = aggregateAmount(item => item.grossSettlementAmount, quote.grossSettlementAmount);
+    const grossPayoutAmount = aggregateAmount(item => item.grossPayoutAmount, quote.grossPayoutAmount);
     const fees = Array.isArray(quote.fees) ? quote.fees : [];
-    const legs = Array.isArray(quote.legs) ? quote.legs : [];
-    const originFee = fees.find(item => item.code === "ORIGIN_AND_PLATFORM")?.amount ?? { amountMinor: "0", scale: 6, currency: "USD" };
-    const destinationFee = fees.find(item => item.code === "DESTINATION_OFFRAMP")?.amount ?? { amountMinor: "0", scale: quote.payoutAmount?.scale ?? 2, currency: quote.payoutAmount?.currency ?? payment.payoutCurrency };
+    const baseLegs = Array.isArray(quote.legs) ? quote.legs : [];
+    const legs = baseLegs.map((leg, index) => ({
+      ...leg,
+      from: aggregateAmount(item => item.legs?.[index]?.from, leg.from),
+      to: aggregateAmount(item => item.legs?.[index]?.to, leg.to),
+    }));
+    const aggregateFee = (code, fallback) => aggregateAmount(item => item.fees?.find(fee => fee.code === code)?.amount, fallback);
+    const originFee = aggregateFee("ORIGIN_AND_PLATFORM", { amountMinor: "0", scale: 6, currency: "USD" });
+    const destinationFee = aggregateFee("DESTINATION_OFFRAMP", { amountMinor: "0", scale: payoutAmount?.scale ?? 2, currency: payoutAmount?.currency ?? payment.payoutCurrency });
     const releaseEvent = events.findLast?.(event => event.kind === "USDC_RELEASED") ?? events.find(event => event.kind === "USDC_RELEASED");
     const regulationEvent = events.findLast?.(event => event.kind === "REGULATIONS_REFRESHED") ?? events.find(event => event.kind === "REGULATIONS_REFRESHED");
     const complianceEvent = events.findLast?.(event => event.kind === "COMPLIANCE_EVALUATED") ?? events.find(event => event.kind === "COMPLIANCE_EVALUATED");
     const fxEvent = events.findLast?.(event => event.kind === "FX_QUOTED") ?? events.find(event => event.kind === "FX_QUOTED");
-    const expectedEscrow = quote.settlementAmount?.amountMinor ?? binding.amountUsdcMinor ?? "0";
-    const observedEscrow = reconciliation.observed?.amountUsdcMinor ?? binding.amountUsdcMinor ?? "0";
-    const releasedEscrow = releaseEvent?.detail?.releasedMinor ?? binding.releasedMinor ?? expectedEscrow;
+    const expectedEscrow = settlementAmount?.amountMinor ?? binding.amountUsdcMinor ?? "0";
+    const observedEscrow = milestoneTimelines.length
+      ? sumMinor(milestoneTimelines.map(item => item.reconciliation?.observed?.amountUsdcMinor ?? item.binding?.amountUsdcMinor))
+      : reconciliation.observed?.amountUsdcMinor ?? binding.amountUsdcMinor ?? "0";
+    const releasedEscrow = milestoneTimelines.length
+      ? sumMinor(milestoneTimelines.map(item => item.events?.findLast?.(event => event.kind === "USDC_RELEASED")?.detail?.releasedMinor ?? item.binding?.releasedMinor ?? item.binding?.amountUsdcMinor))
+      : releaseEvent?.detail?.releasedMinor ?? binding.releasedMinor ?? expectedEscrow;
     const escrowDifference = absoluteMinorDifference(expectedEscrow, observedEscrow);
     const releaseDifference = absoluteMinorDifference(expectedEscrow, releasedEscrow);
-    const originRemainder = minorRemainder(quote.grossSettlementAmount?.amountMinor, originFee.amountMinor, quote.settlementAmount?.amountMinor);
-    const destinationRemainder = minorRemainder(quote.grossPayoutAmount?.amountMinor, destinationFee.amountMinor, quote.payoutAmount?.amountMinor);
-    const fullyAccounted = reconciliation.status === "MATCHED"
-      && reconciliation.observed?.booksBalanced === true
+    const originRemainder = minorRemainder(grossSettlementAmount?.amountMinor, originFee.amountMinor, settlementAmount?.amountMinor);
+    const destinationRemainder = minorRemainder(grossPayoutAmount?.amountMinor, destinationFee.amountMinor, payoutAmount?.amountMinor);
+    const reconciliationRecords = milestoneTimelines.length ? milestoneTimelines.map(item => item.reconciliation ?? {}) : [reconciliation];
+    const fullyAccounted = reconciliationRecords.every(item => item.status === "MATCHED" && item.observed?.booksBalanced === true)
       && escrowDifference === 0n
       && releaseDifference === 0n
       && originRemainder === 0n
       && destinationRemainder === 0n;
     const route = dealRoute();
-    const sourceRows = observations.length ? observations.map(observation => {
-      const content = `<b>${escape(observation.authority ?? observation.sourceId ?? "Official source")}</b><span>${escape(observation.status ?? "CHECKED")} · ${escape(formatInstant(observation.checkedAt ?? regulation.report?.checkedAt))}</span>`;
-      return observation.sourceUri ? `<a href="${escape(observation.sourceUri)}" target="_blank" rel="noopener">${content}</a>` : `<div>${content}</div>`;
-    }).join("") : `<div><b>REGULATION CORPUS</b><span>${escape(regulationEvent ? formatInstant(regulationEvent.occurredAt) : "No source observation projected")}</span></div>`;
     const categoryRows = categories.length ? categories.map(category => `<article><header><b>${escape(String(category.category ?? "OBLIGATION").replaceAll("_", " "))}</b><em data-state="${escape(String(category.status ?? "PENDING").toLowerCase())}">${escape(category.status ?? "PENDING")}</em></header><p>${escape(category.requirements?.[0] ?? category.reasons?.[0] ?? category.reason ?? "Deal-derived rule evaluated.")}</p><small>${escape(category.moduleIds?.join(" · ") ?? `${category.sourceReferences?.length ?? 0} source references`)}</small></article>`).join("") : `<p class="settlement-empty">No obligation categories were projected.</p>`;
     const rules = Array.isArray(compliance.appliedRules) ? compliance.appliedRules : [];
     const auditEvents = events.filter(event => event.kind !== "DOCUMENT_RECORDED");
-    const documentCount = events.filter(event => event.kind === "DOCUMENT_RECORDED").length;
     const explorerBase = timeline.explorerBaseUrl;
     const commandRows = commands.length ? commands.map(command => {
       const transaction = command.transactionId
@@ -651,9 +864,8 @@
         : "—";
       return `<div><span><small>${escape(String(command.action ?? "COMMAND").toUpperCase())}</small><b>${escape(command.status ?? "UNKNOWN")}</b></span><span><small>TRANSACTION</small>${transaction}</span><span><small>CONFIRMED</small><b>${escape(command.confirmedRound ? `ROUND ${command.confirmedRound}` : formatInstant(command.updatedAt))}</b></span></div>`;
     }).join("") : `<p class="settlement-empty">No provider commands were projected.</p>`;
-    const eventRows = auditEvents.length ? auditEvents.map(event => `<li><i></i><div><span><b>${escape(String(event.kind).replaceAll("_", " "))}</b><time>${escape(formatInstant(event.occurredAt))}</time></span><p>${escape(auditEventSummary(event))}</p><small>${escape(event.actorRole ?? "SYSTEM")}</small></div></li>`).join("") : `<li><div><p>No audit events were projected.</p></div></li>`;
-    const submissionEvent = events.find(event => event.kind === "WORK_SUBMITTED");
-    const approvalEvent = events.find(event => event.kind === "WORK_APPROVED");
+    const submissionEvent = events.findLast?.(event => event.kind === "WORK_SUBMITTED") ?? events.find(event => event.kind === "WORK_SUBMITTED");
+    const approvalEvent = events.findLast?.(event => event.kind === "WORK_APPROVED") ?? events.find(event => event.kind === "WORK_APPROVED");
     const eventInstants = auditEvents
       .map(event => new Date(event.occurredAt).getTime())
       .filter(Number.isFinite)
@@ -663,89 +875,49 @@
       : "—";
     const confirmedCommands = commands.filter(command => command.transactionId || command.confirmedRound).length;
     const sourceCount = observations.length || categories.reduce((total, category) => total + (category.sourceReferences?.length ?? 0), 0);
-    const originFeePercent = percentageOfMinor(originFee.amountMinor, quote.grossSettlementAmount?.amountMinor);
-    const destinationFeePercent = percentageOfMinor(destinationFee.amountMinor, quote.grossPayoutAmount?.amountMinor);
-    const proofChecks = [
-      reconciliation.observed?.booksBalanced === true,
-      escrowDifference === 0n,
-      releaseDifference === 0n,
-      originRemainder === 0n,
-      destinationRemainder === 0n,
-    ];
-    const proofChecksPassed = proofChecks.filter(Boolean).length;
-    const journeyDefinitions = [
-      { label: "AGREEMENT", kinds: ["CONTRACT_APPROVED"], copy: "Exact bilateral hash approved" },
-      { label: "RULES", kinds: ["REGULATIONS_REFRESHED", "COMPLIANCE_EVALUATED"], copy: "Corridor obligations evaluated" },
-      { label: "FX LOCK", kinds: ["FX_QUOTED"], copy: "Reference rates committed" },
-      { label: "ESCROW", kinds: ["USDC_LOCKED"], copy: "Stable value secured on Algorand" },
-      { label: "EVIDENCE", kinds: ["WORK_SUBMITTED", "WORK_APPROVED"], copy: "Fabric proof accepted" },
-      { label: "ROUTE", kinds: ["SETTLEMENT_ROUTE_SELECTED"], copy: "Provider hard-gated and selected" },
-      { label: "RELEASE", kinds: ["USDC_RELEASED"], copy: "Provider treasury received USDC" },
-      { label: "PAYOUT", kinds: ["PAYOUT_CREDITED", "PAYMENT_COMPLETED"], copy: "Local fiat credit reconciled" },
-    ];
-    const journeyRows = journeyDefinitions.map((stage, index) => {
-      const matched = auditEvents.filter(event => stage.kinds.includes(event.kind));
-      const event = matched.at(-1);
-      return `<article data-complete="${event ? "true" : "false"}"><i>${event ? "✓" : String(index + 1).padStart(2, "0")}</i><div><small>${escape(stage.label)}</small><b>${escape(stage.copy)}</b><time>${escape(event ? formatInstant(event.occurredAt) : "Not recorded")}</time></div></article>`;
+    const milestoneSettlementRows = milestonePayments.map((entry, index) => {
+      const entryTimeline = entry.timeline ?? {};
+      const entryPayment = entryTimeline.payment ?? entry.payment ?? {};
+      const entryBinding = entryTimeline.binding ?? entry.binding ?? {};
+      const entryQuote = entryTimeline.quote ?? entry.quote ?? {};
+      const release = entryTimeline.events?.findLast?.(event => event.kind === "USDC_RELEASED");
+      return `<article data-state="${entryPayment.state === "COMPLETED" ? "completed" : "pending"}"><i>${entryPayment.state === "COMPLETED" ? "✓" : escape(String(index + 1).padStart(2, "0"))}</i><div><small>MILESTONE ${escape(entry.milestone?.ordinal ?? index + 1)} · ${escape(entryPayment.state ?? "PENDING")}</small><b>${escape(entry.milestone?.title ?? "Milestone release")}</b><p>${escape(money(entryQuote.fundingAmount?.amountMinor ?? entry.milestone?.amountMinor, entryQuote.fundingAmount?.scale ?? entry.milestone?.amountScale, entryQuote.fundingAmount?.currency ?? entry.milestone?.amountCurrency))} → ${escape(money(entryQuote.payoutAmount?.amountMinor, entryQuote.payoutAmount?.scale, entryQuote.payoutAmount?.currency))}</p><code>${escape(shortRef(entryBinding.dealId, 8))} · ${escape(shortRef(release?.detail?.transactionId, 8))}</code></div></article>`;
     }).join("");
 
-    return `<section class="settlement-receipt" aria-label="Complete transaction summary">
-      <header><div><small>END-TO-END SETTLEMENT INTELLIGENCE</small><h3>${escape(`${countryLabel(route.originCountry)} → ${countryLabel(route.destinationCountry)}`)}</h3><p>One dynamic view of the exact quote, policy decision, evidence approval, stablecoin escrow and local payout generated by this deal.</p></div><span data-state="${fullyAccounted ? "matched" : "mismatched"}">${fullyAccounted ? "RECONCILED · 100% ACCOUNTED" : "MISMATCH FOUND"}</span></header>
-      <section class="settlement-identifiers"><div><small>PAYMENT</small><b>${escape(payment.id)}</b></div><div><small>CORRIDOR</small><b>${escape(`${route.originCountry} → ${route.destinationCountry} · ${payment.direction ?? corridor.direction ?? "—"}`)}</b></div><div><small>BOOK</small><b>${escape(payment.bookId ?? "—")}</b></div><div><small>COMPLETED</small><b>${escape(formatInstant(payment.updatedAt))}</b></div></section>
-      <section class="settlement-command-center">
-        <div class="settlement-value-story"><small>THE SETTLEMENT, AT A GLANCE</small><div><span><em>COMPANY COMMITTED</em><b>${escape(money(quote.fundingAmount?.amountMinor, quote.fundingAmount?.scale, quote.fundingAmount?.currency))}</b></span><i>→</i><span class="stable-value"><em>VALUE LOCKED</em><b>${escape(money(quote.settlementAmount?.amountMinor, quote.settlementAmount?.scale, "USDC"))}</b><small>ASA ${escape(binding.assetId ?? "—")}</small></span><i>→</i><span><em>FREELANCER RECEIVED</em><b>${escape(money(quote.payoutAmount?.amountMinor, quote.payoutAmount?.scale, quote.payoutAmount?.currency))}</b></span></div><p>The payer and beneficiary remain in local fiat. Licensed-provider simulation accounts alone handle the public TestNet settlement rail.</p></div>
-        <div class="settlement-kpis" aria-label="Settlement analytics">
-          <article><small>PROCESSING WINDOW</small><b>${escape(processingDuration)}</b><span>first to final persisted event</span></article>
-          <article><small>POLICY COVERAGE</small><b>${escape(`${categories.length} modules`)}</b><span>${escape(`${sourceCount} official source${sourceCount === 1 ? "" : "s"}`)}</span></article>
-          <article><small>TRUST EVENTS</small><b>${escape(`${auditEvents.length} recorded`)}</b><span>${escape(`${documentCount} private document hash${documentCount === 1 ? "" : "es"}`)}</span></article>
-          <article><small>ON-CHAIN PROOF</small><b>${escape(`${confirmedCommands}/${commands.length} confirmed`)}</b><span>${escape(binding.network ?? "network pending")}</span></article>
-        </div>
+    const fxLegRows = legs.map(leg => `<div><span><small>${escape(leg.pair ?? "FX LEG")}</small><b>× ${escape(rate(leg.rateUnits, leg.rateScale))}</b></span><span><small>FROM</small><b>${escape(money(leg.from?.amountMinor, leg.from?.scale, leg.from?.currency))}</b></span><span><small>TO</small><b>${escape(money(leg.to?.amountMinor, leg.to?.scale, leg.to?.currency))}</b></span></div>`).join("");
+
+    return `<section class="settlement-receipt settlement-receipt-minimal" aria-label="Complete transaction summary">
+      <section class="analytics-intelligence" data-analytics-section="intelligence">
+        <header><div><small>END-TO-END SETTLEMENT INTELLIGENCE</small><h3>${escape(`${countryLabel(route.originCountry)} → ${countryLabel(route.destinationCountry)}`)}</h3><p>The exact policy, quote, escrow, evidence and payout generated by this completed deal.</p></div><span data-state="${fullyAccounted ? "matched" : "mismatched"}">${fullyAccounted ? "RECONCILED · 100% ACCOUNTED" : "MISMATCH FOUND"}</span></header>
+        <div class="settlement-identifiers"><div><small>CONTRACT</small><b>${escape(r.contractId ?? binding.dealId)}</b></div><div><small>CORRIDOR</small><b>${escape(`${route.originCountry} → ${route.destinationCountry} · ${payment.direction ?? corridor.direction ?? "—"}`)}</b></div><div><small>BOOK</small><b>${escape(payment.bookId ?? "—")}</b></div><div><small>COMPLETED</small><b>${escape(formatInstant(payment.updatedAt))}</b></div></div>
       </section>
-      <section class="settlement-journey" aria-label="Settlement proof map"><header><div><small>WHY THE PAYMENT MOVED</small><h4>Eight gates. One authorized release.</h4></div><b>${escape(`${proofChecksPassed}/${proofChecks.length} RECONCILIATION CHECKS`)}</b></header><div>${journeyRows}</div></section>
-      ${settlementRouterPanel(timeline)}
-      <div class="settlement-section-title"><span>MONEY FLOW + DEDUCTIONS</span><p>Every displayed amount comes from the persisted quote and settlement record.</p></div>
-      <section class="settlement-money-flow" aria-label="Money and fee flow">
-        <article class="flow-value source-value"><small>01 · LOCAL FUNDING</small><b>${escape(money(quote.fundingAmount?.amountMinor, quote.fundingAmount?.scale, quote.fundingAmount?.currency))}</b><p>Company fiat book debited</p></article>
-        <div class="flow-conversion"><span><small>${escape(legs[0]?.pair ?? "ORIGIN FX")}</small><b>${escape(legs[0] ? `× ${rate(legs[0].rateUnits, legs[0].rateScale)}` : "RATE PENDING")}</b></span><i>→</i><span class="flow-fee"><small>LESS DISCLOSED FEE</small><b>${escape(money(originFee.amountMinor, originFee.scale, originFee.currency))}</b><em>${escape(`${fees.find(item => item.code === "ORIGIN_AND_PLATFORM")?.basisPoints ?? 0} bps`)}</em></span></div>
-        <article class="flow-value escrow-value"><small>02 · STABLE VALUE LOCK</small><b>${escape(money(quote.settlementAmount?.amountMinor, quote.settlementAmount?.scale, "USDC"))}</b><p>${escape(`${binding.network ?? "Algorand"} · App ${binding.applicationId ?? "—"}`)}</p></article>
-        <div class="flow-conversion"><span><small>${escape(legs[1]?.pair ?? "PAYOUT FX")}</small><b>${escape(legs[1] ? `× ${rate(legs[1].rateUnits, legs[1].rateScale)}` : "RATE PENDING")}</b></span><i>→</i><span class="flow-fee"><small>LESS OFF-RAMP FEE</small><b>${escape(money(destinationFee.amountMinor, destinationFee.scale, destinationFee.currency))}</b><em>${escape(`${fees.find(item => item.code === "DESTINATION_OFFRAMP")?.basisPoints ?? 0} bps`)}</em></span></div>
-        <article class="flow-value payout-value"><small>03 · LOCAL PAYOUT</small><b>${escape(money(quote.payoutAmount?.amountMinor, quote.payoutAmount?.scale, quote.payoutAmount?.currency))}</b><p>Beneficiary fiat book credited</p></article>
+      <section class="settlement-command-center" data-analytics-section="at-a-glance">
+        <div class="settlement-value-story"><small>THE SETTLEMENT, AT A GLANCE</small><div><span><em>COMPANY COMMITTED</em><b>${escape(money(fundingAmount?.amountMinor, fundingAmount?.scale, fundingAmount?.currency))}</b></span><i>→</i><span class="stable-value"><em>VALUE LOCKED</em><b>${escape(money(settlementAmount?.amountMinor, settlementAmount?.scale, "USDC"))}</b><small>ASA ${escape(binding.assetId ?? "—")}</small></span><i>→</i><span><em>FREELANCER RECEIVED</em><b>${escape(money(payoutAmount?.amountMinor, payoutAmount?.scale, payoutAmount?.currency))}</b></span></div><p>Both parties remain in local fiat; provider accounts handle the public TestNet settlement rail.</p></div>
+        <div class="settlement-kpis" aria-label="Settlement analytics"><article><small>PROCESSING WINDOW</small><b>${escape(processingDuration)}</b><span>first to final event</span></article><article><small>POLICY COVERAGE</small><b>${escape(`${categories.length} modules`)}</b><span>${escape(`${sourceCount} official sources`)}</span></article><article><small>MILESTONE ESCROWS</small><b>${escape(String(Math.max(1, milestonePayments.length)))}</b><span>independently released</span></article><article><small>ON-CHAIN PROOF</small><b>${escape(`${confirmedCommands}/${commands.length} confirmed`)}</b><span>${escape(binding.network ?? "network pending")}</span></article></div>
       </section>
-      <section class="fee-impact" aria-label="Fee impact analytics"><header><div><small>DISCLOSED FEE IMPACT</small><h4>Nothing disappears between the quote and payout.</h4></div><span>${escape(quote.feeScheduleVersion ?? "VERSIONED FEE SCHEDULE")}</span></header><div><article><div><span>ORIGIN + PLATFORM</span><b>${escape(`${originFeePercent.toFixed(2)}% · ${money(originFee.amountMinor, originFee.scale, originFee.currency)}`)}</b></div><i><b style="--fill:${originFeePercent}%"></b></i><p>Measured against the gross USD settlement value before USDC is locked.</p></article><article><div><span>DESTINATION OFF-RAMP</span><b>${escape(`${destinationFeePercent.toFixed(2)}% · ${money(destinationFee.amountMinor, destinationFee.scale, destinationFee.currency)}`)}</b></div><i><b style="--fill:${destinationFeePercent}%"></b></i><p>Measured against the gross destination-currency value before local credit.</p></article></div></section>
-      <section class="conservation-proof"><header><span>NO-MISSING-MONEY PROOF</span><b data-state="${fullyAccounted ? "matched" : "mismatched"}">${fullyAccounted ? "ALL CHECKS = 0" : "INVESTIGATE"}</b></header><div><article><small>QUOTE → ESCROW DIFFERENCE</small><b>${escape(escrowDifference === null ? "—" : money(escrowDifference.toString(), 6, "USDC"))}</b><p>Expected settlement amount versus observed on-chain escrow amount.</p></article><article><small>ESCROW → RELEASE DIFFERENCE</small><b>${escape(releaseDifference === null ? "—" : money(releaseDifference.toString(), 6, "USDC"))}</b><p>Locked settlement amount versus release event amount.</p></article><article><small>UNEXPLAINED ORIGIN VALUE</small><b>${escape(originRemainder === null ? "—" : money((originRemainder < 0n ? -originRemainder : originRemainder).toString(), 6, "USD"))}</b><p>Gross USD − disclosed origin fee − escrow amount.</p></article><article><small>UNEXPLAINED PAYOUT VALUE</small><b>${escape(destinationRemainder === null ? "—" : money((destinationRemainder < 0n ? -destinationRemainder : destinationRemainder).toString(), quote.payoutAmount?.scale ?? 2, quote.payoutAmount?.currency))}</b><p>Gross payout − disclosed off-ramp fee − beneficiary credit.</p></article></div><footer><b>${escape(reconciliation.status ?? "NOT CHECKED")}</b><span>${escape(reconciliation.detail ?? "Reconciliation evidence is unavailable.")}</span><em>${escape(formatInstant(reconciliation.checkedAt))}</em></footer><p class="network-fee-note">Algorand network fees are paid separately by the provider executor in TestAlgo. They are not removed from the USDC escrow or the freelancer payout.</p></section>
-      <div class="settlement-detail-grid"><section class="settlement-panel"><header><span>CORRIDOR RULE DECISION</span><b>${escape(compliance.outcome ?? plan.outcome ?? "—")}</b></header><div class="receipt-time-grid"><span><small>REGULATIONS FETCHED</small><b>${escape(formatInstant(regulation.report?.checkedAt ?? regulationEvent?.detail?.checkedAt ?? regulationEvent?.occurredAt))}</b></span><span><small>COMPLIANCE DECIDED</small><b>${escape(formatInstant(compliance.evaluatedAt ?? complianceEvent?.occurredAt))}</b></span><span><small>RULESET</small><b>${escape(compliance.rulesVersion ?? "—")}</b></span><span><small>CORPUS HASH</small><b>${escape(shortRef(regulation.report?.approvedCorpusHash ?? regulationEvent?.detail?.approvedCorpusHash, 10))}</b></span></div><div class="receipt-obligations">${categoryRows}</div><div class="receipt-rule-tags">${rules.map(rule => `<span>${escape(rule)}</span>`).join("") || "<span>NO RULE IDS PROJECTED</span>"}</div></section>
-      <section class="settlement-panel"><header><span>FX QUOTE PROVENANCE</span><b>${escape(quote.rateSource ?? "—")}</b></header><div class="receipt-time-grid"><span><small>RATE OBSERVED</small><b>${escape(formatInstant(quote.rateObservedAt))}</b></span><span><small>QUOTE CREATED</small><b>${escape(formatInstant(quote.quotedAt ?? fxEvent?.occurredAt))}</b></span><span><small>QUOTE EXPIRY</small><b>${escape(formatInstant(quote.expiresAt))}</b></span><span><small>QUOTE HASH</small><b>${escape(shortRef(quote.canonicalHash, 10))}</b></span></div><div class="receipt-sources">${sourceRows}</div></section></div>
-      <section class="settlement-panel blockchain-proof"><header><span>TRUST RAIL PROOF</span><b>${escape(`${binding.network ?? "—"} · ${commands.length} COMMANDS`)}</b></header><div class="trust-proof-grid"><article><small>HYPERLEDGER FABRIC</small><b>WORK EVIDENCE + BUYER DECISION</b><p>Submission tx ${escape(shortRef(submissionEvent?.detail?.fabricTxId, 10))}</p><p>Approval tx ${escape(shortRef(approvalEvent?.detail?.fabricTxId ?? r.fabricDecisionTxId, 10))}</p><code>${escape(shortRef(approvalEvent?.detail?.evidenceHash, 12))}</code></article><article><small>ALGORAND ARC-4</small><b>PROVIDER ESCROW + RELEASE</b><p>App ${escape(binding.applicationId)} · ASA ${escape(binding.assetId)}</p><p>${escape(shortRef(binding.originProviderAddress, 9))} → ${escape(shortRef(binding.destinationProviderAddress, 9))}</p><code>${escape(shortRef(binding.bindingHash, 12))}</code></article></div><div class="provider-command-list">${commandRows}</div></section>
-      <details class="settlement-audit"><summary><span>OPEN COMPLETE BACKEND EVENT TIMELINE</span><b>${escape(`${auditEvents.length} EVENTS · ${documentCount} DOCUMENT HASHES`)}</b></summary><ol>${eventRows}</ol></details>
-      <footer class="settlement-next-deal">
-        <div><small>TRANSACTION RECORD SEALED</small><h4>${role === "COMPANY" ? "READY FOR THE NEXT DEAL?" : "THIS DEAL IS NOW CLOSED."}</h4><p>${role === "COMPANY" ? "Start with a clean workspace. This completed payment and every proof above remain preserved in the audit ledger." : "The company can open the next opportunity. This receipt remains available as the final record of your payout."}</p></div>
-        ${role === "COMPANY" ? '<button type="button" data-start-new-deal>START A NEW DEAL <b>→</b></button>' : '<span>WAITING FOR THE NEXT COMPANY BRIEF</span>'}
-      </footer>
+      <section class="settlement-panel blockchain-proof" data-analytics-section="trust-proof"><header><span>TRUST RAIL PROOF</span><b>${escape(`${binding.network ?? "—"} · ${commands.length} COMMANDS`)}</b></header><div class="trust-proof-grid"><article><small>HYPERLEDGER FABRIC</small><b>WORK EVIDENCE + BUYER DECISION</b><p>Submission tx ${escape(shortRef(submissionEvent?.detail?.fabricTxId, 10))}</p><p>Approval tx ${escape(shortRef(approvalEvent?.detail?.fabricTxId ?? r.fabricDecisionTxId, 10))}</p><code>${escape(shortRef(approvalEvent?.detail?.evidenceHash, 12))}</code></article><article><small>ALGORAND ARC-4</small><b>PROVIDER ESCROW + RELEASE</b><p>App ${escape(binding.applicationId)} · ASA ${escape(binding.assetId)}</p><p>${escape(shortRef(binding.originProviderAddress, 9))} → ${escape(shortRef(binding.destinationProviderAddress, 9))}</p><code>${escape(shortRef(binding.bindingHash, 12))}</code></article></div><div class="provider-command-list">${commandRows}</div>${milestoneSettlementRows ? `<div class="analytics-milestone-proof">${milestoneSettlementRows}</div>` : ""}</section>
+      <section class="analytics-money-section" data-analytics-section="money-flow"><header class="settlement-section-title"><span>MONEY FLOW + DEDUCTIONS</span><p>Persisted amounts only; every deduction is disclosed.</p></header><div class="settlement-money-flow" aria-label="Money and fee flow"><article class="flow-value source-value"><small>01 · LOCAL FUNDING</small><b>${escape(money(fundingAmount?.amountMinor, fundingAmount?.scale, fundingAmount?.currency))}</b><p>Company fiat book debited</p></article><div class="flow-conversion"><span><small>${escape(legs[0]?.pair ?? "ORIGIN FX")}</small><b>${escape(legs[0] ? `× ${rate(legs[0].rateUnits, legs[0].rateScale)}` : "RATE PENDING")}</b></span><i>→</i><span class="flow-fee"><small>ORIGIN + PLATFORM FEE</small><b>${escape(money(originFee.amountMinor, originFee.scale, originFee.currency))}</b><em>${escape(`${fees.find(item => item.code === "ORIGIN_AND_PLATFORM")?.basisPoints ?? 0} bps`)}</em></span></div><article class="flow-value escrow-value"><small>02 · STABLE VALUE LOCK</small><b>${escape(money(settlementAmount?.amountMinor, settlementAmount?.scale, "USDC"))}</b><p>${escape(`${binding.network ?? "Algorand"} · App ${binding.applicationId ?? "—"}`)}</p></article><div class="flow-conversion"><span><small>${escape(legs[1]?.pair ?? "PAYOUT FX")}</small><b>${escape(legs[1] ? `× ${rate(legs[1].rateUnits, legs[1].rateScale)}` : "RATE PENDING")}</b></span><i>→</i><span class="flow-fee"><small>DESTINATION OFF-RAMP FEE</small><b>${escape(money(destinationFee.amountMinor, destinationFee.scale, destinationFee.currency))}</b><em>${escape(`${fees.find(item => item.code === "DESTINATION_OFFRAMP")?.basisPoints ?? 0} bps`)}</em></span></div><article class="flow-value payout-value"><small>03 · LOCAL PAYOUT</small><b>${escape(money(payoutAmount?.amountMinor, payoutAmount?.scale, payoutAmount?.currency))}</b><p>Beneficiary fiat book credited</p></article></div><div class="analytics-reconciliation"><span><small>QUOTE → ESCROW</small><b>${escape(escrowDifference === null ? "—" : money(escrowDifference.toString(), 6, "USDC"))}</b></span><span><small>ESCROW → RELEASE</small><b>${escape(releaseDifference === null ? "—" : money(releaseDifference.toString(), 6, "USDC"))}</b></span><span><small>UNEXPLAINED VALUE</small><b>${escape(fullyAccounted ? "0.00" : "INVESTIGATE")}</b></span><span><small>LEDGER CHECK</small><b>${escape(fullyAccounted ? "MATCHED" : reconciliation.status ?? "NOT CHECKED")}</b></span></div><p class="network-fee-note">Algorand network fees are paid separately in TestAlgo and are never removed from the USDC escrow or freelancer payout.</p></section>
+      <div class="settlement-detail-grid"><section class="settlement-panel" data-analytics-section="corridor-rules"><header><span>CORRIDOR RULE DECISION</span><b>${escape(compliance.outcome ?? plan.outcome ?? "—")}</b></header><div class="receipt-time-grid"><span><small>REGULATIONS FETCHED</small><b>${escape(formatInstant(regulation.report?.checkedAt ?? regulationEvent?.detail?.checkedAt ?? regulationEvent?.occurredAt))}</b></span><span><small>COMPLIANCE DECIDED</small><b>${escape(formatInstant(compliance.evaluatedAt ?? complianceEvent?.occurredAt))}</b></span><span><small>RULESET</small><b>${escape(compliance.rulesVersion ?? "—")}</b></span><span><small>CORPUS HASH</small><b>${escape(shortRef(regulation.report?.approvedCorpusHash ?? regulationEvent?.detail?.approvedCorpusHash, 10))}</b></span></div><div class="receipt-obligations">${categoryRows}</div><div class="receipt-rule-tags">${rules.map(rule => `<span>${escape(rule)}</span>`).join("") || "<span>NO RULE IDS PROJECTED</span>"}</div></section><section class="settlement-panel" data-analytics-section="fx-provenance"><header><span>FX QUOTE PROVENANCE</span><b>${escape(quote.rateSource ?? "—")}</b></header><div class="receipt-time-grid"><span><small>RATE OBSERVED</small><b>${escape(formatInstant(quote.rateObservedAt))}</b></span><span><small>QUOTE CREATED</small><b>${escape(formatInstant(quote.quotedAt ?? fxEvent?.occurredAt))}</b></span><span><small>QUOTE EXPIRY</small><b>${escape(formatInstant(quote.expiresAt))}</b></span><span><small>QUOTE HASH</small><b>${escape(shortRef(quote.canonicalHash, 10))}</b></span></div><div class="analytics-fx-legs">${fxLegRows || '<p class="settlement-empty">No FX legs were projected.</p>'}</div></section></div>
+      <footer class="analytics-minimal-footer">${role === "COMPANY" ? '<button type="button" data-start-new-deal>START A NEW DEAL <b>→</b></button>' : '<span>DEAL CLOSED · WAITING FOR THE NEXT COMPANY BRIEF</span>'}</footer>
     </section>`;
   }
 
   function settlementAnalyticsPage() {
-    const route = dealRoute();
-    const payment = results().settlementTimeline?.payment ?? results().payment ?? {};
     return `<section class="settlement-analytics-page" data-settlement-analytics aria-label="Completed deal analytics">
-      <header class="settlement-analytics-hero">
-        <div><small>ANCHOR / COMPLETED DEAL</small><h1>TRANSACTION<br>ANALYTICS.</h1><p>The transfer is finished. This fresh view reconstructs the exact policy, FX, escrow, evidence and payout path from persisted backend records.</p></div>
-        <aside><span><i></i> FINAL</span><b>${escape(`${route.originCountry ?? "—"} → ${route.destinationCountry ?? "—"}`)}</b><small>${escape(shortRef(payment.id, 9))}</small></aside>
-      </header>
       ${settlementReceipt()}
     </section>`;
   }
 
   function moneyTransferScreen() {
-    const payment = results().payment;
-    const binding = results().binding;
-    const quote = results().quote;
-    const completed = model.run?.phase === "COMPLETED" || payment?.state === "COMPLETED";
+    const timeline = (model.run?.phase !== "COMPLETED" && results().lastSettlementTimeline) || results().settlementTimeline || {};
+    const payment = timeline.payment ?? results().payment;
+    const binding = timeline.binding ?? results().binding;
+    const quote = timeline.quote ?? results().quote;
+    const completed = payment?.state === "COMPLETED";
     const companyAmount = quote?.fundingAmount ?? (payment ? { amountMinor: payment.fundingAmountMinor, scale: payment.fundingScale, currency: payment.fundingCurrency } : null);
     const payoutAmount = quote?.payoutAmount ?? (payment ? { amountMinor: payment.payoutAmountMinor, scale: payment.payoutScale, currency: payment.payoutCurrency } : null);
     const route = dealRoute();
     const payoutCurrency = payoutAmount?.currency ?? route.payoutCurrency ?? "LOCAL FIAT";
-    const timeline = results().settlementTimeline ?? {};
     return `<section class="money-transfer-screen" data-transfer-screen data-state="${completed ? "completed" : "releasing"}" aria-live="polite">
       <header><div><small>REAL SETTLEMENT EVENT</small><h3>${completed ? "PAYMENT LANDED." : "PAYMENT IS MOVING."}</h3><p>${completed ? `Algorand confirmed the provider release and the destination ledger recorded the local ${escape(payoutCurrency)} credit.` : "The approved Fabric evidence is authorizing the Algorand escrow release now."}</p></div><span>${completed ? "CONFIRMED" : "RELEASING"}</span></header>
       <div class="money-transfer-stage">
@@ -798,9 +970,9 @@
     if (phase === "AWAITING_COMPANY_AGREEMENT") return stageScreen("04", "COMPANY REVIEW", "Review the generated agreement", "Inspect the document, clause provenance and exact hash. The AI cannot approve it for you.", agreementCard("COMPANY"), "COMPANY DECISION");
     if (phase === "AWAITING_FREELANCER_AGREEMENT") return stageScreen("04", "COUNTERPARTY REVIEW", "Agreement sent for acceptance", "The freelancer receives the same private document and must accept its exact SHA-256 hash.", agreementCard(), "WAITING FOR FREELANCER");
     if (!r.binding && phase !== "AWAITING_DELIVERY") return stageScreen("05", "ANCHOR AUTOPILOT", "Secure the cross-border escrow", "Official-source policy checks, live FX, compliance evidence and Algorand funding advance only when the backend hard gate authorizes them.", automationCard(), automationStatusLabel());
-    if (!r.submission) return stageScreen("06", "DELIVERY DESK", "Escrow is secured", "The agreed settlement value is locked. The selected freelancer can now upload the private deliverable.", payoutCard(), "WAITING FOR DELIVERY");
     if (showRouteOptimizer(phase)) return stageScreen("06", "DYNAMIC SETTLEMENT ROUTER", "Watch Anchor choose the payout path", "Every provider quote, rejection and ranking result below comes from the persisted payment decision that is being bound into the release permit.", settlementRouteOptimizerScreen(), "LIVE OPTIMIZATION");
     if (showTransferScreen(phase)) return stageScreen("06", "SETTLEMENT RAIL", phase === "COMPLETED" ? "The payout has arrived" : "Approved value is moving", "This screen follows the actual release state after the company approval was recorded on Fabric.", moneyTransferScreen(), phase === "COMPLETED" ? "TRANSFER COMPLETE" : "LIVE TRANSFER");
+    if (!r.submission) return stageScreen("06", "DELIVERY DESK", usesMilestoneReleases() ? `Milestone ${activeMilestone()?.ordinal ?? 1} escrow is secured` : "The full escrow is secured", usesMilestoneReleases() ? "This milestone's settlement value is locked. The selected freelancer can upload only the evidence required for this release." : "The complete project value is locked in one escrow and awaits the freelancer's final delivery.", payoutCard(), "WAITING FOR DELIVERY");
     return stageScreen("06", "EVIDENCE + RELEASE", phase === "COMPLETED" ? "Work approved. Payout complete." : "Review the private delivery", "Download the file, inspect the validation evidence, and authorize release only when the agreed criteria are met.", pairedStage(submissionReview(), payoutCard()), phase === "COMPLETED" ? "COMPLETED" : "HUMAN DECISION");
   }
 
@@ -815,9 +987,9 @@
     if (phase === "AWAITING_COMPANY_AGREEMENT") return stageScreen("04", "COMPANY REVIEW", "The sourced agreement is awaiting company approval", "You can inspect the same private document, but the company must approve its exact hash first.", agreementCard(), "WAITING FOR COMPANY");
     if (phase === "AWAITING_FREELANCER_AGREEMENT" && !hasDone("agreement-approve")) return stageScreen("04", "BILATERAL APPROVAL", "Review the private agreement", "Download the document, verify every term and its source, then accept the exact hash only when you agree.", agreementCard("FREELANCER"));
     if (!r.binding && phase !== "AWAITING_DELIVERY") return stageScreen("05", "ANCHOR AUTOPILOT", "Watch escrow become secured", "Anchor checks the selected corridor and advances to FX and provider escrow only when the backend hard gate authorizes it.", automationCard(), automationStatusLabel());
-    if (!r.submission) return stageScreen("06", "PRIVATE DELIVERY", "Submit the finished work", "Your bytes go to private object storage. Only the evidence hash and buyer decision go to Hyperledger Fabric.", pairedStage(submissionForm(), payoutCard()));
     if (showRouteOptimizer(phase)) return stageScreen("06", "DYNAMIC SETTLEMENT ROUTER", "Watch Anchor choose your payout path", "The provider comparison is read from the live payment record. Unsafe or inferior routes cannot authorize the escrow release.", settlementRouteOptimizerScreen(), "LIVE OPTIMIZATION");
     if (showTransferScreen(phase)) return stageScreen("06", "SETTLEMENT RAIL", phase === "COMPLETED" ? "Your local payout has arrived" : "Your payout is moving", "The release follows the approved Fabric evidence and confirmed Algorand escrow state.", moneyTransferScreen(), phase === "COMPLETED" ? "MONEY RECEIVED" : "LIVE TRANSFER");
+    if (!r.submission) return stageScreen("06", "PRIVATE DELIVERY", usesMilestoneReleases() ? `Submit milestone ${activeMilestone()?.ordinal ?? 1} of ${milestones().length}` : "Submit the complete work", usesMilestoneReleases() ? "Your bytes go to private object storage. This evidence can unlock only the active milestone escrow." : "Your final delivery goes to private object storage. Its approved Fabric evidence can unlock the one full-value escrow.", pairedStage(submissionForm(), payoutCard()));
     return stageScreen("06", "DELIVERY + PAYOUT", phase === "COMPLETED" ? "Local payout complete" : "Delivery submitted", phase === "COMPLETED" ? `The company approved the Fabric evidence and the destination provider credited your local ${dealRoute().payoutCurrency ?? "fiat"} balance.` : "The company is reviewing your private file. The advisory agent cannot release funds.", pairedStage(submissionReceipt(), payoutCard()), phase === "COMPLETED" ? "COMPLETED" : "WAITING FOR COMPANY");
   }
 
@@ -959,6 +1131,122 @@
     bindActions();
   }
 
+  function renderTimedWorkflowTransition() {
+    const analyticsVisible = model.run?.phase === "COMPLETED" && completedView === "analytics" && !inspectedStage;
+    if (!busy && !analyticsVisible) render();
+  }
+
+  function milestoneDraftsFromForm(form) {
+    if (form.elements.namedItem("deliveryMode")?.value !== "MILESTONES") return [];
+    const count = Number(form.elements.namedItem("milestoneCount")?.value ?? 1);
+    return Array.from({ length: Math.max(1, Math.min(5, count)) }, (_, index) => {
+      const ordinal = index + 1;
+      return {
+        title: form.elements.namedItem(`milestoneTitle${ordinal}`)?.value ?? "",
+        description: form.elements.namedItem(`milestoneDescription${ordinal}`)?.value ?? "",
+        deliverable: form.elements.namedItem(`milestoneDeliverable${ordinal}`)?.value ?? "",
+        acceptanceCriteria: lines(form.elements.namedItem(`milestoneAcceptance${ordinal}`)?.value),
+        amount: form.elements.namedItem(`milestoneAmount${ordinal}`)?.value ?? "",
+        dueDate: form.elements.namedItem(`milestoneDueDate${ordinal}`)?.value ?? "",
+      };
+    });
+  }
+
+  function updateMilestoneTotal(form) {
+    const milestoneBased = form.elements.namedItem("deliveryMode")?.value === "MILESTONES";
+    const drafts = milestoneDraftsFromForm(form);
+    const total = milestoneBased
+      ? drafts.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
+      : Number(form.elements.namedItem("singleBudget")?.value) || 0;
+    const currency = form.elements.namedItem("fundingCurrency")?.value ?? "";
+    const budget = form.elements.namedItem("budget");
+    if (budget instanceof HTMLInputElement) budget.value = total.toFixed(2);
+    const label = form.querySelector("[data-milestone-total]");
+    if (label) label.textContent = `${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+    const limit = testnetBudgetLimit(currency);
+    const container = form.querySelector("[data-milestone-editor]");
+    if (container) container.dataset.overLimit = String(Boolean(limit && total > limit));
+    return total;
+  }
+
+  function setDeliveryMode(form, mode, drafts = []) {
+    const milestoneBased = mode === "MILESTONES";
+    const selected = form.querySelector(`[name="deliveryMode"][value="${milestoneBased ? "MILESTONES" : "SINGLE"}"]`);
+    if (selected instanceof HTMLInputElement) selected.checked = true;
+    const single = form.querySelector("[data-single-delivery]");
+    const schedule = form.querySelector("[data-milestone-delivery]");
+    if (single) single.hidden = milestoneBased;
+    if (schedule) schedule.hidden = !milestoneBased;
+    const singleBudget = form.elements.namedItem("singleBudget");
+    if (singleBudget instanceof HTMLInputElement) {
+      singleBudget.required = !milestoneBased;
+      singleBudget.disabled = milestoneBased;
+    }
+    schedule?.querySelectorAll("input, select, textarea").forEach(control => { control.disabled = !milestoneBased; });
+    const hint = form.querySelector("[data-delivery-mode-hint]");
+    if (hint) hint.textContent = milestoneBased
+      ? "Every allocation becomes an independently funded Algorand escrow. Each releases only against that milestone's approved Fabric evidence."
+      : "One complete delivery creates one Algorand escrow and releases the full value only against the final approved Fabric evidence.";
+    const editor = form.querySelector("[data-milestone-editor]");
+    if (milestoneBased && (drafts.length || !editor?.querySelector(".milestone-input-card"))) {
+      renderMilestoneEditor(form, drafts.length || form.elements.namedItem("milestoneCount")?.value || 2, drafts);
+    }
+    updateMilestoneTotal(form);
+  }
+
+  function renderMilestoneEditor(form, requestedCount, drafts = milestoneDraftsFromForm(form)) {
+    const container = form.querySelector("[data-milestone-editor]");
+    if (!container) return;
+    const count = Math.max(1, Math.min(5, Number(requestedCount) || 1));
+    const finalDate = form.elements.namedItem("deliveryDate")?.value ?? "";
+    const currency = form.elements.namedItem("fundingCurrency")?.value ?? "";
+    const control = form.elements.namedItem("milestoneCount");
+    if (control) control.value = String(count);
+    container.innerHTML = `<header><div><small>PROJECT RELEASE SCHEDULE</small><h3>${count} MILESTONE ESCROW${count === 1 ? "" : "S"}</h3></div><span>ALLOCATIONS MUST EQUAL PROJECT TOTAL</span></header><div>${Array.from({ length: count }, (_, index) => {
+      const ordinal = index + 1;
+      const item = drafts[index] ?? {};
+      return `<article class="milestone-input-card"><header><i>${String(ordinal).padStart(2, "0")}</i><div><small>INDEPENDENT RELEASE</small><b>MILESTONE ${ordinal}</b></div></header><label><span>TITLE</span><input name="milestoneTitle${ordinal}" required minlength="3" value="${escape(item.title ?? "")}" placeholder="e.g. Architecture and acceptance tests"></label><label><span>WHAT MUST BE COMPLETED</span><textarea name="milestoneDescription${ordinal}" required minlength="10" placeholder="Describe the work completed in this milestone">${escape(item.description ?? "")}</textarea></label><label><span>DELIVERABLE / PROOF FILE</span><input name="milestoneDeliverable${ordinal}" required minlength="3" value="${escape(item.deliverable ?? "")}" placeholder="e.g. Signed architecture PDF and test report"></label><label><span>MILESTONE ACCEPTANCE CHECKS</span><textarea name="milestoneAcceptance${ordinal}" required minlength="5" placeholder="One objective check per line">${escape(Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria.join("\n") : item.acceptanceCriteria ?? "")}</textarea></label><div class="field-grid"><label><span>ESCROW ALLOCATION · ${escape(currency)}</span><input name="milestoneAmount${ordinal}" data-milestone-amount type="number" min="0.01" step="0.01" required value="${escape(item.amount ?? "")}" placeholder="1.00"></label><label><span>DUE DATE</span><input name="milestoneDueDate${ordinal}" type="date" required value="${escape(item.dueDate ?? finalDate)}"></label></div></article>`;
+    }).join("")}</div>`;
+    container.querySelectorAll("[data-milestone-amount]").forEach(input => input.addEventListener("input", () => updateMilestoneTotal(form)));
+    updateMilestoneTotal(form);
+  }
+
+  function jobBriefPayload(form) {
+    return {
+      title: form.elements.namedItem("title")?.value,
+      description: form.elements.namedItem("description")?.value,
+      acceptanceCriteria: lines(form.elements.namedItem("acceptanceCriteria")?.value),
+      skills: String(form.elements.namedItem("skills")?.value ?? "").split(",").map(value => value.trim()).filter(Boolean),
+      budget: updateMilestoneTotal(form),
+      payerCountry: form.elements.namedItem("payerCountry")?.value,
+      fundingCurrency: form.elements.namedItem("fundingCurrency")?.value,
+      deliveryDate: form.elements.namedItem("deliveryDate")?.value,
+      deliveryMode: form.elements.namedItem("deliveryMode")?.value,
+      milestones: milestoneDraftsFromForm(form),
+    };
+  }
+
+  async function downloadJobBrief(form) {
+    if (!form.reportValidity()) return;
+    const response = await fetch("/api/workflow/job-brief.pdf", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-anchor-role": role },
+      body: JSON.stringify(jobBriefPayload(form)),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.error?.message ?? `PDF generation failed (${response.status})`);
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "anchor-company-job-brief.pdf";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
   function bindActions() {
     document.querySelectorAll("[data-inspect-stage]").forEach(button => button.addEventListener("click", () => { inspectedStage = button.dataset.inspectStage; render(); document.querySelector(".portal-main")?.scrollTo({ top: 0, behavior: "smooth" }); }));
     $("[data-return-live]")?.addEventListener("click", () => { inspectedStage = null; render(); document.querySelector(".portal-main")?.scrollTo({ top: 0, behavior: "smooth" }); });
@@ -984,6 +1272,37 @@
         }
       }
       if (hint && limit) hint.textContent = `PUBLIC TESTNET FAUCET LIMIT · MAX ${limit} ${expected} FOR THIS LIVE ON-CHAIN DEMO. USE LOCALNET FOR LARGE NOTIONAL VALUES.`;
+      const form = country.form;
+      if (form?.dataset.workspaceForm === "job") {
+        const singleBudget = form.elements.namedItem("singleBudget");
+        if (singleBudget instanceof HTMLInputElement) {
+          if (limit) singleBudget.max = String(limit);
+          else singleBudget.removeAttribute("max");
+        }
+        if (form.elements.namedItem("deliveryMode")?.value === "MILESTONES") renderMilestoneEditor(form, form.elements.namedItem("milestoneCount")?.value);
+        else updateMilestoneTotal(form);
+      }
+    }));
+    document.querySelectorAll("[data-delivery-mode]").forEach(control => {
+      const form = control.form;
+      if (!form) return;
+      control.addEventListener("change", () => setDeliveryMode(form, control.value));
+    });
+    document.querySelectorAll("[data-milestone-count]").forEach(control => {
+      const form = control.form;
+      if (!form) return;
+      control.addEventListener("change", () => renderMilestoneEditor(form, control.value));
+    });
+    document.querySelectorAll('[data-workspace-form="job"]').forEach(form => setDeliveryMode(form, form.elements.namedItem("deliveryMode")?.value ?? "SINGLE"));
+    document.querySelectorAll("[data-download-job-brief]").forEach(button => button.addEventListener("click", async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        await downloadJobBrief(button.form);
+        setStatus(`${button.form?.elements.namedItem("deliveryMode")?.value === "MILESTONES" ? "MILESTONE" : "SINGLE-DELIVERY"} JOB BRIEF PDF GENERATED · READY TO RE-UPLOAD_`, "success");
+      } catch (error) {
+        setStatus(`PDF GENERATION FAILED · ${error.message}`, "error");
+      } finally { busy = false; }
     }));
     document.querySelectorAll("[data-workspace-form]").forEach(form => {
       form.addEventListener("input", () => { form.dataset.dirty = "true"; });
@@ -1054,10 +1373,19 @@
         populate(form, "description", fields.description);
         populate(form, "acceptanceCriteria", fields.acceptanceCriteria);
         populate(form, "skills", fields.skills);
-        populate(form, "budget", fields.budget ?? fields.budgetAmount ?? fields.budgetPln);
         populate(form, "deliveryDate", fields.deliveryDate);
         populate(form, "payerCountry", fields.payerCountry ?? fields.companyCountry ?? fields.originCountry);
         populate(form, "fundingCurrency", fields.fundingCurrency ?? fields.currency);
+        if (Array.isArray(fields.milestones) && fields.milestones.length > 1) {
+          setDeliveryMode(form, "MILESTONES", fields.milestones);
+        } else if (Array.isArray(fields.milestones) && fields.milestones.length === 1) {
+          populate(form, "singleBudget", fields.milestones[0].amount ?? fields.budget ?? fields.budgetAmount ?? fields.budgetPln);
+          setDeliveryMode(form, "SINGLE");
+        } else if (fields.budget ?? fields.budgetAmount ?? fields.budgetPln) {
+          const amount = fields.budget ?? fields.budgetAmount ?? fields.budgetPln;
+          populate(form, "singleBudget", amount);
+          setDeliveryMode(form, "SINGLE");
+        }
       } else if (input.dataset.extractPurpose === "FREELANCER_PROPOSAL") {
         populate(form, "proposedPrice", fields.proposedPrice ?? fields.proposedPriceAmount ?? fields.proposedPricePln);
         populate(form, "deliveryDays", fields.deliveryDays);
@@ -1104,7 +1432,18 @@
       if (publicLimit && Number(data.get("budget")) > publicLimit) {
         return setStatus(`PUBLIC TESTNET FAUCET LIMIT · USE ${publicLimit} ${data.get("fundingCurrency")} OR LESS, OR SWITCH TO LOCALNET FOR LARGE NOTIONALS_`, "error");
       }
-      return executeByIds(["job"], { title: data.get("title"), description: data.get("description"), acceptanceCriteria: data.get("acceptanceCriteria"), skills: String(data.get("skills")).split(",").map(value => value.trim()).filter(Boolean), deliveryDate: data.get("deliveryDate"), payerCountry: data.get("payerCountry"), fundingCurrency: data.get("fundingCurrency"), budget: { amountMinor: String(Math.round(Number(data.get("budget")) * 100)), currency: data.get("fundingCurrency"), scale: 2 } });
+      const milestoneDrafts = milestoneDraftsFromForm(event.currentTarget);
+      const total = updateMilestoneTotal(event.currentTarget);
+      if (publicLimit && total > publicLimit) return setStatus(`PUBLIC TESTNET FAUCET LIMIT · MILESTONE TOTAL MUST BE ${publicLimit} ${data.get("fundingCurrency")} OR LESS_`, "error");
+      const milestonePayload = milestoneDrafts.map((item) => ({
+        title: item.title,
+        description: item.description,
+        deliverable: item.deliverable,
+        acceptanceCriteria: item.acceptanceCriteria,
+        amount: { amountMinor: String(Math.round(Number(item.amount) * 100)), currency: data.get("fundingCurrency"), scale: 2 },
+        dueDate: item.dueDate,
+      }));
+      return executeByIds(["job"], { title: data.get("title"), description: data.get("description"), acceptanceCriteria: data.get("acceptanceCriteria"), skills: String(data.get("skills")).split(",").map(value => value.trim()).filter(Boolean), deliveryDate: data.get("deliveryDate"), payerCountry: data.get("payerCountry"), fundingCurrency: data.get("fundingCurrency"), budget: { amountMinor: String(Math.round(total * 100)), currency: data.get("fundingCurrency"), scale: 2 }, ...(data.get("deliveryMode") === "MILESTONES" ? { milestones: milestonePayload } : {}) });
     }
     if (kind === "apply") {
       if (countryCurrencies[data.get("payoutCountry")] !== data.get("payoutCurrency")) return setStatus("PAYOUT COUNTRY AND PAYOUT CURRENCY DO NOT MATCH_", "error");
@@ -1128,9 +1467,9 @@
         routeOptimizerUntil = Date.now() + routeOptimizerHoldMilliseconds;
         transferAnimationUntil = Date.now() + routeOptimizerHoldMilliseconds + 6_000;
         clearTimeout(routeOptimizerTimer);
-        routeOptimizerTimer = setTimeout(() => { if (!busy) render(); }, routeOptimizerHoldMilliseconds + 100);
+        routeOptimizerTimer = setTimeout(renderTimedWorkflowTransition, routeOptimizerHoldMilliseconds + 100);
         clearTimeout(transferAnimationTimer);
-        transferAnimationTimer = setTimeout(() => { if (!busy) render(); }, routeOptimizerHoldMilliseconds + 6_100);
+        transferAnimationTimer = setTimeout(renderTimedWorkflowTransition, routeOptimizerHoldMilliseconds + 6_100);
       }
       await refresh({ follow: true });
       setStatus(`${step.label} COMPLETE · RESULT PERSISTED_`, "success");
@@ -1148,22 +1487,40 @@
     // controls that the extractor is about to populate.
     if (!follow && busy) return;
     if (!follow && (document.activeElement?.closest("[data-workspace-form]") || document.querySelector('[data-workspace-form][data-dirty="true"]'))) return;
+    const modelChanged = JSON.stringify(nextModel) !== JSON.stringify(model);
+    let visualStateChanged = false;
     model = nextModel;
+    syncNotifications();
     const nextPhase = model.run?.phase;
     const paymentId = String(results().settlementTimeline?.payment?.id ?? results().payment?.id ?? model.run?.id ?? "completed-deal");
     const routeDecision = results().settlementTimeline?.settlementRoute;
     if (routeDecision?.routeHash && routeOptimizerPaymentId !== paymentId) {
       routeOptimizerPaymentId = paymentId;
+      visualStateChanged = true;
       routeOptimizerUntil = Math.max(routeOptimizerUntil, Date.now() + routeOptimizerHoldMilliseconds);
       clearTimeout(routeOptimizerTimer);
-      routeOptimizerTimer = setTimeout(() => { if (!busy) render(); }, routeOptimizerHoldMilliseconds + 100);
+      routeOptimizerTimer = setTimeout(renderTimedWorkflowTransition, routeOptimizerHoldMilliseconds + 100);
+    }
+    const releasedTimeline = results().lastSettlementTimeline ?? results().settlementTimeline;
+    const releasedPayment = releasedTimeline?.payment;
+    if (releasedPayment?.state === "COMPLETED" && releasedPayment.id !== transferVisualizationPaymentId) {
+      transferVisualizationPaymentId = releasedPayment.id;
+      visualStateChanged = true;
+      routeOptimizerUntil = Math.max(routeOptimizerUntil, Date.now() + routeOptimizerHoldMilliseconds);
+      transferAnimationUntil = Math.max(transferAnimationUntil, routeOptimizerUntil + 6_000);
+      clearTimeout(routeOptimizerTimer);
+      routeOptimizerTimer = setTimeout(renderTimedWorkflowTransition, Math.max(0, routeOptimizerUntil - Date.now()) + 100);
+      clearTimeout(transferAnimationTimer);
+      transferAnimationTimer = setTimeout(renderTimedWorkflowTransition, Math.max(0, transferAnimationUntil - Date.now()) + 100);
     }
     if (nextPhase !== "COMPLETED") {
+      visualStateChanged ||= completedPaymentId !== null || completedView !== "workflow";
       completedPaymentId = null;
       completedView = "workflow";
       clearTimeout(analyticsRevealTimer);
     } else if (completedPaymentId !== paymentId) {
       completedPaymentId = paymentId;
+      visualStateChanged = true;
       if (previousPhase && previousPhase !== "COMPLETED") {
         completedView = "completion";
         clearTimeout(analyticsRevealTimer);
@@ -1177,7 +1534,10 @@
         completedView = "analytics";
       }
     }
-    render();
+    // Polling keeps both portals synchronized, but replacing identical markup
+    // every three seconds restarts entrance effects and visibly flashes the
+    // page. Render only when persisted data or an intentional view state moves.
+    if (follow || modelChanged || visualStateChanged) render();
   }
 
   async function reset() {
@@ -1186,7 +1546,9 @@
     completedPaymentId = null;
     completedView = "workflow";
     routeOptimizerPaymentId = null;
+    transferVisualizationPaymentId = null;
     routeOptimizerUntil = 0;
+    transferAnimationUntil = 0;
     clearTimeout(routeOptimizerTimer);
     clearTimeout(analyticsRevealTimer);
     await request("/api/workflow/reset", { method: "POST" });
@@ -1198,6 +1560,27 @@
     if (!initialized) {
       initialized = true;
       $("#workflowReset")?.addEventListener("click", reset);
+      $("#notificationButton")?.addEventListener("click", () => {
+        const popover = $("#notificationPopover");
+        if (popover?.hidden) openNotificationCenter();
+        else closeNotificationCenter({ restoreFocus: true });
+      });
+      $("#notificationClose")?.addEventListener("click", () => closeNotificationCenter({ restoreFocus: true }));
+      $("#notificationMarkRead")?.addEventListener("click", () => {
+        const state = notificationState();
+        state.readIds = [...new Set([...state.readIds, ...state.items.map(item => item.id)])];
+        saveNotificationState(state);
+        renderNotificationCenter();
+      });
+      $("#notificationToast")?.addEventListener("click", openNotificationCenter);
+      document.addEventListener("click", event => {
+        const popover = $("#notificationPopover");
+        if (popover?.hidden || popover?.contains(event.target) || $("#notificationButton")?.contains(event.target)) return;
+        closeNotificationCenter();
+      });
+      document.addEventListener("keydown", event => {
+        if (event.key === "Escape" && !$("#notificationPopover")?.hidden) closeNotificationCenter({ restoreFocus: true });
+      });
       setInterval(() => { if (!busy && $("#portalWorld")?.classList.contains("open")) refresh().catch(() => {}); }, 3000);
     }
     try {
@@ -1206,5 +1589,5 @@
     } catch (error) { setStatus(`WORKSPACE UNAVAILABLE · ${error.message}`, "error"); }
   }
 
-  window.OptiWorkWorkflow = { init, setRole(nextRole) { role = nextRole === "FREELANCER" ? "FREELANCER" : "COMPANY"; inspectedStage = null; if (initialized) render(); } };
+  window.OptiWorkWorkflow = { init, setRole(nextRole) { role = nextRole === "FREELANCER" ? "FREELANCER" : "COMPANY"; inspectedStage = null; closeNotificationCenter(); if (initialized) { syncNotifications(); render(); } } };
 })();

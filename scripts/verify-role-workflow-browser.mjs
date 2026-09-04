@@ -15,6 +15,8 @@ const freelancerCountry = process.env.ANCHOR_FREELANCER_COUNTRY ?? 'IN';
 const payoutCurrency = process.env.ANCHOR_PAYOUT_CURRENCY ?? 'INR';
 const jobBudget = process.env.ANCHOR_JOB_BUDGET ?? '12000';
 const proposalPriceAmount = process.env.ANCHOR_PROPOSAL_PRICE ?? '11800';
+const milestoneOneAmount = (Math.round(Number(jobBudget) * 40) / 100).toFixed(2);
+const milestoneTwoAmount = (Number(jobBudget) - Number(milestoneOneAmount)).toFixed(2);
 const freelancerUserId = process.env.ANCHOR_FREELANCER_USER_ID ?? 'USER-IN-FREELANCER';
 const orderedRoute = `${companyCountry} → ${freelancerCountry}`;
 const countryNames = { PL: 'Poland', IN: 'India', GB: 'United Kingdom', DE: 'Germany', RU: 'Russia', KP: 'North Korea' };
@@ -59,6 +61,20 @@ await writeFile(jobDraft, [
   'Skills: TypeScript, PostgreSQL, Hyperledger Fabric, Algorand',
   `Budget ${fundingCurrency}: ${jobBudget}`,
   'Delivery date: 2026-10-31',
+  `Payer country: ${countryNames[companyCountry] ?? companyCountry}`,
+  `Funding currency: ${fundingCurrency}`,
+  'Milestone 1 title: Architecture and proof model',
+  'Milestone 1 description: Define the reconciliation invariants, ledger boundaries and executable acceptance plan.',
+  'Milestone 1 deliverable: Architecture PDF and acceptance-test specification',
+  'Milestone 1 acceptance criteria: Trust boundaries are documented; test cases map to every invariant',
+  `Milestone 1 amount: ${milestoneOneAmount}`,
+  'Milestone 1 due date: 2026-10-15',
+  'Milestone 2 title: Working engine and evidence pack',
+  'Milestone 2 description: Implement the approved design and prove restart-safe cross-ledger reconciliation.',
+  'Milestone 2 deliverable: Source archive, test report and operations guide',
+  'Milestone 2 acceptance criteria: All integration tests pass; Fabric and Algorand references reconcile',
+  `Milestone 2 amount: ${milestoneTwoAmount}`,
+  'Milestone 2 due date: 2026-10-31',
 ].join('\n'));
 await writeFile(proposalDraft, [
   `Proposed price ${fundingCurrency}: ${proposalPriceAmount}`,
@@ -238,6 +254,29 @@ try {
     currencies: document.querySelectorAll('[data-workspace-form="job"] [name="fundingCurrency"] option').length
   })`);
   if (jobRouteControls.countries !== 6 || jobRouteControls.currencies !== 6) throw new Error(`Company job route controls are incomplete: ${JSON.stringify(jobRouteControls)}`);
+  const defaultReleaseMode = await company.evaluate(`({
+    selected: document.querySelector('[data-workspace-form="job"] [name="deliveryMode"]:checked')?.value,
+    singleVisible: document.querySelector('[data-single-delivery]')?.hidden === false,
+    milestoneHidden: document.querySelector('[data-milestone-delivery]')?.hidden === true,
+    milestoneFields: document.querySelectorAll('[data-milestone-editor] .milestone-input-card').length,
+    singleBudgetRequired: document.querySelector('[name="singleBudget"]')?.required === true
+  })`);
+  if (defaultReleaseMode.selected !== 'SINGLE' || !defaultReleaseMode.singleVisible || !defaultReleaseMode.milestoneHidden
+    || defaultReleaseMode.milestoneFields !== 0 || !defaultReleaseMode.singleBudgetRequired) {
+    throw new Error(`Single-delivery mode is not the clean default: ${JSON.stringify(defaultReleaseMode)}`);
+  }
+  await company.click('[name="deliveryMode"][value="MILESTONES"]');
+  const milestoneReleaseMode = await company.evaluate(`({
+    selected: document.querySelector('[data-workspace-form="job"] [name="deliveryMode"]:checked')?.value,
+    singleHidden: document.querySelector('[data-single-delivery]')?.hidden === true,
+    milestoneVisible: document.querySelector('[data-milestone-delivery]')?.hidden === false,
+    milestoneFields: document.querySelectorAll('[data-milestone-editor] .milestone-input-card').length,
+    singleBudgetDisabled: document.querySelector('[name="singleBudget"]')?.disabled === true
+  })`);
+  if (milestoneReleaseMode.selected !== 'MILESTONES' || !milestoneReleaseMode.singleHidden || !milestoneReleaseMode.milestoneVisible
+    || milestoneReleaseMode.milestoneFields !== 2 || !milestoneReleaseMode.singleBudgetDisabled) {
+    throw new Error(`Milestone release mode did not activate explicitly: ${JSON.stringify(milestoneReleaseMode)}`);
+  }
   await company.uploadFile('[data-extract-purpose="JOB_BRIEF"]', jobDraft);
   await company.waitFor('["success", "warning", "error"].includes(document.querySelector("[data-extraction-status]")?.dataset.tone)', 'Company brief extraction returned no final status.', 45_000);
   const companyExtraction = await company.evaluate('({ tone: document.querySelector("[data-extraction-status]")?.dataset.tone, text: document.querySelector("[data-extraction-status]")?.textContent })');
@@ -252,9 +291,21 @@ try {
     description: `Deliver a production-shaped TypeScript reconciliation engine, automated tests, operating guide, and proof dashboard for the ${companyCountry} to ${freelancerCountry} corridor.`,
     acceptanceCriteria: 'All integration tests pass\nFabric and Algorand references reconcile\nNo personal data appears on either ledger',
     skills: 'TypeScript, PostgreSQL, Hyperledger Fabric, Algorand',
-    budget: jobBudget, deliveryDate: '2026-10-31', payerCountry: companyCountry, fundingCurrency,
+    milestoneCount: '2',
+    milestoneTitle1: 'Architecture and proof model',
+    milestoneDescription1: 'Define the reconciliation invariants, ledger boundaries and executable acceptance plan.',
+    milestoneDeliverable1: 'Architecture PDF and acceptance-test specification',
+    milestoneAcceptance1: 'Trust boundaries are documented\nTest cases map to every invariant',
+    milestoneAmount1: milestoneOneAmount, milestoneDueDate1: '2026-10-15',
+    milestoneTitle2: 'Working engine and evidence pack',
+    milestoneDescription2: 'Implement the approved design and prove restart-safe cross-ledger reconciliation.',
+    milestoneDeliverable2: 'Source archive, test report and operations guide',
+    milestoneAcceptance2: 'All integration tests pass\nFabric and Algorand references reconcile',
+    milestoneAmount2: milestoneTwoAmount, milestoneDueDate2: '2026-10-31',
+    deliveryDate: '2026-10-31', payerCountry: companyCountry, fundingCurrency,
   });
   await freelancer.waitFor('document.querySelector("[data-workspace-form=apply]") !== null', 'Published job did not appear for the Freelancer.', 20_000);
+  await freelancer.waitFor('document.querySelector("#notificationList")?.innerText.includes("NEW OPPORTUNITY") === true && Number(document.querySelector("#notificationBadge")?.textContent) > 0', 'Freelancer did not receive the new-opportunity notification.', 15_000);
   const payoutCountryOptions = await freelancer.evaluate(`Array.from(document.querySelector('[name="payoutCountry"]')?.options ?? []).map(option => option.value).filter(Boolean).sort()`);
   if (JSON.stringify(payoutCountryOptions) !== JSON.stringify(supportedCountryCodes)) throw new Error(`Freelancer country selector is incomplete: ${JSON.stringify(payoutCountryOptions)}`);
   const visibleOpportunity = await freelancer.evaluate(`document.querySelector('#workspaceAction')?.innerText ?? ''`);
@@ -285,6 +336,7 @@ try {
     approach: 'Start with executable acceptance tests, implement reconciliation invariants, and provide signed evidence for every milestone.',
     coverLetter: 'I build TypeScript settlement services and evidence-led approval systems for regulated cross-border workflows.',
   });
+  await company.waitFor('document.querySelector("#notificationList")?.innerText.includes("NEW FREELANCER PROPOSAL") === true && Number(document.querySelector("#notificationBadge")?.textContent) > 0', 'Company did not receive the new-proposal notification.', 15_000);
   await company.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.screening?.status === 'COMPLETED')`, 'Screening did not complete.', 60_000);
   await company.waitFor('document.querySelectorAll("[data-select-application]").length === 3', 'Three selectable freelancer proposals did not render.', 15_000);
   const screenedState = await company.state();
@@ -296,6 +348,7 @@ try {
     button.click(); return true;
   })()`);
   if (!selected) throw new Error('Company could not select the signed-in Freelancer proposal.');
+  await freelancer.waitFor('document.querySelector("#notificationList")?.innerText.includes("YOU WERE SELECTED") === true', 'Freelancer did not receive the selection notification.', 15_000);
 
   await company.waitFor('document.querySelector("[data-workspace-form=terms]") !== null', 'Sourced agreement generation control did not render.', 15_000);
   await company.submit('[data-workspace-form="terms"]', {});
@@ -306,6 +359,12 @@ try {
   await freelancer.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.phase === 'AWAITING_DELIVERY')`, 'Policy, FX, compliance, and escrow automation did not finish.', 150_000);
   const funded = await freelancer.state();
   if (!funded.run?.results?.binding?.dealId || funded.run?.automation?.status !== 'COMPLETED') throw new Error('No confirmed Algorand escrow binding was returned.');
+  if (funded.run?.results?.milestonePayments?.length !== 2
+    || new Set(funded.run.results.milestonePayments.map(entry => entry.binding?.dealId ?? entry.timeline?.binding?.dealId)).size !== 2) {
+    throw new Error(`Two independent milestone escrows were not funded: ${JSON.stringify(funded.run?.results?.milestonePayments)}`);
+  }
+  await company.waitFor('document.querySelector("#notificationList")?.innerText.includes("MONEY DEDUCTED & ESCROWED") === true', 'Company did not receive the funding-debit notification.', 15_000);
+  await freelancer.waitFor('document.querySelector("#notificationList")?.innerText.includes("ESCROW SECURED") === true', 'Freelancer did not receive the secured-escrow notification.', 15_000);
   if (funded.run?.results?.regulatoryPlan?.orderedRoute !== orderedRoute
     || funded.run?.results?.regulatoryPlan?.outcome !== 'PASSED'
     || funded.run?.results?.regulatoryPlan?.categories?.length !== 5
@@ -313,40 +372,45 @@ try {
     throw new Error(`Deal-derived regulation/FX trace is incomplete: ${JSON.stringify(funded.run?.results?.regulatoryPlan)}`);
   }
 
-  await freelancer.waitFor('document.querySelector("[data-workspace-form=submit]") !== null', 'Deliverable form did not render.', 15_000);
-  const documentNode = await freelancer.command('DOM.getDocument', { depth: -1, pierce: true });
-  const fileNode = await freelancer.command('DOM.querySelector', { nodeId: documentNode.root.nodeId, selector: '[data-workspace-form="submit"] input[type="file"]' });
-  if (!fileNode.nodeId) throw new Error('Freelancer file input was not found.');
-  await freelancer.command('DOM.setFileInputFiles', { nodeId: fileNode.nodeId, files: [deliverable] });
-  await freelancer.submit('[data-workspace-form="submit"]', {
-    note: 'Complete reconciliation engine, automated test evidence, deployment notes, and reviewer walkthrough.',
-  });
-  await company.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.phase === 'AWAITING_WORK_APPROVAL')`, 'Fabric submission and validation did not reach Company approval.', 90_000);
-  await company.waitFor('document.querySelector("[data-approve-work]") !== null', 'Company approval control did not render.', 15_000);
-  await company.click('[data-approve-work]');
-  await company.waitFor('document.querySelector("[data-route-optimizer]") !== null', 'Live settlement router screen did not render after Fabric approval.', 15_000);
-  await company.waitFor('document.querySelector("[data-route-optimizer][data-ready=true]") !== null', 'Persisted provider decision did not reach the live route screen.', 45_000);
-  const routeScene = await company.evaluate(`({
-    stages: document.querySelectorAll('[data-route-optimizer] .route-optimizer-path li').length,
-    candidates: document.querySelectorAll('[data-route-optimizer] .settlement-router-panel article').length,
-    selected: document.querySelectorAll('[data-route-optimizer] .settlement-router-panel article[data-selected="true"]').length,
-    rejected: document.querySelectorAll('[data-route-optimizer] .settlement-router-panel article[data-eligible="false"]').length,
-    text: document.querySelector('[data-route-optimizer]')?.innerText ?? ''
-  })`);
-  if (routeScene.stages !== 6 || routeScene.candidates !== 3 || routeScene.selected !== 1 || routeScene.rejected < 1 || !/AUTHORIZED ROUTE HASH/iu.test(routeScene.text)) {
-    throw new Error(`Live route optimizer scene is incomplete: ${JSON.stringify(routeScene)}`);
+  for (let milestoneIndex = 0; milestoneIndex < 2; milestoneIndex += 1) {
+    await freelancer.waitFor('document.querySelector("[data-workspace-form=submit]") !== null', `Milestone ${milestoneIndex + 1} deliverable form did not render.`, 35_000);
+    await freelancer.uploadFile('[data-workspace-form="submit"] input[type="file"]', deliverable);
+    await freelancer.submit('[data-workspace-form="submit"]', {
+      note: `Complete evidence pack for milestone ${milestoneIndex + 1}, including tests and reviewer instructions.`,
+    });
+    await company.waitFor(`document.querySelector("#notificationList")?.innerText.includes("WORK SUBMITTED") === true`, `Company did not receive the milestone ${milestoneIndex + 1} delivery notification.`, 15_000);
+    await company.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.phase === 'AWAITING_WORK_APPROVAL')`, `Milestone ${milestoneIndex + 1} did not reach Company approval.`, 90_000);
+    await company.waitFor('document.querySelector("[data-approve-work]") !== null', `Milestone ${milestoneIndex + 1} approval control did not render.`, 20_000);
+    await company.click('[data-approve-work]');
+    await company.waitFor('document.querySelector("[data-route-optimizer]") !== null', 'Live settlement router screen did not render after Fabric approval.', 15_000);
+    await company.waitFor('document.querySelector("[data-route-optimizer][data-ready=true]") !== null', 'Persisted provider decision did not reach the live route screen.', 45_000);
+    if (milestoneIndex === 0) {
+      const routeScene = await company.evaluate(`({
+        stages: document.querySelectorAll('[data-route-optimizer] .route-optimizer-path li').length,
+        candidates: document.querySelectorAll('[data-route-optimizer] .settlement-router-panel article').length,
+        selected: document.querySelectorAll('[data-route-optimizer] .settlement-router-panel article[data-selected="true"]').length,
+        rejected: document.querySelectorAll('[data-route-optimizer] .settlement-router-panel article[data-eligible="false"]').length,
+        text: document.querySelector('[data-route-optimizer]')?.innerText ?? ''
+      })`);
+      if (routeScene.stages !== 6 || routeScene.candidates !== 3 || routeScene.selected !== 1 || routeScene.rejected < 1 || !/AUTHORIZED ROUTE HASH/iu.test(routeScene.text)) {
+        throw new Error(`Live route optimizer scene is incomplete: ${JSON.stringify(routeScene)}`);
+      }
+      // Public TestNet confirmation can take longer than a normal block window
+      // when the algod provider is under load. The route view remains visible
+      // while release is pending and hands off to the transfer scene only after
+      // the persisted completion record reaches the browser.
+      await company.waitFor('document.querySelector("[data-transfer-screen]") !== null', 'Post-routing money transfer screen did not render.', 75_000);
+      await company.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.phase === 'AWAITING_DELIVERY' && value.run?.results?.activeMilestoneIndex === 1)`, 'The first release did not advance to milestone two.', 150_000);
+    } else {
+      await company.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.phase === 'COMPLETED')`, 'The final milestone release did not complete the deal.', 150_000);
+    }
   }
-  await company.waitFor('document.querySelector("[data-transfer-screen]") !== null', 'Post-routing money transfer screen did not render.', 30_000);
-  const transferScene = await company.evaluate(`({
-    company: document.querySelector('[data-transfer-screen] img[alt="Company representative"]') !== null,
-    freelancer: document.querySelector('[data-transfer-screen] img[alt="Freelancer"]') !== null,
-    packets: document.querySelectorAll('[data-transfer-screen] .transfer-lane i').length,
-    text: document.querySelector('[data-transfer-screen]')?.innerText ?? ''
-  })`);
-  if (!transferScene.company || !transferScene.freelancer || transferScene.packets !== 9 || !/ALGORAND ESCROW/iu.test(transferScene.text)) {
-    throw new Error(`Money transfer scene is incomplete: ${JSON.stringify(transferScene)}`);
+
+  const finalMilestones = await company.state();
+  if (finalMilestones.run?.results?.completedMilestoneCount !== 2
+    || finalMilestones.run?.results?.milestonePayments?.some(entry => (entry.timeline?.payment ?? entry.payment)?.state !== 'COMPLETED')) {
+    throw new Error(`Not every milestone reached a confirmed release: ${JSON.stringify(finalMilestones.run?.results?.milestonePayments)}`);
   }
-  await company.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.phase === 'COMPLETED')`, 'Fabric-authorized Algorand release did not complete.', 150_000);
 
   await company.waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'Company journey rail did not complete.', 15_000);
   await freelancer.waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'Freelancer journey rail did not complete.', 15_000);
@@ -354,42 +418,71 @@ try {
   await freelancer.waitFor('document.querySelector("[data-transfer-screen][data-state=completed] .deal-complete-confirmation") !== null', 'Freelancer payment confirmation did not render the completed release.', 15_000);
   await company.waitFor('document.querySelector("[data-settlement-analytics] .settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Company did not advance from payment confirmation to the fresh reconciled analytics page.', 15_000);
   await freelancer.waitFor('document.querySelector("[data-settlement-analytics] .settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Freelancer did not advance from payment confirmation to the fresh reconciled analytics page.', 15_000);
+  await company.waitFor('document.querySelector("#notificationList")?.innerText.includes("PAYMENT RELEASED") === true', 'Company did not receive the payment-release notification.', 15_000);
+  await freelancer.waitFor('document.querySelector("#notificationList")?.innerText.includes("MILESTONE PAYMENT RECEIVED") === true', 'Freelancer did not receive the milestone payout notification.', 15_000);
+  const notificationInteraction = await freelancer.evaluate(`(() => {
+    const button = document.querySelector('#notificationButton');
+    if (!(button instanceof HTMLButtonElement)) return null;
+    const unreadBefore = Number(document.querySelector('#notificationBadge')?.textContent ?? 0);
+    button.click();
+    return {
+      unreadBefore,
+      expanded: button.getAttribute('aria-expanded'),
+      panelOpen: document.querySelector('#notificationPopover')?.hidden === false,
+      badgeCleared: document.querySelector('#notificationBadge')?.hidden === true,
+      alertCount: document.querySelectorAll('#notificationList article').length,
+    };
+  })()`);
+  if (!notificationInteraction?.unreadBefore || notificationInteraction.expanded !== 'true' || !notificationInteraction.panelOpen
+    || !notificationInteraction.badgeCleared || notificationInteraction.alertCount < 4) {
+    throw new Error(`Notification inbox interaction is incomplete: ${JSON.stringify(notificationInteraction)}`);
+  }
   const analyticsLayout = await company.evaluate(`({
     view: document.querySelector('#portalWorkflow')?.dataset.view,
     transferStillVisible: document.querySelector('[data-transfer-screen]') !== null,
     railVisible: document.querySelector('.stage-rail')?.offsetParent !== null,
     workspaceHeadingVisible: document.querySelector('.workspace-heading')?.offsetParent !== null,
-    newDealAtBottom: document.querySelector('.settlement-receipt > .settlement-next-deal:last-child [data-start-new-deal]') !== null
+    newDealAtBottom: document.querySelector('.settlement-receipt > .analytics-minimal-footer:last-child [data-start-new-deal]') !== null
   })`);
   if (analyticsLayout.view !== 'analytics' || analyticsLayout.transferStillVisible || analyticsLayout.railVisible || analyticsLayout.workspaceHeadingVisible || !analyticsLayout.newDealAtBottom) {
     throw new Error(`Completed deal did not become a clean analytics destination: ${JSON.stringify(analyticsLayout)}`);
   }
   const settlementReceipt = await company.evaluate(`({
-    conservationChecks: Array.from(document.querySelectorAll('.conservation-proof article b')).map(element => element.textContent),
+    sections: Array.from(document.querySelectorAll('[data-settlement-analytics] [data-analytics-section]')).map(element => ({ id: element.dataset.analyticsSection, text: element.innerText })),
     analyticsCards: document.querySelectorAll('.settlement-kpis article').length,
-    proofStages: document.querySelectorAll('.settlement-journey article[data-complete="true"]').length,
-    routerCandidates: document.querySelectorAll('.settlement-router-panel article').length,
-    selectedRoutes: document.querySelectorAll('.settlement-router-panel article[data-selected="true"]').length,
-    feeImpactRows: document.querySelectorAll('.fee-impact article').length,
+    reconciliationChecks: document.querySelectorAll('.analytics-reconciliation > span').length,
+    milestoneProofs: document.querySelectorAll('.analytics-milestone-proof > article').length,
+    fxLegs: document.querySelectorAll('.analytics-fx-legs > div').length,
     commands: document.querySelectorAll('.provider-command-list > div').length,
-    events: document.querySelectorAll('.settlement-audit li').length,
+    atAGlance: document.querySelector('[data-analytics-section="at-a-glance"]')?.innerText ?? '',
+    removedSections: document.querySelectorAll('.settlement-journey, .settlement-router-panel, .fee-impact, .conservation-proof, .settlement-audit, .milestone-settlement-summary, .settlement-next-deal').length,
     text: document.querySelector('.settlement-receipt')?.innerText ?? ''
   })`);
-  if (settlementReceipt.conservationChecks.length !== 4
-    || settlementReceipt.conservationChecks.some(value => !/^0(?:[.,]0+)?\s/u.test(value ?? ''))
+  const requiredAnalyticsHeadings = [
+    'END-TO-END SETTLEMENT INTELLIGENCE', 'THE SETTLEMENT, AT A GLANCE', 'TRUST RAIL PROOF',
+    'MONEY FLOW + DEDUCTIONS', 'CORRIDOR RULE DECISION', 'FX QUOTE PROVENANCE',
+  ];
+  if (settlementReceipt.sections.length !== 6
+    || requiredAnalyticsHeadings.some(heading => !settlementReceipt.sections.some(section => section.text.includes(heading)))
     || settlementReceipt.analyticsCards !== 4
-    || settlementReceipt.proofStages !== 8
-    || settlementReceipt.routerCandidates !== 3
-    || settlementReceipt.selectedRoutes !== 1
-    || settlementReceipt.feeImpactRows !== 2
-    || settlementReceipt.commands < 4
-    || settlementReceipt.events < 10
+    || settlementReceipt.reconciliationChecks !== 4
+    || settlementReceipt.milestoneProofs !== 2
+    || settlementReceipt.fxLegs !== 2
+    || settlementReceipt.commands < 8
+    || !settlementReceipt.atAGlance.includes(`${Number(proposalPriceAmount).toFixed(2)} ${fundingCurrency}`)
+    || settlementReceipt.removedSections !== 0
     || !/REGULATIONS FETCHED/iu.test(settlementReceipt.text)
     || !/RATE OBSERVED/iu.test(settlementReceipt.text)
     || !/HYPERLEDGER FABRIC/iu.test(settlementReceipt.text)
     || !/ALGORAND ARC-4/iu.test(settlementReceipt.text)) {
     throw new Error(`Completed settlement receipt is incomplete: ${JSON.stringify(settlementReceipt)}`);
   }
+  const roleAnalytics = await Promise.all([company, freelancer].map(browser => browser.evaluate(`Array.from(document.querySelectorAll('[data-settlement-analytics] [data-analytics-section]')).map(element => element.innerText)`)));
+  if (JSON.stringify(roleAnalytics[0]) !== JSON.stringify(roleAnalytics[1])) throw new Error('Company and Freelancer analytics sections do not show the same persisted facts.');
+  await Promise.all([company, freelancer].map(browser => browser.evaluate(`(() => { const receipt = document.querySelector('.settlement-receipt'); if (!receipt) return false; receipt.dataset.pollingProbe = 'stable'; return true; })()`)));
+  await sleep(3_600);
+  const stableAcrossPoll = await Promise.all([company, freelancer].map(browser => browser.evaluate(`document.querySelector('.settlement-receipt')?.dataset.pollingProbe === 'stable'`)));
+  if (stableAcrossPoll.some(value => value !== true)) throw new Error(`An unchanged polling response rebuilt the analytics page: ${JSON.stringify(stableAcrossPoll)}`);
   const companyGuide = await company.evaluate(`({ title: document.querySelector('#dealCompanionTitle')?.textContent, copy: document.querySelector('#dealCompanionCopy')?.textContent, image: document.querySelector('#dealCompanionCharacter')?.getAttribute('src') })`);
   const freelancerGuide = await freelancer.evaluate(`({ title: document.querySelector('#dealCompanionTitle')?.textContent, copy: document.querySelector('#dealCompanionCopy')?.textContent, image: document.querySelector('#dealCompanionCharacter')?.getAttribute('src') })`);
   if (companyGuide.title !== 'DEAL COMPLETE' || !companyGuide.copy?.includes(payoutCurrency) || !companyGuide.image?.includes('company')) throw new Error(`Company live guide is not transaction-derived: ${JSON.stringify(companyGuide)}`);
