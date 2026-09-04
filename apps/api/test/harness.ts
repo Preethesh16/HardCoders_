@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { loadConfig, type ApiConfig } from '../src/config.js';
-import { createContext, type AppContext } from '../src/context.js';
+import { createContext, type AppContext, type ContextOverrides } from '../src/context.js';
 import { seedDemo, type SeedResult } from '../src/demo/seed.js';
 import { FixedClock, SequentialIds } from '../src/runtime.js';
 
@@ -18,7 +18,10 @@ export interface Harness {
  * A complete API under deterministic time and identifiers, wired to in-memory
  * adapters. Every test exercises the same business code the hosted profiles run.
  */
-export async function createHarness(environment: NodeJS.ProcessEnv = {}): Promise<Harness> {
+export async function createHarness(
+  environment: NodeJS.ProcessEnv = {},
+  overrides: ContextOverrides = {},
+): Promise<Harness> {
   const config = loadConfig({
     OPTIWORK_PROFILE: 'demo',
     REGULATION_REFRESH_MODE: 'fixture',
@@ -26,7 +29,7 @@ export async function createHarness(environment: NodeJS.ProcessEnv = {}): Promis
     ...environment,
   });
   const clock = new FixedClock(new Date('2026-09-03T09:00:00.000Z'));
-  const context = createContext(config, { clock, ids: new SequentialIds() });
+  const context = createContext(config, { ...overrides, clock, ids: new SequentialIds() });
   const app = await buildApp({ config, context, logger: false });
   const seed = await seedDemo(context);
   return {

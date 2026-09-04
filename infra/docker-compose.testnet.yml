@@ -5,6 +5,11 @@ services:
   fabric-gateway:
     env_file:
       - ../.optiwork/testnet/fabric-gateway.env
+    environment:
+      IDEMPOTENCY_DATABASE_URL: "${SUPABASE_DATABASE_URL}?sslmode=verify-full"
+      NODE_EXTRA_CA_CERTS: /run/optiwork/supabase-ca.crt
+    volumes:
+      - ../.optiwork/testnet/supabase-ca.crt:/run/optiwork/supabase-ca.crt:ro
 
   algorand-executor:
     env_file:
@@ -18,6 +23,11 @@ services:
       ALGORAND_REQUEST_TIMEOUT_MS: "120000"
       ALGORAND_CONFIRMATION_ROUNDS: "3"
       FABRIC_GATEWAY_DEMO_AUTH: "true"
+      DATABASE_URL: "${SUPABASE_DATABASE_URL}"
+      DATABASE_SSL_MODE: verify-full
+      NODE_EXTRA_CA_CERTS: /run/optiwork/supabase-ca.crt
+    volumes:
+      - ../.optiwork/testnet/supabase-ca.crt:/run/optiwork/supabase-ca.crt:ro
 
   api:
     env_file:
@@ -27,8 +37,11 @@ services:
       AUTH_MODE: demo
       ALGORAND_NETWORK: testnet
       ALGORAND_EXPLORER_BASE_URL: https://lora.algokit.io/testnet
+      DATABASE_URL: "${SUPABASE_DATABASE_URL}?sslmode=verify-full"
+      NODE_EXTRA_CA_CERTS: /run/optiwork/supabase-ca.crt
     volumes:
       - ../.optiwork/testnet/algorand-deployment.json:/run/optiwork/algorand-deployment.json:ro
+      - ../.optiwork/testnet/supabase-ca.crt:/run/optiwork/supabase-ca.crt:ro
 
   web:
     environment:

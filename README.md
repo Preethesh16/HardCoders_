@@ -241,25 +241,32 @@ commands, generated artifacts and troubleshooting.
 
 ### Public Algorand TestNet acceptance
 
-The public profile keeps PostgreSQL, MinIO and the private two-organization
-Fabric network, but replaces Algorand LocalNet with the deployed TestNet ARC-4
-application and Circle TestNet USDC. It uses a separate Compose project,
-separate databases and owner-only generated secrets; switching profiles does
-not delete the LocalNet volumes.
+The public profile keeps MinIO and the private two-organization Fabric network,
+stores the API records plus the Fabric and Algorand command journals in a
+Supabase-hosted PostgreSQL database, and replaces Algorand LocalNet with the
+deployed TestNet ARC-4 application and Circle TestNet USDC. It uses a separate
+Compose project and owner-only generated secrets; switching profiles does not
+delete the LocalNet volumes or the durable Supabase history.
 
-After creating and funding the guarded disposable provider accounts described
-in the TestNet manifest, run:
+Set `SUPABASE_DATABASE_URL` in the ignored root `.env` to the Supabase session
+pooler URI (port `5432`, without URL query parameters). The startup path mounts
+the official Supabase root CA and uses `verify-full`; it also applies all API,
+Gateway and executor migrations without deleting existing rows. After creating
+and funding the guarded disposable provider accounts described in the TestNet
+manifest, run:
 
 ```bash
-corepack pnpm testnet:e2e     # reset only TestNet acceptance data and prove both journeys
+corepack pnpm testnet:e2e     # prove both public-TestNet journeys
 corepack pnpm testnet:status  # show the active network and real adapters
 corepack pnpm testnet:down    # stop only the TestNet application stack
 corepack pnpm local:up        # return to the preserved LocalNet demo
 ```
 
 `testnet:e2e` refuses the wrong network, application, asset, open key-file
-permissions, underfunded provider accounts, non-HTTPS public endpoints and
-Algorand mainnet. Faucet-sized acceptance amounts exercise the same escrow,
+permissions, underfunded provider accounts, an unverified database certificate,
+non-HTTPS public endpoints and Algorand mainnet. Before a run it safely restores
+the pinned application's disposable TestAlgo box reserve; it never requests or
+moves real assets. Faucet-sized acceptance amounts exercise the same escrow,
 evidence, permit and accounting code while conserving zero-value test assets.
 
 The product has two marketplace roles. Infrastructure proof is embedded in

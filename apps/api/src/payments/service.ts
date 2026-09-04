@@ -62,6 +62,7 @@ import {
   defaultSettlementProviders,
   providerForDecision,
   selectSettlementRoute,
+  type SettlementRouteDecision,
   type SettlementProviderAdapter,
   type SettlementTransaction,
 } from '../settlement/router.js';
@@ -449,7 +450,7 @@ export class PaymentService {
     const contract = await this.requireContract(payment.contractId);
     requireOwnership(principal, contract.buyerOrganizationId);
     if (payment.state === 'COMPLETED') return this.hydrate(payment);
-    if (payment.state !== 'WORK_PENDING') {
+    if (payment.state !== 'WORK_PENDING' && payment.state !== 'RELEASE_AUTHORIZED') {
       throw conflict(`Payment ${paymentId} cannot be released from state ${payment.state}.`);
     }
 
@@ -469,8 +470,17 @@ export class PaymentService {
     const { quote, compliance, corridor } = await this.hydrate(payment);
     const bindingRow = await this.requireBinding(payment.id);
     const escrowInput = this.toEscrowInput(bindingRow);
-    const generation = (await this.context.store.findMany(providerCommands, { paymentId: payment.id, action: 'release' })).length + 1;
-    const routeNow = this.context.clock.now();
+    const priorRouteDecisions = await this.context.store.findMany(
+      settlementRouteDecisions,
+      { paymentId: payment.id },
+      { orderBy: 'generation', direction: 'desc' },
+    );
+    const retryDecisionRow = payment.state === 'RELEASE_AUTHORIZED' ? priorRouteDecisions[0] : undefined;
+    if (payment.state === 'RELEASE_AUTHORIZED' && !retryDecisionRow) {
+      throw conflict('The authorized release has no persisted settlement route to reconcile.');
+    }
+    const generation = retryDecisionRow?.generation ?? ((priorRouteDecisions[0]?.generation ?? 0) + 1);
+    const routeNow = retryDecisionRow ? new Date(retryDecisionRow.decidedAt) : this.context.clock.now();
     const freshRates = await this.context.rates.rates(corridor, routeNow);
     const fxOracleUnsigned = {
       schemaVersion: '1.0',
@@ -504,76 +514,80 @@ export class PaymentService {
       // marked settlement-affecting may be supplied here.
       settlementObligations: [],
     };
-    const routeDecision = await selectSettlementRoute({
-      transaction: settlementTransaction,
-      providers: this.settlementProviders,
-      generation,
-      now: routeNow,
-    });
-    const routeDecisionId = this.context.ids.next('ROUTE');
-    await this.context.store.insert(settlementRouteDecisions, {
-      id: routeDecisionId,
-      paymentId: payment.id,
-      generation,
-      status: routeDecision.status,
-      selectedProviderId: routeDecision.selectedProviderId,
-      selectedQuoteId: routeDecision.selectedQuoteId,
-      selectedRecipientAmountMinor: routeDecision.selectedRecipientAmount?.amountMinor ?? null,
-      payoutCurrency: payment.payoutCurrency,
-      payoutScale: payment.payoutScale,
-      fxOracleHash: routeDecision.fxOracleHash,
-      routeHash: routeDecision.routeHash,
-      decision: routeDecision as unknown as Record<string, unknown>,
-      decidedAt: routeDecision.decidedAt,
-      expiresAt: routeDecision.expiresAt,
-    });
-    for (const candidate of routeDecision.candidates) {
-      await this.context.store.insert(settlementProviderQuotes, {
-        id: this.context.ids.next('PQUOTE'),
-        paymentId: payment.id,
-        decisionId: routeDecisionId,
-        providerId: candidate.quote.providerId,
-        quoteId: candidate.quote.quoteId,
-        eligible: candidate.eligible,
-        reasonCodes: [...candidate.reasonCodes],
-        recipientAmountMinor: candidate.quote.recipientAmount.amountMinor,
-        payoutCurrency: candidate.quote.recipientAmount.currency,
-        payoutScale: candidate.quote.recipientAmount.scale,
-        quotedAt: candidate.quote.quotedAt,
-        expiresAt: candidate.quote.expiresAt,
-        authenticityHash: candidate.quote.authenticityHash,
-        quote: candidate.quote as unknown as Record<string, unknown>,
-        createdAt: routeNow.toISOString(),
+    const routeDecision = retryDecisionRow
+      ? retryDecisionRow.decision as unknown as SettlementRouteDecision
+      : await selectSettlementRoute({
+        transaction: settlementTransaction,
+        providers: this.settlementProviders,
+        generation,
+        now: routeNow,
       });
-    }
-    await this.context.timeline.append({
-      kind: 'SETTLEMENT_ROUTE_SELECTED',
-      actor: { subject: 'anchor-settlement-router', role: 'payments_service' },
-      contractId: contract.id,
-      paymentId: payment.id,
-      detail: {
-        decisionId: routeDecisionId,
+    const routeDecisionId = retryDecisionRow?.id ?? this.context.ids.next('ROUTE');
+    if (!retryDecisionRow) {
+      await this.context.store.insert(settlementRouteDecisions, {
+        id: routeDecisionId,
+        paymentId: payment.id,
+        generation,
         status: routeDecision.status,
         selectedProviderId: routeDecision.selectedProviderId,
         selectedQuoteId: routeDecision.selectedQuoteId,
-        selectedRecipientAmount: routeDecision.selectedRecipientAmount,
-        candidates: routeDecision.candidates.map((candidate) => ({
-          providerId: candidate.quote.providerId,
-          eligible: candidate.eligible,
-          reasonCodes: candidate.reasonCodes,
-          recipientAmount: candidate.quote.recipientAmount,
-          etaSeconds: candidate.quote.estimatedSettlementSeconds,
-          expiresAt: candidate.quote.expiresAt,
-        })),
-        rankingRule: routeDecision.rankingRule,
-        fxSource: settlementTransaction.fxSource,
-        fxObservedAt: settlementTransaction.fxObservedAt,
-        fxFetchedAt: settlementTransaction.fxFetchedAt,
-        fxOracleHash: settlementTransaction.fxOracleHash,
+        selectedRecipientAmountMinor: routeDecision.selectedRecipientAmount?.amountMinor ?? null,
+        payoutCurrency: payment.payoutCurrency,
+        payoutScale: payment.payoutScale,
+        fxOracleHash: routeDecision.fxOracleHash,
         routeHash: routeDecision.routeHash,
-        demoProviders: true,
-      },
-    });
+        decision: routeDecision as unknown as Record<string, unknown>,
+        decidedAt: routeDecision.decidedAt,
+        expiresAt: routeDecision.expiresAt,
+      });
+      for (const candidate of routeDecision.candidates) {
+        await this.context.store.insert(settlementProviderQuotes, {
+          id: this.context.ids.next('PQUOTE'),
+          paymentId: payment.id,
+          decisionId: routeDecisionId,
+          providerId: candidate.quote.providerId,
+          quoteId: candidate.quote.quoteId,
+          eligible: candidate.eligible,
+          reasonCodes: [...candidate.reasonCodes],
+          recipientAmountMinor: candidate.quote.recipientAmount.amountMinor,
+          payoutCurrency: candidate.quote.recipientAmount.currency,
+          payoutScale: candidate.quote.recipientAmount.scale,
+          quotedAt: candidate.quote.quotedAt,
+          expiresAt: candidate.quote.expiresAt,
+          authenticityHash: candidate.quote.authenticityHash,
+          quote: candidate.quote as unknown as Record<string, unknown>,
+          createdAt: routeNow.toISOString(),
+        });
+      }
+      await this.context.timeline.append({
+        kind: 'SETTLEMENT_ROUTE_SELECTED',
+        actor: { subject: 'anchor-settlement-router', role: 'payments_service' },
+        contractId: contract.id,
+        paymentId: payment.id,
+        detail: {
+          decisionId: routeDecisionId,
+          status: routeDecision.status,
+          selectedProviderId: routeDecision.selectedProviderId,
+          selectedQuoteId: routeDecision.selectedQuoteId,
+          selectedRecipientAmount: routeDecision.selectedRecipientAmount,
+          candidates: routeDecision.candidates.map((candidate) => ({
+            providerId: candidate.quote.providerId,
+            eligible: candidate.eligible,
+            reasonCodes: candidate.reasonCodes,
+            recipientAmount: candidate.quote.recipientAmount,
+            etaSeconds: candidate.quote.estimatedSettlementSeconds,
+            expiresAt: candidate.quote.expiresAt,
+          })),
+          rankingRule: routeDecision.rankingRule,
+          fxSource: settlementTransaction.fxSource,
+          fxObservedAt: settlementTransaction.fxObservedAt,
+          fxFetchedAt: settlementTransaction.fxFetchedAt,
+          fxOracleHash: settlementTransaction.fxOracleHash,
+          routeHash: routeDecision.routeHash,
+          demoProviders: true,
+        },
+      });
+    }
     if (routeDecision.status !== 'SELECTED' || !routeDecision.expiresAt) {
       throw unprocessable('No eligible settlement provider route is available; escrow remains locked.', {
         reasonCodes: routeDecision.reasonCodes,
@@ -615,30 +629,33 @@ export class PaymentService {
       releaseBinding,
     };
 
-    let current = await this.transition(payment, 'RELEASE_AUTHORIZED');
-    await this.context.store.update(workContracts, { id: contract.id }, {
-      state: 'RELEASE_AUTHORIZED',
-      updatedAt: this.context.clock.now().toISOString(),
-    });
-    await this.context.timeline.append({
-      kind: 'RELEASE_AUTHORIZED',
-      actor: this.actor(principal),
-      contractId: contract.id,
-      paymentId: payment.id,
-      detail: {
+    let current = payment;
+    if (payment.state === 'WORK_PENDING') {
+      current = await this.transition(payment, 'RELEASE_AUTHORIZED');
+      await this.context.store.update(workContracts, { id: contract.id }, {
+        state: 'RELEASE_AUTHORIZED',
+        updatedAt: this.context.clock.now().toISOString(),
+      });
+      await this.context.timeline.append({
+        kind: 'RELEASE_AUTHORIZED',
+        actor: this.actor(principal),
+        contractId: contract.id,
         paymentId: payment.id,
-        generation,
-        expiresAt,
-        authorizationCommitment: command.authorizationCommitment,
-        workEvidenceHash: releaseBinding.workEvidenceHash,
-        fabricTxHash: releaseBinding.fabricTxHash,
-        complianceResultHash: releaseBinding.complianceResultHash,
-        fxQuoteHash: releaseBinding.fxQuoteHash,
-        settlementRouteHash: releaseBinding.settlementRouteHash,
-        selectedProviderId: routeDecision.selectedProviderId,
-        selectedQuoteId: routeDecision.selectedQuoteId,
-      },
-    });
+        detail: {
+          paymentId: payment.id,
+          generation,
+          expiresAt,
+          authorizationCommitment: command.authorizationCommitment,
+          workEvidenceHash: releaseBinding.workEvidenceHash,
+          fabricTxHash: releaseBinding.fabricTxHash,
+          complianceResultHash: releaseBinding.complianceResultHash,
+          fxQuoteHash: releaseBinding.fxQuoteHash,
+          settlementRouteHash: releaseBinding.settlementRouteHash,
+          selectedProviderId: routeDecision.selectedProviderId,
+          selectedQuoteId: routeDecision.selectedQuoteId,
+        },
+      });
+    }
 
     const released = await this.context.escrow.release(command, releaseIdempotencyKey);
     await this.recordCommand(payment.id, 'release', releaseIdempotencyKey, command, released);

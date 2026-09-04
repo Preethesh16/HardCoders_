@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { base64, call, createHarness, type Harness } from './harness.js';
+import { SimulatedEscrowExecutor, type EscrowExecutor, type ReleaseCommand } from '../src/algorand/executor-client.js';
 
 let harness: Harness | undefined;
 
@@ -10,7 +11,25 @@ afterEach(async () => {
 
 describe('milestone-scoped settlement', () => {
   it('creates distinct escrows and releases each only for its own approved evidence', async () => {
-    harness = await createHarness();
+    const delegate = new SimulatedEscrowExecutor(() => new Date('2026-09-03T09:00:00.000Z'));
+    let ambiguousReleaseInjected = false;
+    const releaseAttempts: Array<{ command: ReleaseCommand; key: string }> = [];
+    const escrow: EscrowExecutor = {
+      mode: 'simulated',
+      create: delegate.create.bind(delegate), fund: delegate.fund.bind(delegate),
+      pause: delegate.pause.bind(delegate), resume: delegate.resume.bind(delegate),
+      refund: delegate.refund.bind(delegate), complete: delegate.complete.bind(delegate), get: delegate.get.bind(delegate),
+      async release(command, key) {
+        releaseAttempts.push({ command: structuredClone(command), key });
+        const outcome = await delegate.release(command, key);
+        if (!ambiguousReleaseInjected) {
+          ambiguousReleaseInjected = true;
+          throw new Error('Algorand submission was ambiguous; reconcile the persisted transaction.');
+        }
+        return outcome;
+      },
+    };
+    harness = await createHarness({}, { escrow });
     const current = harness;
     const buyer = current.seed.polishCompany;
     const freelancer = current.seed.indianFreelancer;
@@ -123,9 +142,17 @@ describe('milestone-scoped settlement', () => {
         token: buyer.token, idempotencyKey: `milestone-decision-${milestone.ordinal}`,
         body: { decision: 'APPROVED', comment: 'Accepted against this milestone only.' },
       });
-      const released = await call(current, 'POST', `/v1/payments/${payments[index]!.id}/release`, {
+      let released = await call(current, 'POST', `/v1/payments/${payments[index]!.id}/release`, {
         token: buyer.token, idempotencyKey: `milestone-release-${milestone.ordinal}`,
       });
+      if (index === 0) {
+        expect(released.status).toBe(500);
+        released = await call(current, 'POST', `/v1/payments/${payments[index]!.id}/release`, {
+          token: buyer.token, idempotencyKey: `milestone-release-${milestone.ordinal}`,
+        });
+        expect(releaseAttempts).toHaveLength(2);
+        expect(releaseAttempts[1]).toEqual(releaseAttempts[0]);
+      }
       expect(released.status).toBe(200);
       expect(released.body.payment.state).toBe('COMPLETED');
 

@@ -15,6 +15,7 @@ if [[ -f "${ROOT}/.env" ]]; then
 fi
 STATE="${ROOT}/.optiwork/testnet"
 ACCOUNTS="${ROOT}/services/algorand-executor/generated-credentials/testnet-accounts.json"
+SUPABASE_CA="${STATE}/supabase-ca.crt"
 
 log() { printf '[anchor-testnet] %s\n' "$*"; }
 die() { printf '[anchor-testnet] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -25,6 +26,7 @@ preflight() {
   require curl
   require jq
   require node
+  require openssl
   docker info >/dev/null 2>&1 || die 'Docker is not available'
   [[ "$(node -p 'process.versions.node.split(`.`)[0]')" == 24 ]] || die 'Node.js 24 is required'
   [[ -f "${STATE}/algorand-deployment.json" ]] || die 'The pinned TestNet deployment manifest is missing'
@@ -32,6 +34,21 @@ preflight() {
   [[ "$(stat -c '%a' "${ACCOUNTS}")" == 600 ]] || die 'The TestNet account file must be owner-only (chmod 600)'
   [[ "$(jq -r '.network' "${STATE}/algorand-deployment.json")" == testnet ]] || die 'The deployment manifest is not TestNet'
   [[ "$(jq -r '.assetId' "${STATE}/algorand-deployment.json")" == 10458941 ]] || die 'TestNet must use official Circle USDC ASA 10458941'
+}
+
+ensure_supabase_ca() {
+  [[ -f "${ROOT}/.env" ]] && grep -q '^SUPABASE_DATABASE_URL=.' "${ROOT}/.env" \
+    || die 'SUPABASE_DATABASE_URL must be configured in the ignored root .env'
+  if [[ ! -f "${SUPABASE_CA}" ]]; then
+    curl -fsSL --max-time 30 \
+      'https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt' \
+      -o "${SUPABASE_CA}"
+  fi
+  openssl x509 -in "${SUPABASE_CA}" -noout -checkend 86400 >/dev/null \
+    || die 'The Supabase CA certificate is invalid or expires within 24 hours'
+  [[ "$(openssl x509 -in "${SUPABASE_CA}" -noout -subject)" == *'Supabase Root 2021 CA'* ]] \
+    || die 'The downloaded database CA is not the expected Supabase Root 2021 CA'
+  chmod 644 "${SUPABASE_CA}"
 }
 
 check_public_funding() {
@@ -46,8 +63,12 @@ check_public_funding() {
   (( deployer_algo >= 1000000 )) || die 'The disposable TestNet executor needs at least 1 TestAlgo for the acceptance run'
   (( origin_algo >= 100000 )) || die 'The TestNet origin treasury needs more TestAlgo for transaction fees'
   (( origin_usdc >= 5000000 )) || die 'The TestNet origin treasury needs at least 5 zero-value TestNet USDC'
-  (( application_available >= 250000 )) || die 'The TestNet ARC-4 application needs at least 0.25 TestAlgo above its current box minimum balance'
-  log "public funding ready: executor $((deployer_algo / 1000000)) TestAlgo; origin $((origin_usdc / 1000000)) TestNet USDC; app reserve ${application_available} microAlgo"
+  log "public funding ready: executor $((deployer_algo / 1000000)) TestAlgo; origin $((origin_usdc / 1000000)) TestNet USDC; current app reserve ${application_available} microAlgo"
+}
+
+ensure_application_reserve() {
+  corepack pnpm --filter @optiwork/algorand-executor ensure:testnet-reserve \
+    "${ACCOUNTS}" "${STATE}/algorand-deployment.json"
 }
 
 render_runtime() {
@@ -85,7 +106,9 @@ wait_stack() {
 
 up() {
   preflight
+  ensure_supabase_ca
   check_public_funding
+  ensure_application_reserve
   "${ROOT}/blockchain/fabric/network/network.sh" up
   render_runtime
   build
@@ -97,7 +120,9 @@ up() {
 
 e2e() {
   preflight
+  ensure_supabase_ca
   check_public_funding
+  ensure_application_reserve
   "${ROOT}/blockchain/fabric/network/network.sh" up
   render_runtime
   build

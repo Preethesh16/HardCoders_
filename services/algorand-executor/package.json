@@ -12,6 +12,7 @@
     "deploy:localnet": "pnpm compile:contract && node --env-file-if-exists=.env.deploy --import tsx src/deploy-localnet.ts",
     "bootstrap:localnet": "pnpm compile:contract && node --import tsx src/bootstrap-localnet.ts",
     "deploy:testnet": "pnpm compile:contract && node --env-file-if-exists=.env.testnet --import tsx src/deploy-testnet.ts",
+    "ensure:testnet-reserve": "node --import tsx src/ensure-testnet-app-reserve.ts",
     "generate:testnet-accounts": "node --import tsx src/generate-testnet-accounts.ts",
     "dev": "node --env-file-if-exists=.env --watch --import tsx src/server.ts",
     "lint": "tsc --noEmit",
