@@ -405,6 +405,34 @@ function mergeWithLabeledText(
   return normalizeFields(purpose, output);
 }
 
+/**
+ * A pooled keep-alive connection to the provider can be dropped silently by an
+ * intervening NAT, so the next request stalls on a dead socket. Retrying once
+ * on a transport error, a 429 or a 5xx keeps a routine blip from degrading the
+ * form to an empty manual-entry draft. A 4xx is returned as-is: it is a real
+ * rejection and retrying it would only waste a paid call.
+ */
+async function fetchWithRetry(url: URL, init: RequestInit, attempts = 3): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, init);
+      if (response.status === 429 || response.status >= 500) {
+        if (attempt === attempts) return response;
+        lastError = new Error(`HTTP ${response.status}`);
+      } else {
+        return response;
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) throw error;
+    }
+    console.warn(`[extract-form] attempt ${attempt}/${attempts} failed (${lastError instanceof Error ? lastError.message : String(lastError)}); retrying`);
+    await new Promise((resolve) => { setTimeout(resolve, 250 * attempt); });
+  }
+  throw lastError instanceof Error ? lastError : new Error('The extraction request failed.');
+}
+
 export async function extractFormDraft(
   config: ApiConfig['ai'],
   request: FormExtractionRequest,
@@ -434,11 +462,11 @@ export async function extractFormDraft(
       : request.purpose === 'FREELANCER_PROPOSAL'
         ? 'Extract a freelancer proposal into the requested fields, including explicitly stated tax residence, payout country, and payout currency. Never invent or infer missing locations or currencies. Return the numeric proposed price exactly as written; the proposed price is denominated in the payer currency shown in the job, while payoutCurrency is the freelancer receiving currency.'
         : 'Extract agreement inputs into commercial terms, objective acceptance criteria, company policies, and legal clauses. Preserve obligations accurately and never invent missing terms.';
-    const response = await fetch(new URL(`${config.baseUrl.replace(/\/$/u, '')}/responses`), {
+    const response = await fetchWithRetry(new URL(`${config.baseUrl.replace(/\/$/u, '')}/responses`), {
       method: 'POST',
       redirect: 'error',
       cache: 'no-store',
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(20_000),
       headers: {
         'content-type': 'application/json',
         accept: 'application/json',
@@ -457,7 +485,7 @@ export async function extractFormDraft(
         text: { format: { type: 'json_schema', name: 'anchor_form_draft', strict: true, schema: schemaFor(request.purpose) } },
       }),
     });
-    if (!response.ok) throw new Error(`OpenAI returned HTTP ${response.status}.`);
+    if (!response.ok) throw new Error(`OpenAI returned HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
     const payload = await response.json() as ResponsesPayload;
     const extracted = normalizeFields(request.purpose, JSON.parse(responseText(payload)));
     const fields = TEXT_EXTENSIONS.includes(extension(request.fileName) as typeof TEXT_EXTENSIONS[number])
@@ -471,7 +499,8 @@ export async function extractFormDraft(
       warnings: [],
       reviewRequired: true,
     };
-  } catch {
+  } catch (error) {
+    console.error("[extract-form] OpenAI extraction failed:", error instanceof Error ? (error.stack ?? error.message) : error);
     return fallback('OpenAI extraction was unavailable. Labeled text fields were recovered where possible; review or complete them manually.');
   }
 }
