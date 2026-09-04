@@ -69,7 +69,8 @@ const ACTIONS = [
   { id: "agreement-company-approve", actor: "COMPANY", label: "APPROVE AGREEMENT", detail: "The company reviews and accepts the generated private agreement hash." },
   { id: "agreement-approve", actor: "FREELANCER", label: "APPROVE AGREEMENT", detail: "The selected freelancer accepts the exact same private agreement." },
   { id: "submit", actor: "FREELANCER", label: "DELIVER WORK", detail: "Upload any deliverable; MinIO stores bytes and Fabric receives only SHA-256 evidence." },
-  { id: "approve-work", actor: "COMPANY", label: "APPROVE DELIVERY", detail: "Review the real file and advisory validation before authorizing release." }
+  { id: "approve-work", actor: "COMPANY", label: "APPROVE DELIVERY", detail: "Review the real file and advisory validation before authorizing release." },
+  { id: "rate-freelancer", actor: "COMPANY", label: "RATE FREELANCER", detail: "Record the company's post-completion rating against the selected freelancer and completed deal." }
 ];
 
 const COMPETING_PROPOSALS = [
@@ -118,10 +119,12 @@ function freshRun(previous = null) {
   const retainedCompanyPartyKey = previous?.results?.companyPartyKey ?? null;
   const retainedVerification = previous?.results?.companyVerificationProfile ?? null;
   const retainedAuthorization = previous?.results?.companyAuthorization ?? null;
+  const retainedReputation = previous?.reputation ?? { ratings: [] };
   return {
     startedAt: new Date().toISOString(), nonce: Date.now().toString(36), phase: retainedProfile ? "JOB_DRAFT" : "COMPANY_ONBOARDING",
     results: { applications: [], ...(retainedProfile ? { companyPolicyProfile: retainedProfile } : {}), ...(retainedCompanyPartyKey ? { companyPartyKey: retainedCompanyPartyKey } : {}), ...(retainedVerification ? { companyVerificationProfile: retainedVerification } : {}), ...(retainedAuthorization ? { companyAuthorization: retainedAuthorization } : {}) }, actions: {}, screening: { status: "IDLE", stages: {} },
-    automation: { status: "IDLE", stages: {} }, deliveryAutomation: { status: "IDLE", stages: {} }
+    automation: { status: "IDLE", stages: {} }, deliveryAutomation: { status: "IDLE", stages: {} },
+    reputation: retainedReputation
   };
 }
 
@@ -195,7 +198,10 @@ function providerProfile(country) {
 }
 
 function companyPartyKey() {
-  return run?.results?.companyPartyKey ?? companyProfile().partyKey;
+  const country = run?.results?.companyPolicyProfile?.country
+    ?? run?.results?.companyVerificationProfile?.country
+    ?? "GB";
+  return run?.results?.companyPartyKey ?? companyProfile(country).partyKey;
 }
 
 async function authorizeJobPayerProfile(country) {
@@ -251,6 +257,16 @@ function selectedPartyKey() {
   return found[0];
 }
 
+function freelancerPortalPartyKey() {
+  if (run?.results?.primaryProviderPartyKey) return run.results.primaryProviderPartyKey;
+  const selected = selectedApplication();
+  if (selected && parties) {
+    const found = Object.entries(parties).find(([, party]) => party.principal?.subject === selected.applicantUserId);
+    if (found) return found[0];
+  }
+  return "indianFreelancer";
+}
+
 function proposalMoney(application) {
   if (application?.proposedPrice && typeof application.proposedPrice === "object") return application.proposedPrice;
   if (application?.proposedPriceMinor) return {
@@ -304,6 +320,7 @@ function normalizeApplications(payload) {
       id,
       rank: row.rank ?? index + 1,
       applicantDisplayName: row.applicantDisplayName ?? row.applicant?.label ?? previous.applicantDisplayName,
+      reputation: row.reputation ?? row.applicant?.reputation ?? previous.reputation,
       proposedPriceMinor: row.proposedPriceMinor ?? row.proposedAmountMinor ?? price?.amountMinor ?? previous.proposedPriceMinor,
       proposedPriceCurrency: row.proposedPriceCurrency ?? row.proposedCurrency ?? price?.currency ?? previous.proposedPriceCurrency,
       proposedPriceScale: row.proposedPriceScale ?? row.proposedScale ?? price?.scale ?? previous.proposedPriceScale,
@@ -716,6 +733,29 @@ const EXECUTORS = {
     run.phase = "RELEASING";
     releasePromise = runRelease(run.nonce);
     return [["DECISION", input.decision ?? "APPROVED"], ["FABRIC TX", decided.fabricTxId], ["NEXT", "AUTOMATIC RELEASE"]];
+  },
+  async "rate-freelancer"(input) {
+    if (run.phase !== "COMPLETED") throw new Error("The company can rate the freelancer only after the complete deal has settled.");
+    const application = selectedApplication();
+    if (!application?.id) throw new Error("No selected freelancer is bound to this completed deal.");
+    const stars = Number(input.stars);
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) throw new Error("Choose a whole-star rating from 1 to 5.");
+    const review = String(input.review ?? "").trim();
+    if (review.length > 280) throw new Error("Keep the freelancer review within 280 characters.");
+    const persisted = await call(companyPartyKey(), "POST", `/v1/contracts/${run.results.contractId}/rating`, {
+      stars,
+      review,
+    }, "rate-freelancer");
+    const record = {
+      ...persisted.rating,
+      jobId: run.results.jobId,
+      jobTitle: run.results.job?.title,
+      applicationId: application.id,
+      freelancerName: application.applicantDisplayName ?? application.applicantUserId ?? "Selected freelancer",
+    };
+    run.reputation = persisted.reputation;
+    run.results.freelancerRating = { ...record, ...persisted.reputation };
+    return [["FREELANCER", record.freelancerName], ["RATING", `${stars}/5`], ["PROFILE AVERAGE", `${persisted.reputation.average?.toFixed(1) ?? "—"}/5`]];
   }
 };
 
@@ -779,7 +819,7 @@ export async function authorizePortal(role, input = {}) {
   };
 }
 
-export async function runAction(id, input = {}) {
+export async function runAction(id, input = {}, callerRole = null) {
   if (!run) {
     run = freshRun();
     persistRun();
@@ -787,6 +827,9 @@ export async function runAction(id, input = {}) {
   const action = ACTIONS.find(item => item.id === id);
   const execute = EXECUTORS[id];
   if (!action || !execute) return { ok: false, id, error: `Unknown workflow action ${id}.` };
+  if (callerRole && action.actor !== callerRole) {
+    return { ok: false, id, error: `Only the ${action.actor.toLowerCase()} portal can perform ${action.label.toLowerCase()}.` };
+  }
   const repeatable = id === "submit" || id === "approve-work";
   const actionId = repeatable ? `${id}:${activeMilestone()?.id ?? "pending"}` : id;
   if (run.actions[actionId]?.status === "DONE") return { ok: true, id, replay: true, facts: run.actions[actionId].facts };
@@ -819,6 +862,46 @@ export async function submissionAccess() {
   return call(companyPartyKey(), "GET", `/v1/submissions/${run.results.submissionId}/access`);
 }
 
+export async function companyWorkspace() {
+  return call(companyPartyKey(), "GET", "/v1/company/workspace");
+}
+
+export async function companyPolicyAccess() {
+  return call(companyPartyKey(), "GET", "/v1/company/policy-profile/access");
+}
+
+export async function companyAgreementAccess(contractId) {
+  return call(companyPartyKey(), "GET", `/v1/contracts/${contractId}/agreement/access`);
+}
+
+export async function companySubmissionAccess(submissionId) {
+  return call(companyPartyKey(), "GET", `/v1/submissions/${submissionId}/access`);
+}
+
+export async function freelancerWorkspace() {
+  return call(freelancerPortalPartyKey(), "GET", "/v1/freelancers/me/workspace");
+}
+
+export async function saveFreelancerProfile(input) {
+  return call(freelancerPortalPartyKey(), "POST", "/v1/freelancers/me/profile", input, `freelancer-profile-${Date.now()}`);
+}
+
+export async function uploadFreelancerDocument(input) {
+  return call(freelancerPortalPartyKey(), "POST", "/v1/freelancers/me/documents", input, `freelancer-document-${Date.now()}`);
+}
+
+export async function freelancerDocumentAccess(documentId) {
+  return call(freelancerPortalPartyKey(), "GET", `/v1/freelancers/me/documents/${documentId}/access`);
+}
+
+export async function freelancerAgreementAccess(contractId) {
+  return call(freelancerPortalPartyKey(), "GET", `/v1/contracts/${contractId}/agreement/access`);
+}
+
+export async function freelancerSubmissionAccess(submissionId) {
+  return call(freelancerPortalPartyKey(), "GET", `/v1/submissions/${submissionId}/access`);
+}
+
 export async function extractForm(role, input) {
   if (!run) {
     run = freshRun();
@@ -843,7 +926,8 @@ export function currentRun() {
   persistRun();
   return {
     startedAt: run.startedAt, phase: run.phase, results: run.results, actions: run.actions,
-    screening: run.screening, automation: run.automation, deliveryAutomation: run.deliveryAutomation
+    screening: run.screening, automation: run.automation, deliveryAutomation: run.deliveryAutomation,
+    reputation: run.reputation ?? { ratings: [] }
   };
 }
 

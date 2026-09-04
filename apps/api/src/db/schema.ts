@@ -345,6 +345,38 @@ export const contractApprovals = pgTable('contract_approvals', {
   approvedAt: instant('approved_at').notNull(),
 }, (table) => [uniqueIndex('contract_approvals_party_idx').on(table.contractId, table.party)]);
 
+/** One durable, buyer-authored reputation record per completed contract. */
+export const freelancerRatings = pgTable('freelancer_ratings', {
+  id: id(),
+  contractId: ref('contract_id').notNull(),
+  freelancerUserId: ref('freelancer_user_id').notNull(),
+  freelancerOrganizationId: ref('freelancer_organization_id').notNull(),
+  buyerOrganizationId: ref('buyer_organization_id').notNull(),
+  ratedByUserId: ref('rated_by_user_id').notNull(),
+  stars: smallint('stars').notNull(),
+  review: text('review').notNull(),
+  ratedAt: instant('rated_at').notNull(),
+}, (table) => [
+  uniqueIndex('freelancer_ratings_contract_idx').on(table.contractId),
+  index('freelancer_ratings_profile_idx').on(table.freelancerUserId, table.ratedAt),
+]);
+
+/** Freelancer-owned public profile fields. Private files remain in object storage. */
+export const freelancerProfiles = pgTable('freelancer_profiles', {
+  id: id(),
+  userId: ref('user_id').notNull(),
+  organizationId: ref('organization_id').notNull(),
+  headline: text('headline').notNull(),
+  bio: text('bio').notNull(),
+  experience: jsonb('experience').$type<string[]>().notNull(),
+  githubLinks: jsonb('github_links').$type<string[]>().notNull(),
+  createdAt: instant('created_at').notNull(),
+  updatedAt: instant('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('freelancer_profiles_user_idx').on(table.userId),
+  index('freelancer_profiles_org_idx').on(table.organizationId),
+]);
+
 /** Immutable milestone schedule copied from the job into the approved deal. */
 export const contractMilestones = pgTable('contract_milestones', {
   id: id(),
@@ -657,6 +689,7 @@ export const uploadedObjects = pgTable('uploaded_objects', {
   id: id(),
   bucket: varchar('bucket', { length: 64 }).notNull(),
   objectKey: text('object_key').notNull(),
+  fileName: text('file_name').notNull().default('artifact.bin'),
   contentType: varchar('content_type', { length: 128 }).notNull(),
   byteLength: numeric('byte_length', { precision: 20, scale: 0 }).notNull(),
   sha256: hash('sha256').notNull(),
@@ -664,6 +697,19 @@ export const uploadedObjects = pgTable('uploaded_objects', {
   classification: varchar('classification', { length: 24 }).notNull(),
   createdAt: instant('created_at').notNull(),
 }, (table) => [uniqueIndex('uploaded_objects_key_idx').on(table.bucket, table.objectKey)]);
+
+/** Metadata linking private freelancer-owned portfolio/proposal files to MinIO objects. */
+export const freelancerDocuments = pgTable('freelancer_documents', {
+  id: id(),
+  freelancerUserId: ref('freelancer_user_id').notNull(),
+  ownerOrganizationId: ref('owner_organization_id').notNull(),
+  objectId: ref('object_id').notNull(),
+  category: varchar('category', { length: 24 }).notNull(),
+  uploadedAt: instant('uploaded_at').notNull(),
+}, (table) => [
+  uniqueIndex('freelancer_documents_object_idx').on(table.objectId),
+  index('freelancer_documents_user_idx').on(table.freelancerUserId, table.uploadedAt),
+]);
 
 export const workSubmissions = pgTable('work_submissions', {
   id: id(),
@@ -715,6 +761,8 @@ export const schema = {
   workContracts,
   contractMilestones,
   contractApprovals,
+  freelancerRatings,
+  freelancerProfiles,
   corridorPolicies,
   complianceResults,
   requiredDocuments,
@@ -733,6 +781,7 @@ export const schema = {
   journalEntries,
   journalLines,
   uploadedObjects,
+  freelancerDocuments,
   workSubmissions,
   timelineEvents,
 } as const;

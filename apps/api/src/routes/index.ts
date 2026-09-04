@@ -53,12 +53,15 @@ import {
   IdParams,
   PrepareAgreementBody,
   PreviewComplianceBody,
+  RateFreelancerBody,
   RecordDocumentBody,
   RefundPaymentBody,
   ResolveCorridorBody,
   SaveCompanyPolicyProfileBody,
+  SaveFreelancerProfileBody,
   SelectApplicationBody,
   SupplierPaymentBody,
+  UploadFreelancerDocumentBody,
   VerifyCredentialBody,
 } from './schemas.js';
 
@@ -154,6 +157,42 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
   app.get('/v1/company/policy-profile', async (request) => ({
     profile: await marketplace.latestCompanyPolicyProfile(principalOf(request)),
   }));
+
+  app.get('/v1/company/policy-profile/access', async (request) =>
+    marketplace.companyPolicyProfileAccess(principalOf(request)));
+
+  app.get('/v1/company/workspace', async (request) =>
+    marketplace.companyWorkspace(principalOf(request)));
+
+  app.get('/v1/freelancers/me/workspace', async (request) =>
+    marketplace.freelancerWorkspace(principalOf(request)));
+
+  app.post('/v1/freelancers/me/profile', {
+    schema: { body: SaveFreelancerProfileBody, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    const body = request.body as Static<typeof SaveFreelancerProfileBody>;
+    return mutate(context, request, reply, principal, {
+      scope: 'freelancer-profile.save',
+      run: async () => ({ profile: await marketplace.saveFreelancerProfile(principal, body) }),
+    });
+  });
+
+  app.post('/v1/freelancers/me/documents', {
+    schema: { body: UploadFreelancerDocumentBody, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    const body = request.body as Static<typeof UploadFreelancerDocumentBody>;
+    return mutate(context, request, reply, principal, {
+      scope: 'freelancer-documents.upload',
+      statusCode: 201,
+      run: async () => marketplace.uploadFreelancerDocument(principal, body),
+    });
+  });
+
+  app.get<{ Params: { id: string } }>('/v1/freelancers/me/documents/:id/access', {
+    schema: { params: IdParams, response: errorResponses },
+  }, async (request) => marketplace.freelancerDocumentAccess(principalOf(request), request.params.id));
 
   app.post('/v1/company/policy-profile', {
     schema: { body: SaveCompanyPolicyProfileBody, response: errorResponses },
@@ -306,6 +345,21 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
   app.get<{ Params: { id: string } }>('/v1/contracts/:id/milestones', {
     schema: { params: IdParams, response: errorResponses },
   }, async (request) => ({ milestones: await marketplace.milestones(principalOf(request), request.params.id) }));
+
+  app.post<{ Params: { id: string } }>('/v1/contracts/:id/rating', {
+    schema: { params: IdParams, body: RateFreelancerBody, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    const body = request.body as Static<typeof RateFreelancerBody>;
+    return mutate(context, request, reply, principal, {
+      scope: 'contracts.rating.create',
+      statusCode: 201,
+      run: async () => marketplace.rateFreelancer(principal, request.params.id, body),
+    });
+  });
+
+  app.get('/v1/freelancers/me/reputation', async (request) =>
+    marketplace.myFreelancerReputation(principalOf(request)));
 
   app.post<{ Params: { id: string } }>('/v1/contracts/:id/agreement', {
     schema: { params: IdParams, body: PrepareAgreementBody, response: errorResponses },

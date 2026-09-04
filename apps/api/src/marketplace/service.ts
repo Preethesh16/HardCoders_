@@ -18,23 +18,54 @@ import {
   companyPolicyProfiles,
   contractMilestones,
   contractApprovals,
+  freelancerDocuments,
+  freelancerProfiles,
+  freelancerRatings,
   jobs,
   memberships,
   organizations,
   uploadedObjects,
   users,
+  workSubmissions,
   workContracts,
 } from '../db/schema.js';
 import { money, sameDenomination, type Money } from '../money.js';
 import { requireOwnership, requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import type { Select } from '../db/store.js';
-import { objectKeyFor } from '../storage/object-store.js';
+import { MAX_OBJECT_BYTES, objectKeyFor } from '../storage/object-store.js';
 import { inspect } from '../corridor/service.js';
 
 export type Job = Select<typeof jobs>;
 export type Application = Select<typeof applications>;
 export type WorkContract = Select<typeof workContracts>;
 export type CompanyPolicyProfile = Select<typeof companyPolicyProfiles>;
+
+export interface FreelancerProfileInput {
+  readonly headline: string;
+  readonly bio: string;
+  readonly experience: readonly string[];
+  readonly githubLinks: readonly string[];
+}
+
+export interface FreelancerDocumentInput {
+  readonly category: 'RESUME' | 'PROPOSAL' | 'PORTFOLIO';
+  readonly fileName: string;
+  readonly contentType: string;
+  readonly contentBase64: string;
+}
+
+function decodePrivateFile(value: string): Buffer {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(value) || value.length % 4 === 1) {
+    throw unprocessable('The freelancer document is not valid base64.');
+  }
+  const bytes = Buffer.from(value, 'base64');
+  if (bytes.toString('base64').replace(/=+$/u, '') !== value.replace(/=+$/u, '')) {
+    throw unprocessable('The freelancer document is not canonical base64.');
+  }
+  if (bytes.byteLength === 0) throw unprocessable('The freelancer document is empty.');
+  if (bytes.byteLength > MAX_OBJECT_BYTES) throw unprocessable(`The freelancer document exceeds ${MAX_OBJECT_BYTES} bytes.`);
+  return bytes;
+}
 
 export interface CreateJobInput {
   readonly title: string;
@@ -106,6 +137,11 @@ export interface ApproveContractInput {
   readonly acceptedTermsHash: string;
 }
 
+export interface RateFreelancerInput {
+  readonly stars: number;
+  readonly review?: string;
+}
+
 function isIsoDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -127,6 +163,289 @@ export class MarketplaceService {
       { orderBy: 'version', direction: 'desc', limit: 1 },
     );
     return latest ?? null;
+  }
+
+  async companyPolicyProfileAccess(principal: Principal) {
+    const profile = await this.latestCompanyPolicyProfile(principal);
+    if (!profile) throw notFound('No approved company policy document is available.');
+    const object = await this.context.store.findOne(uploadedObjects, { id: profile.sourceObjectId });
+    if (!object || object.classification !== 'COMPANY_POLICY' || object.ownerOrganizationId !== principal.organizationId) {
+      throw notFound('The approved company policy artifact is missing.');
+    }
+    const signed = await this.context.objects.signedDownloadUrl(
+      object.objectKey,
+      this.context.config.storage.signedUrlTtlSeconds,
+      this.context.clock.now(),
+    );
+    return {
+      url: signed.url,
+      expiresAt: signed.expiresAt,
+      ttlSeconds: signed.ttlSeconds,
+      fileName: profile.sourceFileName,
+      contentType: object.contentType,
+      byteLength: object.byteLength,
+      artifactHash: profile.sourceArtifactHash,
+      profileHash: profile.profileHash,
+      version: profile.version,
+    };
+  }
+
+  /** Company-scoped workspace library; raw storage keys and other tenants never leave this boundary. */
+  async companyWorkspace(principal: Principal) {
+    requireRole(principal, 'company_member', 'platform_admin');
+    const organization = await this.context.store.findOne(organizations, { id: principal.organizationId });
+    if (!organization) throw notFound(`Unknown organization ${principal.organizationId}.`);
+    const ownJobs = await this.context.store.findMany(
+      jobs, { organizationId: principal.organizationId }, { orderBy: 'createdAt', direction: 'desc' },
+    );
+    const allContracts = await this.context.store.findMany(workContracts, {}, { orderBy: 'updatedAt', direction: 'desc' });
+    const ownContracts = allContracts.filter((contract) => contract.buyerOrganizationId === principal.organizationId);
+    const contracts = await Promise.all(ownContracts.map(async (contract) => {
+      const [job, application, submissions, timeline, rating] = await Promise.all([
+        this.context.store.findOne(jobs, { id: contract.jobId }),
+        this.context.store.findOne(applications, { id: contract.applicationId }),
+        this.context.store.findMany(workSubmissions, { contractId: contract.id }, { orderBy: 'submittedAt', direction: 'desc' }),
+        this.context.timeline.forContract(contract.id),
+        this.context.store.findOne(freelancerRatings, { contractId: contract.id }),
+      ]);
+      const freelancer = application
+        ? await this.context.store.findOne(users, { id: application.applicantUserId })
+        : null;
+      return {
+        contract,
+        job: job ? { id: job.id, title: job.title, status: job.status, createdAt: job.createdAt } : null,
+        freelancer: freelancer ? { id: freelancer.id, displayName: freelancer.displayName, country: freelancer.country } : null,
+        agreement: this.agreementMetadata(contract),
+        submissions: await Promise.all(submissions.map(async (submission) => {
+          const object = await this.context.store.findOne(uploadedObjects, { id: submission.objectId });
+          return {
+            id: submission.id,
+            milestoneId: submission.milestoneId,
+            version: submission.version,
+            fileName: object?.fileName ?? 'deliverable.bin',
+            contentType: object?.contentType ?? 'application/octet-stream',
+            byteLength: object?.byteLength ?? '0',
+            fileHash: submission.fileHash,
+            buyerDecision: submission.buyerDecision,
+            submittedAt: submission.submittedAt,
+          };
+        })),
+        timeline,
+        rating,
+      };
+    }));
+    return {
+      organization,
+      profile: await this.latestCompanyPolicyProfile(principal),
+      jobs: ownJobs,
+      contracts,
+    };
+  }
+
+  /** Freelancer-owned workspace projection for documents, applications, history and profile. */
+  async freelancerWorkspace(principal: Principal) {
+    requireRole(principal, 'freelancer', 'supplier');
+    const [organization, user, profile, reputation, applicationRows, documentRows, allContracts] = await Promise.all([
+      this.context.store.findOne(organizations, { id: principal.organizationId }),
+      this.context.store.findOne(users, { id: principal.subject }),
+      this.context.store.findOne(freelancerProfiles, { userId: principal.subject }),
+      this.freelancerReputation(principal.subject),
+      this.context.store.findMany(applications, { applicantUserId: principal.subject }, { orderBy: 'createdAt', direction: 'desc' }),
+      this.context.store.findMany(freelancerDocuments, { freelancerUserId: principal.subject }, { orderBy: 'uploadedAt', direction: 'desc' }),
+      this.context.store.findMany(workContracts, { providerUserId: principal.subject }, { orderBy: 'updatedAt', direction: 'desc' }),
+    ]);
+    if (!organization || !user) throw notFound('The freelancer account is unavailable.');
+
+    const contracts = await Promise.all(allContracts.map(async (contract) => {
+      const [job, buyer, submissions, timeline, rating] = await Promise.all([
+        this.context.store.findOne(jobs, { id: contract.jobId }),
+        this.context.store.findOne(organizations, { id: contract.buyerOrganizationId }),
+        this.context.store.findMany(workSubmissions, { contractId: contract.id }, { orderBy: 'submittedAt', direction: 'desc' }),
+        this.context.timeline.forContract(contract.id),
+        this.context.store.findOne(freelancerRatings, { contractId: contract.id }),
+      ]);
+      return {
+        contract,
+        job: job ? { id: job.id, title: job.title, status: job.status, createdAt: job.createdAt } : null,
+        company: buyer ? { id: buyer.id, legalName: buyer.legalName, country: buyer.country } : null,
+        agreement: this.agreementMetadata(contract),
+        submissions: await Promise.all(submissions.map(async (submission) => {
+          const object = await this.context.store.findOne(uploadedObjects, { id: submission.objectId });
+          return {
+            id: submission.id,
+            milestoneId: submission.milestoneId,
+            version: submission.version,
+            fileName: object?.fileName ?? 'deliverable.bin',
+            contentType: object?.contentType ?? 'application/octet-stream',
+            byteLength: object?.byteLength ?? '0',
+            fileHash: submission.fileHash,
+            buyerDecision: submission.buyerDecision,
+            submittedAt: submission.submittedAt,
+          };
+        })),
+        timeline,
+        rating,
+      };
+    }));
+
+    const contractByApplication = new Map(contracts.map((entry) => [entry.contract.applicationId, entry]));
+    const applicationViews = await Promise.all(applicationRows.map(async (application) => {
+      const [job, company] = await Promise.all([
+        this.context.store.findOne(jobs, { id: application.jobId }),
+        this.context.store.findOne(jobs, { id: application.jobId }).then((row) => row
+          ? this.context.store.findOne(organizations, { id: row.organizationId }) : null),
+      ]);
+      const linked = contractByApplication.get(application.id);
+      return {
+        application,
+        job: job ? { id: job.id, title: job.title, status: job.status, createdAt: job.createdAt } : null,
+        company: company ? { id: company.id, legalName: company.legalName, country: company.country } : null,
+        contract: linked?.contract ?? null,
+      };
+    }));
+
+    const documents = await Promise.all(documentRows.map(async (document) => {
+      const object = await this.context.store.findOne(uploadedObjects, { id: document.objectId });
+      return object ? {
+        id: document.id,
+        category: document.category,
+        fileName: object.fileName,
+        contentType: object.contentType,
+        byteLength: object.byteLength,
+        sha256: object.sha256,
+        uploadedAt: document.uploadedAt,
+      } : null;
+    }));
+
+    const ratings = await Promise.all(reputation.ratings.map(async (rating) => {
+      const buyer = await this.context.store.findOne(organizations, { id: rating.buyerOrganizationId });
+      const contract = contracts.find((entry) => entry.contract.id === rating.contractId);
+      return {
+        ...rating,
+        company: buyer ? { legalName: buyer.legalName, country: buyer.country } : null,
+        jobTitle: contract?.job?.title ?? 'Completed engagement',
+      };
+    }));
+
+    return {
+      user: { id: user.id, displayName: user.displayName, country: user.country },
+      organization,
+      profile,
+      reputation: { ...reputation, ratings },
+      documents: documents.filter((document): document is NonNullable<typeof document> => document !== null),
+      applications: applicationViews,
+      contracts,
+    };
+  }
+
+  async saveFreelancerProfile(principal: Principal, input: FreelancerProfileInput) {
+    requireRole(principal, 'freelancer', 'supplier');
+    const headline = input.headline.trim();
+    const bio = input.bio.trim();
+    const experience = input.experience.map((item) => item.trim()).filter(Boolean);
+    const githubLinks = input.githubLinks.map((item) => item.trim()).filter(Boolean);
+    if (headline.length < 3 || bio.length < 20) throw unprocessable('Add a headline and a meaningful professional bio.');
+    if (githubLinks.some((value) => !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)?\/?$/u.test(value))) {
+      throw unprocessable('GitHub links must use https://github.com/.');
+    }
+    const now = this.context.clock.now().toISOString();
+    const existing = await this.context.store.findOne(freelancerProfiles, { userId: principal.subject });
+    const values = { headline, bio, experience, githubLinks, updatedAt: now };
+    if (existing) {
+      const [updated] = await this.context.store.update(freelancerProfiles, { id: existing.id }, values);
+      return updated ?? { ...existing, ...values };
+    }
+    return this.context.store.insert(freelancerProfiles, {
+      id: this.context.ids.next('FP'), userId: principal.subject, organizationId: principal.organizationId,
+      ...values, createdAt: now,
+    });
+  }
+
+  async uploadFreelancerDocument(principal: Principal, input: FreelancerDocumentInput) {
+    requireRole(principal, 'freelancer', 'supplier');
+    if (!input.fileName.trim() || /[\r\n\0]/u.test(input.fileName) || input.fileName.length > 200) {
+      throw unprocessable('The freelancer document filename is invalid.');
+    }
+    if (!input.contentType.includes('/') || /[\r\n\0]/u.test(input.contentType)) {
+      throw unprocessable('The freelancer document content type is invalid.');
+    }
+    const bytes = decodePrivateFile(input.contentBase64);
+    const objectId = this.context.ids.next('OBJ');
+    const objectKey = objectKeyFor(`freelancer-${input.category.toLowerCase()}`, principal.organizationId, objectId);
+    const stored = await this.context.objects.put(objectKey, bytes, input.contentType);
+    const uploadedAt = this.context.clock.now().toISOString();
+    await this.context.store.insert(uploadedObjects, {
+      id: objectId, bucket: stored.bucket, objectKey: stored.objectKey, fileName: input.fileName.trim(),
+      contentType: stored.contentType, byteLength: String(stored.byteLength), sha256: stored.sha256,
+      ownerOrganizationId: principal.organizationId, classification: `FREELANCER_${input.category}`, createdAt: uploadedAt,
+    });
+    const document = await this.context.store.insert(freelancerDocuments, {
+      id: this.context.ids.next('FDOC'), freelancerUserId: principal.subject,
+      ownerOrganizationId: principal.organizationId, objectId, category: input.category, uploadedAt,
+    });
+    return { document, objectId, fileName: input.fileName.trim(), contentType: stored.contentType, byteLength: String(stored.byteLength), sha256: stored.sha256 };
+  }
+
+  async freelancerDocumentAccess(principal: Principal, documentId: string) {
+    requireRole(principal, 'freelancer', 'supplier');
+    const document = await this.context.store.findOne(freelancerDocuments, { id: documentId });
+    if (!document || document.freelancerUserId !== principal.subject || document.ownerOrganizationId !== principal.organizationId) {
+      throw notFound('The freelancer document is unavailable.');
+    }
+    const object = await this.context.store.findOne(uploadedObjects, { id: document.objectId });
+    if (!object || object.ownerOrganizationId !== principal.organizationId) throw notFound('The private file is missing.');
+    const signed = await this.context.objects.signedDownloadUrl(object.objectKey, this.context.config.storage.signedUrlTtlSeconds, this.context.clock.now());
+    return { url: signed.url, expiresAt: signed.expiresAt, ttlSeconds: signed.ttlSeconds, fileName: object.fileName, contentType: object.contentType, byteLength: object.byteLength, sha256: object.sha256 };
+  }
+
+  async rateFreelancer(principal: Principal, contractId: string, input: RateFreelancerInput) {
+    requireRole(principal, 'company_member', 'platform_admin');
+    const contract = await this.requireContract(contractId);
+    requireOwnership(principal, contract.buyerOrganizationId);
+    if (contract.state !== 'COMPLETED') throw conflict('The freelancer can be rated only after every milestone is paid.');
+    if (!Number.isInteger(input.stars) || input.stars < 1 || input.stars > 5) {
+      throw unprocessable('A freelancer rating must be a whole number from 1 to 5.');
+    }
+    const review = (input.review ?? '').trim();
+    if (review.length > 280) throw unprocessable('The freelancer review must be 280 characters or fewer.');
+    const existing = await this.context.store.findOne(freelancerRatings, { contractId });
+    if (existing) return { rating: existing, reputation: await this.freelancerReputation(contract.providerUserId) };
+    const rating = await this.context.store.insert(freelancerRatings, {
+      id: this.context.ids.next('RATING'),
+      contractId,
+      freelancerUserId: contract.providerUserId,
+      freelancerOrganizationId: contract.providerOrganizationId,
+      buyerOrganizationId: contract.buyerOrganizationId,
+      ratedByUserId: principal.subject,
+      stars: input.stars,
+      review,
+      ratedAt: this.context.clock.now().toISOString(),
+    });
+    await this.context.timeline.append({
+      kind: 'FREELANCER_RATED',
+      actor: this.actor(principal),
+      contractId,
+      detail: { contractId, freelancerUserId: contract.providerUserId, stars: input.stars, ratingId: rating.id },
+    });
+    return { rating, reputation: await this.freelancerReputation(contract.providerUserId) };
+  }
+
+  async myFreelancerReputation(principal: Principal) {
+    requireRole(principal, 'freelancer', 'supplier');
+    return this.freelancerReputation(principal.subject);
+  }
+
+  private async freelancerReputation(freelancerUserId: string) {
+    const ratings = await this.context.store.findMany(
+      freelancerRatings, { freelancerUserId }, { orderBy: 'ratedAt', direction: 'desc' },
+    );
+    const total = ratings.reduce((sum, rating) => sum + rating.stars, 0);
+    return {
+      freelancerUserId,
+      average: ratings.length === 0 ? null : Number((total / ratings.length).toFixed(2)),
+      ratingCount: ratings.length,
+      ratings,
+    };
   }
 
   async saveCompanyPolicyProfile(
@@ -164,6 +483,7 @@ export class MarketplaceService {
       id: objectId,
       bucket: stored.bucket,
       objectKey: stored.objectKey,
+      fileName: input.fileName,
       contentType: stored.contentType,
       byteLength: String(stored.byteLength),
       sha256: stored.sha256,
@@ -361,6 +681,14 @@ export class MarketplaceService {
     }
     const proposedSkills = input.proposedSkills ?? job.skills;
     if (proposedSkills.length === 0) throw unprocessable('A proposal needs at least one relevant skill.');
+    if (input.resumeObjectId) {
+      const proposalObject = await this.context.store.findOne(uploadedObjects, { id: input.resumeObjectId });
+      if (!proposalObject
+        || proposalObject.ownerOrganizationId !== principal.organizationId
+        || !['FREELANCER_PROPOSAL', 'FREELANCER_RESUME'].includes(proposalObject.classification)) {
+        throw unprocessable('The attached proposal document must belong to the applying freelancer.');
+      }
+    }
 
     const application = await this.context.store.insert(applications, {
       id: this.context.ids.next('APP'),
@@ -419,6 +747,7 @@ export class MarketplaceService {
         applicant: {
           label: applicant?.displayName ?? 'Verified professional',
           country: applicant?.country ?? 'ZZ',
+          reputation: await this.freelancerReputation(application.applicantUserId),
         },
         evaluation: evaluations[0] ?? null,
       };
@@ -456,6 +785,7 @@ export class MarketplaceService {
         applicant: {
           label: applicant?.displayName ?? 'Verified professional',
           country: applicant?.country ?? 'ZZ',
+          reputation: await this.freelancerReputation(application.applicantUserId),
         },
         proposal: {
           price: money(application.proposedAmountMinor, application.proposedCurrency, application.proposedScale),
@@ -1012,6 +1342,7 @@ export class MarketplaceService {
       id: objectId,
       bucket: stored.bucket,
       objectKey: stored.objectKey,
+      fileName: `anchor-agreement-v${args.version}.md`,
       contentType: stored.contentType,
       byteLength: String(stored.byteLength),
       sha256: stored.sha256,

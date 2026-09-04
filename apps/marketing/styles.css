@@ -760,6 +760,23 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
 .portal-world.open .portal-logo .brand-mark{width:20px;height:20px}
 .portal-world.open .portal-logo .brand-mark b{background:var(--acid)}
 .portal-world.open .portal-logo strong{color:#fff;font:12px "Press Start 2P",monospace}
+.portal-world.open .company-header-nav,.portal-world.open .freelancer-header-nav{display:flex;align-items:center;gap:13px;margin-left:18px}
+.portal-world.open .company-header-nav[hidden],.portal-world.open .freelancer-header-nav[hidden]{display:none}
+.portal-world.open .company-header-nav button,.portal-world.open .freelancer-header-nav button{padding:5px 0;background:transparent;color:#91a99d;border:0;border-bottom:1px solid transparent;font:5px/1.5 "Press Start 2P",monospace;white-space:nowrap;cursor:pointer}
+.portal-world.open .company-header-nav button:hover,.portal-world.open .company-header-nav button.active,.portal-world.open .freelancer-header-nav button:hover,.portal-world.open .freelancer-header-nav button.active{color:var(--acid);border-bottom-color:var(--acid)}
+.portal-world.open .portal-brand-stack{display:grid;gap:5px;justify-items:start}
+.portal-world.open .portal-dashboard-button{
+  padding:0;
+  background:transparent;
+  color:#91a99d;
+  border:0;
+  border-bottom:1px solid transparent;
+  font:5px/1.5 "Press Start 2P",monospace;
+  cursor:pointer;
+}
+.portal-world.open .portal-dashboard-button:hover,
+.portal-world.open .portal-dashboard-button:focus-visible,
+.portal-world.open .portal-dashboard-button.active{color:var(--acid);border-bottom-color:var(--acid);outline:0}
 .portal-world.open .portal-logo>span{color:#91a99d;border-color:#365446;font:6px "Press Start 2P",monospace}
 .portal-world.open .portal-network{color:var(--acid);font:6px "Press Start 2P",monospace}
 .portal-world.open .portal-network i{background:var(--acid);box-shadow:0 0 8px rgba(217,255,69,.55);border-radius:50%}
@@ -797,6 +814,32 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
     linear-gradient(135deg,#f6f8f3 0%,#edf4e9 52%,#f7f9f4 100%);
 }
 .portal-world.open .portal-view{padding:24px clamp(22px,3vw,48px) 34px}
+
+.company-module-view{min-height:100%;color:#17372d}
+.company-module-heading{display:flex;align-items:end;justify-content:space-between;gap:24px;max-width:1400px;margin:0 auto 28px}
+.company-module-heading small{color:#1b6b50;font:7px "Press Start 2P",monospace}
+.company-module-heading h1{margin:12px 0 8px;color:#071b15;font:clamp(27px,3vw,43px)/1.2 "Press Start 2P",monospace}
+.company-module-heading p{max-width:800px;margin:0;color:#68776f;font:15px/1.65 var(--sans)}
+.company-module-heading button,.company-module-loading button{padding:12px 16px;background:#17372d;color:#fff;border:0;border-radius:7px;font:6px "Press Start 2P",monospace;cursor:pointer}
+.company-library-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;max-width:1400px;margin:0 auto}
+.company-library-card{overflow:hidden;background:#fff;border:1px solid #d8e0da;border-radius:15px;box-shadow:0 18px 48px rgba(19,60,46,.08)}
+.company-library-card>header{display:flex;align-items:start;justify-content:space-between;gap:20px;padding:20px 22px;border-bottom:1px solid #e2e8e3}
+.company-library-card>header small{color:#718078;font:8px "Press Start 2P",monospace}
+.company-library-card>header h3{margin:8px 0 0;color:#123c30;font-size:21px}
+.company-library-card>header>a{padding:10px 12px;background:#d9ff45;color:#071b15;border-radius:6px;font:6px "Press Start 2P",monospace;text-decoration:none;white-space:nowrap}
+.company-library-card>p{padding:0 22px;color:#66756d}
+.company-library-card dl{margin:0;padding:6px 22px 20px}
+.company-library-card dl>div{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;padding:12px 0;border-bottom:1px solid #edf1ee}
+.company-library-card dt{color:#7b8981;font:7px "Press Start 2P",monospace}.company-library-card dd{margin:0;color:#213a31;font:13px var(--mono);overflow-wrap:anywhere}
+.company-policy-columns{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:0 22px 22px}
+.company-policy-columns section{padding:15px;background:#f3f7f1;border-radius:9px}.company-policy-columns b{color:#1b6b50;font:7px "Press Start 2P",monospace}.company-policy-columns p{color:#5e6e65;font-size:12px;line-height:1.55}
+.company-event-list{list-style:none;margin:0;padding:0 22px 22px}.company-event-list li{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #edf1ee}.company-event-list i{width:32px;height:32px;display:grid;place-items:center;background:#edf5e8;border-radius:50%;color:#1b6b50;font:6px "Press Start 2P",monospace;font-style:normal}.company-event-list b,.company-event-list small{display:block}.company-event-list b{font:7px "Press Start 2P",monospace;color:#183c31}.company-event-list small{margin-top:5px;color:#7a8981;font-size:11px}
+.company-module-loading{max-width:900px;margin:80px auto;padding:50px;text-align:center;background:#fff;border:1px solid #d8e0da;border-radius:15px;color:#17372d}.company-module-loading i{display:block;width:16px;height:16px;margin:0 auto 18px;background:#d9ff45;border-radius:50%;box-shadow:0 0 18px #a7d822}.company-module-loading b{font:10px "Press Start 2P",monospace}.company-module-loading p{color:#68776f}.company-module-loading.error{border-color:#b7463d}
+.freelancer-profile-hero{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:20px;padding:24px;background:#123c30;color:#fff;border-radius:14px}.freelancer-profile-hero img{width:84px;height:104px;object-fit:contain}.freelancer-profile-hero h2{margin:7px 0;font-size:24px}.freelancer-profile-hero p{margin:0;color:#bdd0c6}.freelancer-rating-summary{text-align:right}.freelancer-rating-summary strong{display:block;color:var(--acid);font:19px "Press Start 2P",monospace}.freelancer-rating-summary small{color:#bdd0c6}
+.freelancer-profile-form,.freelancer-upload-form{display:grid;gap:15px;padding:22px}.freelancer-profile-form label,.freelancer-upload-form label{display:grid;gap:7px;color:#315349;font:7px "Press Start 2P",monospace}.freelancer-profile-form input,.freelancer-profile-form textarea,.freelancer-upload-form input,.freelancer-upload-form select{width:100%;padding:13px 14px;border:1px solid #cbd8cf;border-radius:7px;background:#f9fbf8;color:#17372d;font:14px/1.5 var(--mono)}.freelancer-profile-form textarea{min-height:110px;resize:vertical}.freelancer-profile-form button,.freelancer-upload-form button{padding:13px 16px;border:0;border-radius:7px;background:#17372d;color:#fff;font:7px "Press Start 2P",monospace;cursor:pointer}.freelancer-profile-form output,.freelancer-upload-form output{min-height:18px;color:#1b6b50;font-size:12px}
+.freelancer-status-pill{display:inline-flex;padding:7px 9px;border-radius:999px;background:#edf5e8;color:#1b6b50;font:6px "Press Start 2P",monospace}.freelancer-document-meta{display:flex;flex-wrap:wrap;gap:8px 16px;padding:0 22px 20px;color:#67776e;font-size:12px}.freelancer-rating-list{display:grid;gap:12px;padding:0 22px 22px}.freelancer-rating-list article{padding:15px;background:#f3f7f1;border-radius:9px}.freelancer-rating-list strong{color:#17372d}.freelancer-rating-list b{color:#bd8a00}.freelancer-rating-list p{margin:8px 0 0;color:#617168}.company-library-card details{margin:0 22px 20px;padding:13px;background:#f3f7f1;border-radius:8px}.company-library-card summary{cursor:pointer;color:#1b6b50;font:7px "Press Start 2P",monospace}.company-library-card details p{line-height:1.6}
+@media(max-width:1250px){.portal-world.open .company-header-nav,.portal-world.open .freelancer-header-nav{gap:8px;margin-left:8px}.portal-world.open .company-header-nav button,.portal-world.open .freelancer-header-nav button{font-size:4px}.portal-logo>span{display:none}.company-library-grid{grid-template-columns:1fr}}
+@media(max-width:850px){.portal-world.open .company-header-nav,.portal-world.open .freelancer-header-nav{display:none}.company-module-heading{align-items:start;flex-direction:column}.company-policy-columns{grid-template-columns:1fr}.freelancer-profile-hero{grid-template-columns:1fr;text-align:center}.freelancer-profile-hero img{margin:auto}.freelancer-rating-summary{text-align:center}}
 
 #portalWorkflow{
   --role-accent:var(--dash-violet);
@@ -1756,3 +1799,37 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
 #portalWorkflow .milestone-settlement-summary{margin:22px 24px;border:1px solid #d8e2db;border-radius:10px;overflow:hidden}
 #portalWorkflow .milestone-settlement-summary>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));background:#fff}
 @media(max-width:700px){#portalWorkflow .delivery-mode-selector>header,#portalWorkflow .milestone-editor>header,#portalWorkflow .milestone-total{align-items:flex-start;flex-direction:column}#portalWorkflow .delivery-mode-selector>div{grid-template-columns:1fr}#portalWorkflow .milestone-editor>header span{text-align:left}#portalWorkflow .milestone-total button{width:100%}}
+
+/* Post-settlement reputation prompt. It deliberately sits above the complete
+   deal analytics like a game result screen, while the submitted score is
+   persisted by the workflow server rather than kept only in the browser. */
+.freelancer-rating-modal{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:24px;opacity:0;transition:opacity 180ms ease}
+.freelancer-rating-modal[hidden]{display:none!important}
+.freelancer-rating-modal.open{opacity:1}
+.freelancer-rating-shade{position:absolute;inset:0;border:0;background:rgba(5,25,19,.76);backdrop-filter:blur(7px);cursor:default}
+.freelancer-rating-modal>form{position:relative;width:min(590px,100%);padding:42px 46px 38px;background:linear-gradient(145deg,#fff 0%,#f6faef 100%);border:1px solid #bfd0c3;border-radius:20px;box-shadow:0 34px 90px rgba(6,35,25,.35);text-align:center;transform:translateY(16px) scale(.97);transition:transform 220ms ease}
+.freelancer-rating-modal.open>form{transform:none}
+.freelancer-rating-close{position:absolute;right:17px;top:14px;width:34px;height:34px;border:0;border-radius:50%;background:#e9f0e9;color:#173e32;font:22px/1 var(--mono);cursor:pointer}
+.freelancer-rating-avatar{width:105px;height:105px;margin:-78px auto 22px;display:grid;place-items:center;background:#d9ff45;border:6px solid #fff;border-radius:50%;box-shadow:0 12px 30px rgba(15,55,40,.2)}
+.freelancer-rating-avatar img{width:82px;height:100px;object-fit:contain;image-rendering:pixelated}
+.freelancer-rating-modal form>small{color:#2b7658;font:6px/1.6 "Press Start 2P",monospace}
+.freelancer-rating-modal h2{margin:16px 0 12px;color:#102b22;font:clamp(23px,4vw,37px)/1.25 "Press Start 2P",monospace!important;letter-spacing:0}
+.freelancer-rating-modal form>p{max-width:470px;margin:0 auto;color:#63736a;font:14px/1.65 var(--sans)}
+.freelancer-rating-modal form>p strong{color:#173e32}
+.freelancer-rating-stars{margin:24px 0 18px;padding:0;border:0}
+.freelancer-rating-stars legend{width:100%;margin-bottom:11px;color:#708078;font:5px/1.5 "Press Start 2P",monospace}
+.freelancer-rating-stars>div{display:flex;justify-content:center;flex-direction:row-reverse;gap:8px}
+.freelancer-rating-stars input{position:absolute;opacity:0;pointer-events:none}
+.freelancer-rating-stars label{color:#d5ddd6;font:42px/1 var(--sans);cursor:pointer;filter:drop-shadow(0 3px 0 rgba(18,55,43,.12));transition:color 120ms ease,transform 120ms ease}
+.freelancer-rating-stars label:hover,.freelancer-rating-stars label:hover~label,.freelancer-rating-stars input:checked~label{color:#f3bf32;transform:translateY(-2px)}
+.freelancer-rating-stars input:focus-visible+label{outline:3px solid #173e32;outline-offset:3px;border-radius:3px}
+.freelancer-rating-review{display:block;text-align:left}
+.freelancer-rating-review span{display:block;margin-bottom:8px;color:#51665b;font:5px/1.5 "Press Start 2P",monospace}
+.freelancer-rating-review textarea{width:100%;min-height:82px;resize:vertical;padding:13px 14px;border:1px solid #cbd8cf;border-radius:8px;background:#fff;color:#173e32;font:13px/1.5 var(--sans)}
+.freelancer-rating-actions{display:grid;grid-template-columns:.7fr 1.3fr;gap:10px;margin-top:18px}
+.freelancer-rating-actions button{min-height:48px;padding:12px;border:1px solid #173e32;border-radius:7px;background:#fff;color:#173e32;font:6px/1.5 "Press Start 2P",monospace;cursor:pointer}
+.freelancer-rating-actions button[type="submit"]{background:#173e32;color:#d9ff45}
+#portalWorkflow .analytics-minimal-footer .analytics-rating-result{display:flex;align-items:center;gap:10px;color:#173e32;font:11px/1.5 var(--mono)}
+#portalWorkflow .analytics-minimal-footer .analytics-rating-result b{color:#e0a91f;font-size:20px;letter-spacing:2px}
+@media(max-width:620px){.freelancer-rating-modal{padding:14px}.freelancer-rating-modal>form{padding:38px 20px 24px}.freelancer-rating-avatar{width:88px;height:88px;margin-top:-68px}.freelancer-rating-avatar img{width:68px;height:85px}.freelancer-rating-stars label{font-size:36px}.freelancer-rating-actions{grid-template-columns:1fr}#portalWorkflow .analytics-minimal-footer .analytics-rating-result{align-items:flex-start;flex-direction:column}}
+@media(prefers-reduced-motion:reduce){.freelancer-rating-modal,.freelancer-rating-modal>form{transition:none}}

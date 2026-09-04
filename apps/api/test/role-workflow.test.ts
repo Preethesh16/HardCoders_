@@ -312,6 +312,53 @@ describe('role-specific hiring workflow', () => {
       token: current.seed.polishCompany.token,
     });
     expect(accessed.status).toBe(200);
-    expect(accessed.body).toMatchObject({ contentType: 'application/vnd.blender', byteLength: '7' });
+    expect(accessed.body).toMatchObject({ fileName: 'model.blend', contentType: 'application/vnd.blender', byteLength: '7' });
+  });
+
+  it('persists a freelancer profile and private portfolio documents with owner-only access', async () => {
+    harness = await createHarness();
+    const current = harness;
+    const freelancer = current.seed.indianFreelancers[0]!;
+    const profile = await call(current, 'POST', '/v1/freelancers/me/profile', {
+      token: freelancer.token,
+      idempotencyKey: 'freelancer-profile-1',
+      body: {
+        headline: 'Cross-border systems engineer',
+        bio: 'I build auditable settlement services and evidence-backed delivery workflows.',
+        experience: ['Built reconciliation services for distributed payment systems.'],
+        githubLinks: ['https://github.com/anchor-demo/reconciliation-engine'],
+      },
+    });
+    expect(profile.status).toBe(200);
+
+    const bytes = Buffer.from([80, 75, 3, 4, 10, 20]);
+    const uploaded = await call(current, 'POST', '/v1/freelancers/me/documents', {
+      token: freelancer.token,
+      idempotencyKey: 'freelancer-document-1',
+      body: {
+        category: 'PORTFOLIO', fileName: 'reconciliation-engine.zip',
+        contentType: 'application/zip', contentBase64: bytes.toString('base64'),
+      },
+    });
+    expect(uploaded.status).toBe(201);
+    expect(uploaded.body).toMatchObject({ fileName: 'reconciliation-engine.zip', byteLength: '6' });
+
+    const workspace = await call(current, 'GET', '/v1/freelancers/me/workspace', { token: freelancer.token });
+    expect(workspace.status).toBe(200);
+    expect(workspace.body.profile).toMatchObject({ headline: 'Cross-border systems engineer' });
+    expect(workspace.body.documents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: uploaded.body.document.id, fileName: 'reconciliation-engine.zip', category: 'PORTFOLIO' }),
+    ]));
+
+    const ownerAccess = await call(current, 'GET', `/v1/freelancers/me/documents/${uploaded.body.document.id}/access`, {
+      token: freelancer.token,
+    });
+    expect(ownerAccess.status).toBe(200);
+    expect(ownerAccess.body).toMatchObject({ fileName: 'reconciliation-engine.zip', sha256: sha256Bytes(bytes) });
+
+    const otherFreelancer = await call(current, 'GET', `/v1/freelancers/me/documents/${uploaded.body.document.id}/access`, {
+      token: current.seed.indianFreelancers[1]!.token,
+    });
+    expect(otherFreelancer.status).toBe(404);
   });
 });

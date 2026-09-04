@@ -78,6 +78,20 @@
       "when": 1788529300000,
       "tag": "0010_milestone_escrows",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788547000000,
+      "tag": "0011_freelancer_reputation",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788550600000,
+      "tag": "0012_freelancer_workspace",
+      "breakpoints": true
     }
   ]
 }

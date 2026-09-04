@@ -21,6 +21,16 @@ import {
   submissionAccess,
   extractForm,
   authorizePortal,
+  companyWorkspace,
+  companyPolicyAccess,
+  companyAgreementAccess,
+  companySubmissionAccess,
+  freelancerWorkspace,
+  saveFreelancerProfile,
+  uploadFreelancerDocument,
+  freelancerDocumentAccess,
+  freelancerAgreementAccess,
+  freelancerSubmissionAccess,
 } from "./workflow.mjs";
 import { createJobBriefPdf } from "./job-brief-pdf.mjs";
 
@@ -147,6 +157,95 @@ const server = createServer(async (req, res) => {
     sendJson(res, 200, { steps: stepList(), run: await currentRunWithLiveSettlement(), runtime: await runtimeMetadata() });
     return;
   }
+  if (requestPath === "/api/company/workspace" && req.method === "GET") {
+    try {
+      if (req.headers["x-anchor-role"] !== "COMPANY") throw new Error("Company workspace access required.");
+      sendJson(res, 200, await companyWorkspace());
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  if (requestPath === "/api/freelancer/workspace" && req.method === "GET") {
+    try {
+      if (req.headers["x-anchor-role"] !== "FREELANCER") throw new Error("Freelancer workspace access required.");
+      sendJson(res, 200, await freelancerWorkspace());
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  if (requestPath === "/api/freelancer/profile" && req.method === "POST") {
+    try {
+      if (req.headers["x-anchor-role"] !== "FREELANCER") throw new Error("Freelancer profile access required.");
+      sendJson(res, 200, await saveFreelancerProfile(await readJson(req)));
+    } catch (error) {
+      sendJson(res, 400, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  if (requestPath === "/api/freelancer/documents" && req.method === "POST") {
+    try {
+      if (req.headers["x-anchor-role"] !== "FREELANCER") throw new Error("Freelancer document access required.");
+      sendJson(res, 201, await uploadFreelancerDocument(await readJson(req)));
+    } catch (error) {
+      sendJson(res, 400, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  const freelancerDocumentMatch = /^\/api\/freelancer\/documents\/([^/]+)\/download$/.exec(requestPath);
+  if (freelancerDocumentMatch && req.method === "GET") {
+    try {
+      await streamPrivateObject(await freelancerDocumentAccess(decodeURIComponent(freelancerDocumentMatch[1])), res, "freelancer-document.bin");
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  const freelancerAgreementMatch = /^\/api\/freelancer\/agreements\/([^/]+)\/download$/.exec(requestPath);
+  if (freelancerAgreementMatch && req.method === "GET") {
+    try {
+      await streamPrivateObject(await freelancerAgreementAccess(decodeURIComponent(freelancerAgreementMatch[1])), res, "anchor-agreement.md");
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  const freelancerSubmissionMatch = /^\/api\/freelancer\/submissions\/([^/]+)\/download$/.exec(requestPath);
+  if (freelancerSubmissionMatch && req.method === "GET") {
+    try {
+      await streamPrivateObject(await freelancerSubmissionAccess(decodeURIComponent(freelancerSubmissionMatch[1])), res, "deliverable.bin");
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  if (requestPath === "/api/company/policy/download" && req.method === "GET") {
+    try {
+      await streamPrivateObject(await companyPolicyAccess(), res, "anchor-company-policy.pdf");
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  const companyAgreementMatch = /^\/api\/company\/agreements\/([^/]+)\/download$/.exec(requestPath);
+  if (companyAgreementMatch && req.method === "GET") {
+    try {
+      await streamPrivateObject(await companyAgreementAccess(decodeURIComponent(companyAgreementMatch[1])), res, "anchor-agreement.md");
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
+  const companySubmissionMatch = /^\/api\/company\/submissions\/([^/]+)\/download$/.exec(requestPath);
+  if (companySubmissionMatch && req.method === "GET") {
+    try {
+      await streamPrivateObject(await companySubmissionAccess(decodeURIComponent(companySubmissionMatch[1])), res, "anchor-deliverable.bin");
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
+    }
+    return;
+  }
   if (requestPath === "/api/authorization/evaluate" && req.method === "POST") {
     try {
       const role = req.headers["x-anchor-role"] === "FREELANCER" ? "FREELANCER" : "COMPANY";
@@ -202,7 +301,8 @@ const server = createServer(async (req, res) => {
   const actionMatch = /^\/api\/workflow\/action\/([a-z-]+)$/.exec(requestPath);
   if (actionMatch && req.method === "POST") {
     try {
-      const result = await runAction(actionMatch[1], await readJson(req));
+      const callerRole = req.headers["x-anchor-role"] === "FREELANCER" ? "FREELANCER" : "COMPANY";
+      const result = await runAction(actionMatch[1], await readJson(req), callerRole);
       sendJson(res, result.ok ? 200 : 422, result);
     } catch (error) {
       sendJson(res, 400, { ok: false, error: String(error.message ?? error) });

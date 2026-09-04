@@ -77,6 +77,20 @@ export const CreateApplicationBody = Type.Object({
   resumeObjectId: Type.Optional(IdentifierSchema),
 }, { additionalProperties: false });
 
+export const SaveFreelancerProfileBody = Type.Object({
+  headline: Type.String({ minLength: 3, maxLength: 160 }),
+  bio: Type.String({ minLength: 20, maxLength: 4_000 }),
+  experience: Type.Array(Type.String({ minLength: 2, maxLength: 1_000 }), { maxItems: 24 }),
+  githubLinks: Type.Array(Type.String({ minLength: 19, maxLength: 300 }), { maxItems: 12, uniqueItems: true }),
+}, { additionalProperties: false });
+
+export const UploadFreelancerDocumentBody = Type.Object({
+  category: Type.Union([Type.Literal('RESUME'), Type.Literal('PROPOSAL'), Type.Literal('PORTFOLIO')]),
+  fileName: Type.String({ minLength: 1, maxLength: 200 }),
+  contentType: Type.String({ minLength: 3, maxLength: 128 }),
+  contentBase64: Type.String({ minLength: 4, maxLength: 24_000_000 }),
+}, { additionalProperties: false });
+
 export const ExtractFormBody = Type.Object({
   purpose: Type.Union([Type.Literal('COMPANY_IDENTITY'), Type.Literal('COMPANY_POLICY'), Type.Literal('JOB_BRIEF'), Type.Literal('FREELANCER_PROPOSAL'), Type.Literal('AGREEMENT_TERMS')]),
   fileName: Type.String({ minLength: 1, maxLength: 200 }),
@@ -122,6 +136,11 @@ export const EvaluateCompanyAuthorizationBody = Type.Object({
   representativeRole: Type.String({ minLength: 2, maxLength: 160 }),
   authorityBasis: Type.String({ minLength: 12, maxLength: 1_000 }),
   mandateReference: Type.String({ minLength: 4, maxLength: 200 }),
+}, { additionalProperties: false });
+
+export const RateFreelancerBody = Type.Object({
+  stars: Type.Integer({ minimum: 1, maximum: 5 }),
+  review: Type.Optional(Type.String({ maxLength: 280 })),
 }, { additionalProperties: false });
 
 export const EvaluateApplicationBody = Type.Object({

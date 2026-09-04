@@ -19,6 +19,11 @@
   let routeOptimizerUntil = 0;
   let routeOptimizerTimer = null;
   let notificationToastTimer = null;
+  let ratingPromptDismissedPaymentId = null;
+  let companySection = "home";
+  let companyWorkspaceModel = null;
+  let freelancerSection = "home";
+  let freelancerWorkspaceModel = null;
   const completionHoldMilliseconds = 4_500;
   const routeOptimizerHoldMilliseconds = 6_000;
 
@@ -67,18 +72,6 @@
 
   const countryNames = { PL: "Poland", IN: "India", GB: "United Kingdom", DE: "Germany", RU: "Russia", KP: "North Korea" };
   const countryCurrencies = { PL: "PLN", IN: "INR", GB: "GBP", DE: "EUR", RU: "RUB", KP: "KPW" };
-  // Circle's public faucet supplies small, zero-value TestNet balances. Keep
-  // public-network demonstrations within a transparent notional cap instead
-  // of silently scaling the real fiat amount committed to the agreement.
-  const testnetBudgetLimits = { PLN: 15, INR: 350, GBP: 3, EUR: 4, RUB: 350, KPW: 3500 };
-
-  function isPublicTestnet() {
-    return String(model.runtime?.network ?? "").toLowerCase() === "testnet";
-  }
-
-  function testnetBudgetLimit(currency) {
-    return isPublicTestnet() ? testnetBudgetLimits[String(currency ?? "").toUpperCase()] : undefined;
-  }
 
   function dealRoute() {
     const r = results();
@@ -147,6 +140,202 @@
     element.dataset.tone = tone;
   }
 
+  function companyModuleCard(title, meta, body, action = "") {
+    return `<article class="company-library-card"><header><div><small>${escape(meta)}</small><h3>${escape(title)}</h3></div>${action}</header>${body}</article>`;
+  }
+
+  function renderCompanyModule() {
+    const target = $("#companyModuleContent");
+    if (!target || companySection === "home") return;
+    const workspace = companyWorkspaceModel;
+    if (!workspace) {
+      target.innerHTML = `<div class="company-module-loading"><i></i><b>LOADING ${escape(companySection.toUpperCase())}</b><p>Resolving your company-scoped PostgreSQL and MinIO records…</p></div>`;
+      return;
+    }
+    const profile = workspace.profile;
+    const contracts = workspace.contracts ?? [];
+    const headings = {
+      policies: ["POLICY DOCS", "Your approved company policy source and the structured clauses Anchor uses when it drafts agreements."],
+      documents: ["DOCUMENT ACCESS", "Private agreement and freelancer delivery bytes. Every click receives a short-lived, authorization-checked MinIO URL."],
+      history: ["COMPANY HISTORY", "Previous jobs, contracts and the persisted event trail for your organization."],
+      profile: ["COMPANY PROFILE", "The verified legal entity, representative authorization and reusable policy identity behind this workspace."],
+    };
+    const [title, copy] = headings[companySection] ?? headings.history;
+    let cards = "";
+    if (companySection === "policies") {
+      cards = profile ? companyModuleCard(
+        profile.sourceFileName,
+        `APPROVED POLICY · VERSION ${profile.version}`,
+        `<dl><div><dt>JURISDICTION</dt><dd>${escape(profile.country)}</dd></div><div><dt>FUNDING CURRENCY</dt><dd>${escape(profile.fundingCurrency)}</dd></div><div><dt>SOURCE SHA-256</dt><dd>${escape(shortRef(profile.sourceArtifactHash, 18))}</dd></div><div><dt>PROFILE HASH</dt><dd>${escape(shortRef(profile.profileHash, 18))}</dd></div><div><dt>AI EXTRACTION</dt><dd>${escape(profile.extractionSource)} · ${escape(profile.extractionModel)}</dd></div></dl><div class="company-policy-columns"><section><b>COMPANY POLICIES</b>${(profile.policies ?? []).map(item => `<p>${escape(item)}</p>`).join("")}</section><section><b>LEGAL CLAUSES</b>${(profile.legalClauses ?? []).map(item => `<p>${escape(item)}</p>`).join("")}</section><section><b>COMMERCIAL STANDARDS</b>${(profile.commercialStandards ?? []).map(item => `<p>${escape(item)}</p>`).join("")}</section></div>`,
+        `<a href="/api/company/policy/download">DOWNLOAD PRIVATE SOURCE ↗</a>`,
+      ) : companyModuleCard("NO POLICY SOURCE YET", "ACTION REQUIRED", "<p>Approve a company policy document from Home Page before generating an agreement.</p>");
+    } else if (companySection === "documents") {
+      const documents = contracts.flatMap(entry => [
+        ...(entry.agreement?.available ? [{ type: "agreement", id: entry.contract.id, title: entry.agreement.fileName, hash: entry.agreement.artifactHash, meta: entry.job?.title }] : []),
+        ...(entry.submissions ?? []).map(item => ({ type: "submission", id: item.id, title: `Deliverable · milestone ${shortRef(item.milestoneId, 7)} · v${item.version}`, hash: item.fileHash, meta: entry.job?.title, decision: item.buyerDecision })),
+      ]);
+      cards = documents.length ? documents.map(item => companyModuleCard(
+        item.title,
+        `${item.type === "agreement" ? "PRIVATE AGREEMENT" : "FREELANCER WORK"} · ${item.decision ?? "AVAILABLE"}`,
+        `<p>${escape(item.meta ?? "Private contract artifact")}</p><dl><div><dt>SHA-256</dt><dd>${escape(shortRef(item.hash, 20))}</dd></div><div><dt>STORAGE</dt><dd>MINIO · AUTHORIZED ACCESS ONLY</dd></div></dl>`,
+        `<a href="/api/company/${item.type === "agreement" ? `agreements/${encodeURIComponent(item.id)}` : `submissions/${encodeURIComponent(item.id)}`}/download">OPEN DOCUMENT ↗</a>`,
+      )).join("") : companyModuleCard("NO DEAL DOCUMENTS YET", "PRIVATE LIBRARY", "<p>Agreements and submitted work will appear here as the deal advances.</p>");
+    } else if (companySection === "history") {
+      cards = contracts.length ? contracts.map(entry => {
+        const recent = [...(entry.timeline ?? [])].reverse().slice(0, 8);
+        return companyModuleCard(
+          entry.job?.title ?? entry.contract.id,
+          `${entry.contract.state} · ${entry.contract.payerCountry} → ${entry.contract.payoutCountry}`,
+          `<dl><div><dt>CONTRACT</dt><dd>${escape(shortRef(entry.contract.id, 16))}</dd></div><div><dt>FREELANCER</dt><dd>${escape(entry.freelancer?.displayName ?? "Verified freelancer")}</dd></div><div><dt>VALUE</dt><dd>${escape(money(entry.contract.amountMinor, entry.contract.amountScale, entry.contract.amountCurrency))}</dd></div><div><dt>CREATED</dt><dd>${escape(new Date(entry.contract.createdAt).toLocaleString())}</dd></div></dl><ol class="company-event-list">${recent.map(event => `<li><i>${escape(String(event.sequence).padStart(2, "0"))}</i><span><b>${escape(event.kind.replaceAll("_", " "))}</b><small>${escape(new Date(event.occurredAt).toLocaleString())}</small></span></li>`).join("")}</ol>`,
+        );
+      }).join("") : companyModuleCard("NO COMPLETED ACTIVITY YET", "HISTORY", `<p>${workspace.jobs?.length ?? 0} job posting(s) exist. Contract history appears after a freelancer is selected.</p>`);
+    } else {
+      const verification = companyVerificationProfile() ?? {};
+      const authorization = companyAuthorization() ?? {};
+      cards = companyModuleCard(
+        workspace.organization?.legalName ?? verification.legalName ?? "Verified company",
+        `${workspace.organization?.country ?? verification.country ?? "—"} · ${authorization.outcome ?? "AUTHORIZED WORKSPACE"}`,
+        `<dl><div><dt>ORGANIZATION</dt><dd>${escape(workspace.organization?.id)}</dd></div><div><dt>REGISTRY</dt><dd>${escape(verification.registryAuthority ?? "Verified during onboarding")}</dd></div><div><dt>REGISTRATION</dt><dd>${escape(verification.registrationNumber ?? "Private")}</dd></div><div><dt>AUTHORIZATION</dt><dd>${escape(authorization.outcome ?? "AUTHORIZED")}</dd></div><div><dt>MANDATE</dt><dd>${escape(authorization.mandateReference ?? "Current tenant mandate")}</dd></div><div><dt>DECISION HASH</dt><dd>${escape(shortRef(authorization.decisionHash, 18))}</dd></div><div><dt>POLICY PROFILE</dt><dd>${escape(profile ? `v${profile.version} · ${shortRef(profile.profileHash, 14)}` : "Pending")}</dd></div></dl>`,
+      );
+    }
+    target.innerHTML = `<header class="company-module-heading"><div><small>COMPANY WORKSPACE</small><h1>${escape(title)}</h1><p>${escape(copy)}</p></div><button type="button" data-company-home>← HOME PAGE</button></header><div class="company-library-grid">${cards}</div>`;
+    target.querySelector("[data-company-home]")?.addEventListener("click", () => $("#portalDashboard")?.click());
+  }
+
+  async function openCompanySection(section) {
+    if (role !== "COMPANY" || section === "home") return;
+    companySection = section;
+    document.querySelectorAll("[data-company-section]").forEach(button => button.classList.toggle("active", button.dataset.companySection === section));
+    document.querySelectorAll(".portal-view").forEach(view => view.classList.remove("active"));
+    $("#portalCompanyModule")?.classList.add("active");
+    companyWorkspaceModel = null;
+    renderCompanyModule();
+    document.querySelector(".portal-main")?.scrollTo(0, 0);
+    try {
+      companyWorkspaceModel = await request("/api/company/workspace");
+      renderCompanyModule();
+    } catch (error) {
+      $("#companyModuleContent").innerHTML = `<div class="company-module-loading error"><b>WORKSPACE UNAVAILABLE</b><p>${escape(error.message)}</p><button type="button" data-company-home>RETURN HOME</button></div>`;
+      $("#companyModuleContent [data-company-home]")?.addEventListener("click", () => $("#portalDashboard")?.click());
+    }
+  }
+
+  function applicationStatus(entry) {
+    if (entry.contract?.state === "COMPLETED") return "COMPLETED";
+    if (entry.contract) return entry.contract.state.replaceAll("_", " ");
+    return String(entry.application?.status ?? "SUBMITTED").replaceAll("_", " ");
+  }
+
+  function renderFreelancerModule() {
+    const target = $("#freelancerModuleContent");
+    if (!target || freelancerSection === "home") return;
+    const workspace = freelancerWorkspaceModel;
+    if (!workspace) {
+      target.innerHTML = `<div class="company-module-loading"><i></i><b>LOADING ${escape(freelancerSection.toUpperCase())}</b><p>Resolving your freelancer-scoped PostgreSQL and MinIO records…</p></div>`;
+      return;
+    }
+    const headings = {
+      documents: ["MY DOCUMENTS", "Proposal sources, portfolio files, private agreements and actual work deliveries that belong to your account."],
+      applications: ["APPLIED COMPANIES", "Every proposal you submitted, the company receiving it and its current persisted status."],
+      history: ["WORK HISTORY", "Past and active engagements reconstructed from your contract event trails."],
+      profile: ["FREELANCER PROFILE", "Your professional identity, work samples and ratings from companies you completed work for."],
+    };
+    const [title, copy] = headings[freelancerSection] ?? headings.history;
+    let cards = "";
+    if (freelancerSection === "documents") {
+      const owned = (workspace.documents ?? []).map(item => ({
+        title: item.fileName, meta: `${item.category} · PRIVATE`, hash: item.sha256,
+        details: `${Number(item.byteLength ?? 0).toLocaleString()} bytes · ${item.contentType}`,
+        href: `/api/freelancer/documents/${encodeURIComponent(item.id)}/download`, date: item.uploadedAt,
+      }));
+      const dealFiles = (workspace.contracts ?? []).flatMap(entry => [
+        ...(entry.agreement?.available ? [{ title: entry.agreement.fileName, meta: "PRIVATE AGREEMENT", hash: entry.agreement.artifactHash, details: entry.job?.title, href: `/api/freelancer/agreements/${encodeURIComponent(entry.contract.id)}/download`, date: entry.contract.updatedAt }] : []),
+        ...(entry.submissions ?? []).map(item => ({ title: item.fileName, meta: `DELIVERABLE · ${item.buyerDecision}`, hash: item.fileHash, details: `${entry.job?.title ?? "Work delivery"} · version ${item.version}`, href: `/api/freelancer/submissions/${encodeURIComponent(item.id)}/download`, date: item.submittedAt })),
+      ]);
+      const documents = [...owned, ...dealFiles].sort((left, right) => String(right.date).localeCompare(String(left.date)));
+      cards = documents.length ? documents.map(item => companyModuleCard(
+        item.title, item.meta,
+        `<p>${escape(item.details)}</p><dl><div><dt>SHA-256</dt><dd>${escape(shortRef(item.hash, 20))}</dd></div><div><dt>STORAGE</dt><dd>MINIO · OWNER/PARTY ACCESS</dd></div><div><dt>RECORDED</dt><dd>${escape(new Date(item.date).toLocaleString())}</dd></div></dl>`,
+        `<a href="${item.href}">OPEN FILE ↗</a>`,
+      )).join("") : companyModuleCard("NO DOCUMENTS YET", "PRIVATE LIBRARY", "<p>Upload a proposal, profile document or work delivery and it will appear here with its persisted hash.</p>");
+    } else if (freelancerSection === "applications") {
+      cards = (workspace.applications ?? []).length ? workspace.applications.map(entry => companyModuleCard(
+        entry.job?.title ?? entry.application.jobId,
+        `${entry.company?.legalName ?? "Company"} · ${entry.company?.country ?? "—"}`,
+        `<p><span class="freelancer-status-pill">${escape(applicationStatus(entry))}</span></p><dl><div><dt>PROPOSED PRICE</dt><dd>${escape(money(entry.application.proposedAmountMinor, entry.application.proposedScale, entry.application.proposedCurrency))}</dd></div><div><dt>DELIVERY</dt><dd>${escape(entry.application.deliveryDays)} days</dd></div><div><dt>APPLIED</dt><dd>${escape(new Date(entry.application.createdAt).toLocaleString())}</dd></div><div><dt>PAYOUT</dt><dd>${escape(`${entry.application.payoutCountry} · ${entry.application.payoutCurrency}`)}</dd></div></dl><details><summary>VIEW YOUR PROPOSAL</summary><p>${escape(entry.application.approach)}</p><p>${escape(entry.application.coverLetter)}</p></details>`,
+      )).join("") : companyModuleCard("NO APPLICATIONS YET", "OPPORTUNITY DESK", "<p>Return Home to review the current company opportunity and submit your first proposal.</p>");
+    } else if (freelancerSection === "history") {
+      cards = (workspace.contracts ?? []).length ? workspace.contracts.map(entry => {
+        const recent = [...(entry.timeline ?? [])].reverse().slice(0, 8);
+        return companyModuleCard(
+          entry.job?.title ?? entry.contract.id,
+          `${entry.contract.state.replaceAll("_", " ")} · ${entry.company?.legalName ?? "Company"}`,
+          `<dl><div><dt>CONTRACT</dt><dd>${escape(shortRef(entry.contract.id, 16))}</dd></div><div><dt>CORRIDOR</dt><dd>${escape(`${entry.contract.payerCountry} → ${entry.contract.payoutCountry}`)}</dd></div><div><dt>VALUE</dt><dd>${escape(money(entry.contract.amountMinor, entry.contract.amountScale, entry.contract.amountCurrency))}</dd></div><div><dt>RATING</dt><dd>${entry.rating ? `${"★".repeat(entry.rating.stars)}${"☆".repeat(5 - entry.rating.stars)} · ${escape(entry.rating.stars)}/5` : "Not rated yet"}</dd></div></dl><ol class="company-event-list">${recent.map(event => `<li><i>${escape(String(event.sequence).padStart(2, "0"))}</i><span><b>${escape(event.kind.replaceAll("_", " "))}</b><small>${escape(new Date(event.occurredAt).toLocaleString())}</small></span></li>`).join("")}</ol>`,
+        );
+      }).join("") : companyModuleCard("NO DEAL HISTORY YET", "WORK HISTORY", "<p>Your selected and completed engagements will appear here without affecting the live Home workflow.</p>");
+    } else {
+      const profile = workspace.profile ?? {};
+      const reputation = workspace.reputation ?? { average: null, ratingCount: 0, ratings: [] };
+      const experience = (profile.experience ?? []).join("\n");
+      const githubLinks = (profile.githubLinks ?? []).join("\n");
+      cards = `<article class="company-library-card" style="grid-column:1/-1"><div class="freelancer-profile-hero"><img src="assets/optiwork-freelancer-pixel.png" alt="Freelancer profile avatar"><div><small>VERIFIED FREELANCER</small><h2>${escape(workspace.user?.displayName ?? "Freelancer")}</h2><p>${escape(profile.headline ?? `${countryLabel(workspace.user?.country)} independent professional`)}</p></div><div class="freelancer-rating-summary"><strong>${reputation.average === null ? "NEW" : `${Number(reputation.average).toFixed(1)}/5`}</strong><small>${escape(reputation.ratingCount)} COMPANY RATING${reputation.ratingCount === 1 ? "" : "S"}</small></div></div><form class="freelancer-profile-form" data-freelancer-profile-form><label>PROFESSIONAL HEADLINE<input name="headline" required minlength="3" maxlength="160" value="${escape(profile.headline ?? "")}" placeholder="e.g. Cross-border systems engineer"></label><label>ABOUT<textarea name="bio" required minlength="20" maxlength="4000" placeholder="Describe your expertise, working style and outcomes">${escape(profile.bio ?? "")}</textarea></label><label>EXPERIENCE · ONE ENTRY PER LINE<textarea name="experience" maxlength="12000" placeholder="Senior engineer · Built payment reconciliation systems">${escape(experience)}</textarea></label><label>GITHUB LINKS · ONE PER LINE<textarea name="githubLinks" maxlength="4000" placeholder="https://github.com/your-name/project">${escape(githubLinks)}</textarea></label><button type="submit">SAVE PROFILE</button><output data-profile-status aria-live="polite"></output></form></article><article class="company-library-card"><header><div><small>PRIVATE PORTFOLIO</small><h3>ADD WORK FILE</h3></div></header><form class="freelancer-upload-form" data-freelancer-upload-form><label>DOCUMENT TYPE<select name="category"><option value="RESUME">RESUME / CV</option><option value="PORTFOLIO">WORK SAMPLE / IMAGE / ARCHIVE</option></select></label><label>CHOOSE ACTUAL FILE<input type="file" name="file" required></label><button type="submit">UPLOAD TO PRIVATE LIBRARY</button><output data-upload-status aria-live="polite"></output></form></article><article class="company-library-card"><header><div><small>COMPANY FEEDBACK</small><h3>RATINGS</h3></div></header><div class="freelancer-rating-list">${(reputation.ratings ?? []).length ? reputation.ratings.map(item => `<article><b>${"★".repeat(item.stars)}${"☆".repeat(5 - item.stars)}</b><strong>${escape(item.company?.legalName ?? "Verified company")}</strong><small>${escape(item.jobTitle)} · ${escape(new Date(item.ratedAt).toLocaleDateString())}</small>${item.review ? `<p>${escape(item.review)}</p>` : ""}</article>`).join("") : "<p>No company ratings yet. Ratings appear after completed and paid work.</p>"}</div></article>`;
+    }
+    target.innerHTML = `<header class="company-module-heading"><div><small>FREELANCER WORKSPACE</small><h1>${escape(title)}</h1><p>${escape(copy)}</p></div><button type="button" data-freelancer-home>← HOME PAGE</button></header><div class="company-library-grid">${cards}</div>`;
+    target.querySelector("[data-freelancer-home]")?.addEventListener("click", () => $("#portalDashboard")?.click());
+    target.querySelector("[data-freelancer-profile-form]")?.addEventListener("submit", saveFreelancerProfileForm);
+    target.querySelector("[data-freelancer-upload-form]")?.addEventListener("submit", uploadFreelancerProfileFile);
+  }
+
+  async function loadFreelancerSection() {
+    freelancerWorkspaceModel = await request("/api/freelancer/workspace");
+    renderFreelancerModule();
+  }
+
+  async function openFreelancerSection(section) {
+    if (role !== "FREELANCER" || section === "home") return;
+    freelancerSection = section;
+    document.querySelectorAll("[data-freelancer-section]").forEach(button => button.classList.toggle("active", button.dataset.freelancerSection === section));
+    document.querySelectorAll(".portal-view").forEach(view => view.classList.remove("active"));
+    $("#portalFreelancerModule")?.classList.add("active");
+    freelancerWorkspaceModel = null;
+    renderFreelancerModule();
+    document.querySelector(".portal-main")?.scrollTo(0, 0);
+    try { await loadFreelancerSection(); }
+    catch (error) {
+      $("#freelancerModuleContent").innerHTML = `<div class="company-module-loading error"><b>WORKSPACE UNAVAILABLE</b><p>${escape(error.message)}</p><button type="button" data-freelancer-home>RETURN HOME</button></div>`;
+      $("#freelancerModuleContent [data-freelancer-home]")?.addEventListener("click", () => $("#portalDashboard")?.click());
+    }
+  }
+
+  async function saveFreelancerProfileForm(event) {
+    event.preventDefault();
+    if (!event.currentTarget.reportValidity()) return;
+    const output = event.currentTarget.querySelector("[data-profile-status]");
+    const data = new FormData(event.currentTarget);
+    output.textContent = "SAVING PROFILE…";
+    try {
+      await request("/api/freelancer/profile", { method: "POST", body: JSON.stringify({ headline: data.get("headline"), bio: data.get("bio"), experience: lines(data.get("experience")), githubLinks: lines(data.get("githubLinks")) }) });
+      await loadFreelancerSection();
+      const refreshedOutput = $("#freelancerModuleContent [data-profile-status]");
+      if (refreshedOutput) refreshedOutput.textContent = "PROFILE SAVED TO POSTGRESQL ✓";
+    } catch (error) { output.textContent = `SAVE FAILED · ${error.message}`; }
+  }
+
+  async function uploadFreelancerProfileFile(event) {
+    event.preventDefault();
+    if (!event.currentTarget.reportValidity()) return;
+    const output = event.currentTarget.querySelector("[data-upload-status]");
+    const data = new FormData(event.currentTarget);
+    const file = data.get("file");
+    output.textContent = "UPLOADING PRIVATE FILE…";
+    try {
+      await request("/api/freelancer/documents", { method: "POST", body: JSON.stringify({ category: data.get("category"), ...(await filePayload(file)) }) });
+      await loadFreelancerSection();
+      const refreshedOutput = $("#freelancerModuleContent [data-upload-status]");
+      if (refreshedOutput) refreshedOutput.textContent = "MINIO FILE + POSTGRESQL METADATA SAVED ✓";
+    } catch (error) { output.textContent = `UPLOAD FAILED · ${error.message}`; }
+  }
+
   function applications() {
     const list = results().applications;
     if (Array.isArray(list)) return list;
@@ -164,6 +353,35 @@
   function selectedApplication() {
     const id = results().selectedApplicationId ?? (results().contract ? results().applicationId : null);
     return applications().find(application => application.id === id) ?? (id ? { id } : null);
+  }
+
+  function completedDealId() {
+    return String(results().settlementTimeline?.payment?.id ?? results().payment?.id ?? results().contractId ?? model.run?.startedAt ?? "completed-deal");
+  }
+
+  function closeRatingModal({ dismiss = false } = {}) {
+    const modal = $("#freelancerRatingModal");
+    if (!modal) return;
+    if (dismiss) ratingPromptDismissedPaymentId = completedDealId();
+    modal.hidden = true;
+    modal.classList.remove("open");
+  }
+
+  function renderRatingModal(analyticsVisible) {
+    const modal = $("#freelancerRatingModal");
+    if (!modal) return;
+    const rating = results().freelancerRating;
+    const dealId = completedDealId();
+    const shouldOpen = role === "COMPANY" && analyticsVisible && !rating && ratingPromptDismissedPaymentId !== dealId;
+    if (!shouldOpen) {
+      closeRatingModal();
+      return;
+    }
+    const freelancer = selectedApplication();
+    $("#freelancerRatingName").textContent = freelancer?.applicantDisplayName ?? "The selected freelancer";
+    $("#freelancerRatingJob").textContent = results().job?.title ?? "this project";
+    modal.hidden = false;
+    requestAnimationFrame(() => modal.classList.add("open"));
   }
 
   function notificationStorageKey() {
@@ -238,6 +456,12 @@
       `${selected?.applicantDisplayName ?? "The freelancer"} accepted the exact terms`,
       `Both approvals bind agreement ${shortRef(agreement()?.artifactHash ?? agreement()?.contractHash, 8)}. Compliance, FX and escrow automation may now proceed.`,
       createdAt("agreement-approve"), "agreement"
+    );
+    if (done("rate-freelancer") && r.freelancerRating) add(
+      "FREELANCER", `rating:${r.freelancerRating.id}`, "NEW COMPANY RATING",
+      `${"★".repeat(r.freelancerRating.stars)}${"☆".repeat(5 - r.freelancerRating.stars)} · ${r.freelancerRating.average.toFixed(1)}/5 profile average`,
+      r.freelancerRating.review || `The company rated your completed work on ${r.job?.title ?? "the project"}.`,
+      createdAt("rate-freelancer", r.freelancerRating.ratedAt), "success"
     );
 
     const submissionActions = Object.entries(run.actions ?? {}).filter(([id, value]) => id.startsWith("submit:") && value?.status === "DONE");
@@ -484,7 +708,6 @@
     const profile = companyPolicyProfile() ?? {};
     const payerCountry = profile.country ?? companyVerificationProfile()?.country ?? "GB";
     const fundingCurrency = countryCurrencies[payerCountry] ?? profile.fundingCurrency ?? "GBP";
-    const publicLimit = testnetBudgetLimit(fundingCurrency);
     return `<section class="workspace-card action-card"><header><span>COMPANY INPUT · REQUIRED</span><b>NEW BRIEF</b></header><form class="workspace-form" data-workspace-form="job">
       ${documentAutofill("JOB_BRIEF")}
       <div class="selected-talent"><small>AUTHORIZED COMPANY · JOB-LEVEL PAYER PROFILE</small><strong>${escape(companyVerificationProfile()?.legalName ?? "Verified demo company")}</strong><span>Choose the payer country for this job. Anchor switches to that country's signed demo entity and reuses the approved policy source; corridor law is evaluated after freelancer selection.</span></div>
@@ -495,10 +718,9 @@
       <div class="field-grid corridor-inputs"><label><span>PAYER COUNTRY</span><select name="payerCountry" data-country-select="fundingCurrency" required>${countryOptions(payerCountry)}</select></label><label><span>FUNDING CURRENCY</span><select name="fundingCurrency" required>${currencyOptions(fundingCurrency)}</select></label></div>
       <label><span>TARGET DELIVERY DATE</span><input name="deliveryDate" type="date" required></label>
       <section class="delivery-mode-selector"><header><small>PAYMENT RELEASE MODEL</small><b>CHOOSE HOW THE WORK WILL BE DELIVERED</b></header><div role="radiogroup" aria-label="Payment release model"><label><input type="radio" name="deliveryMode" value="SINGLE" data-delivery-mode checked><span><b>ONE COMPLETE DELIVERY</b><small>One escrow · one work submission · one final release</small></span></label><label><input type="radio" name="deliveryMode" value="MILESTONES" data-delivery-mode><span><b>MILESTONE RELEASES</b><small>2–5 independent escrows released as each deliverable is approved</small></span></label></div></section>
-      <section class="single-delivery-editor" data-single-delivery><label><span>TOTAL PROJECT BUDGET · ${escape(fundingCurrency)}</span><input name="singleBudget" data-single-budget type="number" min="0.01" step="0.01" required placeholder="1.00"></label><p>Complete the work once, submit one final evidence file, and release the full escrow after company approval.</p><button type="button" data-download-job-brief>DOWNLOAD JOB BRIEF PDF ↓</button></section>
-      <section data-milestone-delivery hidden><div class="field-grid"><label><span>NUMBER OF MILESTONES</span><select name="milestoneCount" data-milestone-count>${[2, 3, 4, 5].map(count => `<option value="${count}" ${count === 2 ? "selected" : ""}>${count} milestones</option>`).join("")}</select></label></div><section class="milestone-editor" data-milestone-editor data-public-limit="${publicLimit ?? ""}"></section><div class="milestone-total"><span><small>TOTAL PROJECT FUNDING</small><b data-milestone-total>0.00 ${escape(fundingCurrency)}</b></span><button type="button" data-download-job-brief>DOWNLOAD MILESTONE BRIEF PDF ↓</button></div></section>
+      <section class="single-delivery-editor" data-single-delivery><label><span>TOTAL PROJECT BUDGET · ${escape(fundingCurrency)}</span><input name="singleBudget" data-single-budget type="number" min="0.01" step="0.01" required placeholder="Enter the amount"></label><p>Complete the work once, submit one final evidence file, and release the full escrow after company approval.</p><button type="button" data-download-job-brief>DOWNLOAD JOB BRIEF PDF ↓</button></section>
+      <section data-milestone-delivery hidden><div class="field-grid"><label><span>NUMBER OF MILESTONES</span><select name="milestoneCount" data-milestone-count>${[2, 3, 4, 5].map(count => `<option value="${count}" ${count === 2 ? "selected" : ""}>${count} milestones</option>`).join("")}</select></label></div><section class="milestone-editor" data-milestone-editor></section><div class="milestone-total"><span><small>TOTAL PROJECT FUNDING</small><b data-milestone-total>0.00 ${escape(fundingCurrency)}</b></span><button type="button" data-download-job-brief>DOWNLOAD MILESTONE BRIEF PDF ↓</button></div></section>
       <input name="budget" data-budget-input type="hidden" value="0">
-      ${publicLimit ? `<p class="form-hint" data-testnet-budget-hint>PUBLIC TESTNET FAUCET LIMIT · MAX ${publicLimit} ${escape(fundingCurrency)} FOR THIS LIVE ON-CHAIN DEMO. USE LOCALNET FOR LARGE NOTIONAL VALUES.</p>` : ""}
       <button type="submit">PUBLISH OPPORTUNITY <b>→</b></button><p class="form-hint" data-delivery-mode-hint>One complete delivery creates one Algorand escrow and releases the full value only against the final approved Fabric evidence.</p>
     </form></section>`;
   }
@@ -506,7 +728,7 @@
   function applicationForm(job) {
     return `<section class="workspace-card action-card"><header><span>YOUR PROPOSAL</span><b>PRIVATE UNTIL SUBMITTED</b></header><form class="workspace-form" data-workspace-form="apply">
       ${documentAutofill("FREELANCER_PROPOSAL")}
-      <div class="field-grid"><label><span>PROPOSED PRICE · ${escape(job?.fundingCurrency ?? job?.budgetCurrency ?? "PAYER CURRENCY")}</span><input name="proposedPrice" type="number" min="0.01" step="0.01" required placeholder="10800.00"></label><label><span>DELIVERY · DAYS</span><input name="deliveryDays" type="number" min="1" max="365" required placeholder="21"></label></div>
+      <div class="field-grid"><label><span>PROPOSED PRICE · ${escape(job?.fundingCurrency ?? job?.budgetCurrency ?? "PAYER CURRENCY")}</span><input name="proposedPrice" type="number" min="0.01" step="0.01" required placeholder="Enter the amount"></label><label><span>DELIVERY · DAYS</span><input name="deliveryDays" type="number" min="1" max="365" required placeholder="21"></label></div>
       <div class="field-grid corridor-inputs"><label><span>TAX RESIDENCE</span><select name="residenceCountry" required><option value="" selected disabled>Choose residence</option><option value="PL">Poland</option><option value="IN">India</option><option value="GB">United Kingdom</option><option value="DE">Germany</option><option value="RU">Russia</option><option value="KP">North Korea</option></select></label><label><span>PAYOUT COUNTRY</span><select name="payoutCountry" data-country-select="payoutCurrency" required><option value="" selected disabled>Choose payout country</option><option value="PL" data-currency="PLN">Poland</option><option value="IN" data-currency="INR">India</option><option value="GB" data-currency="GBP">United Kingdom</option><option value="DE" data-currency="EUR">Germany</option><option value="RU" data-currency="RUB">Russia</option><option value="KP" data-currency="KPW">North Korea</option></select></label></div>
       <label><span>PAYOUT CURRENCY</span><select name="payoutCurrency" required><option value="" selected disabled>Derived from payout country</option><option value="PLN">PLN · Polish złoty</option><option value="INR">INR · Indian rupee</option><option value="GBP">GBP · Pound sterling</option><option value="EUR">EUR · Euro</option><option value="RUB">RUB · Russian ruble</option><option value="KPW">KPW · North Korean won</option></select></label>
       <label><span>AVAILABILITY</span><input name="availability" required minlength="3" placeholder="e.g. Available from Monday, 30 hours/week"></label>
@@ -553,7 +775,7 @@
     return `<section class="workspace-card applicants-card"><header><span>SCREENING DESK</span><b>${escape(model.run?.screening?.status ?? "WAITING")} · ${list.length} PROPOSALS</b></header><div class="applicant-grid">${list.map((application, index) => {
       const evaluation = application.evaluation ?? application.aiEvaluation;
       const chosen = selectedId === application.id;
-      return `<article class="applicant-card ${chosen ? "selected" : ""}"><div class="applicant-rank"><i>${escape(application.rank ?? index + 1)}</i><span><small>${chosen ? "SELECTED" : "AGENT RANK"}</small><b>${evaluation?.score !== undefined ? `${escape(evaluation.score)}/100` : "SCREENING"}</b></span></div><h3>${escape(application.applicantDisplayName ?? application.applicantName ?? `Freelancer ${index + 1}`)}</h3><p>${escape(evaluation?.summary ?? application.coverLetter ?? "Proposal received and awaiting advisory screening.")}</p><dl><div><dt>PRICE</dt><dd>${escape(proposalPrice(application))}</dd></div><div><dt>DELIVERY</dt><dd>${escape(application.deliveryDays ? `${application.deliveryDays} days` : "—")}</dd></div><div><dt>AVAILABILITY</dt><dd>${escape(application.availability)}</dd></div><div><dt>PAYOUT PROFILE</dt><dd>${escape(application.payoutCountry ? `${countryLabel(application.payoutCountry)} · ${application.payoutCurrency ?? "currency pending"}` : "Pending")}</dd></div></dl><details><summary>READ APPROACH</summary><p>${escape(application.approach ?? application.coverLetter)}</p></details>${!selectedId && selectStep && screeningReady ? `<button type="button" data-select-application="${escape(application.id)}">SELECT THIS FREELANCER <b>→</b></button>` : ""}</article>`;
+      return `<article class="applicant-card ${chosen ? "selected" : ""}"><div class="applicant-rank"><i>${escape(application.rank ?? index + 1)}</i><span><small>${chosen ? "SELECTED" : "AGENT RANK"}</small><b>${evaluation?.score !== undefined ? `${escape(evaluation.score)}/100` : "SCREENING"}</b></span></div><h3>${escape(application.applicantDisplayName ?? application.applicantName ?? `Freelancer ${index + 1}`)}</h3><p>${escape(evaluation?.summary ?? application.coverLetter ?? "Proposal received and awaiting advisory screening.")}</p><dl><div><dt>ANCHOR REPUTATION</dt><dd>${application.reputation?.ratingCount ? `${"★".repeat(Math.round(application.reputation.average))}${"☆".repeat(5 - Math.round(application.reputation.average))} · ${escape(application.reputation.average.toFixed(1))}/5 (${escape(application.reputation.ratingCount)})` : "NEW VERIFIED FREELANCER"}</dd></div><div><dt>PRICE</dt><dd>${escape(proposalPrice(application))}</dd></div><div><dt>DELIVERY</dt><dd>${escape(application.deliveryDays ? `${application.deliveryDays} days` : "—")}</dd></div><div><dt>AVAILABILITY</dt><dd>${escape(application.availability)}</dd></div><div><dt>PAYOUT PROFILE</dt><dd>${escape(application.payoutCountry ? `${countryLabel(application.payoutCountry)} · ${application.payoutCurrency ?? "currency pending"}` : "Pending")}</dd></div></dl><details><summary>READ APPROACH</summary><p>${escape(application.approach ?? application.coverLetter)}</p></details>${!selectedId && selectStep && screeningReady ? `<button type="button" data-select-application="${escape(application.id)}">SELECT THIS FREELANCER <b>→</b></button>` : ""}</article>`;
     }).join("")}</div><p class="advisory-note">AI ranking is advisory. The company remains accountable for the final selection.</p></section>`;
   }
 
@@ -898,7 +1120,7 @@
       <section class="settlement-panel blockchain-proof" data-analytics-section="trust-proof"><header><span>TRUST RAIL PROOF</span><b>${escape(`${binding.network ?? "—"} · ${commands.length} COMMANDS`)}</b></header><div class="trust-proof-grid"><article><small>HYPERLEDGER FABRIC</small><b>WORK EVIDENCE + BUYER DECISION</b><p>Submission tx ${escape(shortRef(submissionEvent?.detail?.fabricTxId, 10))}</p><p>Approval tx ${escape(shortRef(approvalEvent?.detail?.fabricTxId ?? r.fabricDecisionTxId, 10))}</p><code>${escape(shortRef(approvalEvent?.detail?.evidenceHash, 12))}</code></article><article><small>ALGORAND ARC-4</small><b>PROVIDER ESCROW + RELEASE</b><p>App ${escape(binding.applicationId)} · ASA ${escape(binding.assetId)}</p><p>${escape(shortRef(binding.originProviderAddress, 9))} → ${escape(shortRef(binding.destinationProviderAddress, 9))}</p><code>${escape(shortRef(binding.bindingHash, 12))}</code></article></div><div class="provider-command-list">${commandRows}</div>${milestoneSettlementRows ? `<div class="analytics-milestone-proof">${milestoneSettlementRows}</div>` : ""}</section>
       <section class="analytics-money-section" data-analytics-section="money-flow"><header class="settlement-section-title"><span>MONEY FLOW + DEDUCTIONS</span><p>Persisted amounts only; every deduction is disclosed.</p></header><div class="settlement-money-flow" aria-label="Money and fee flow"><article class="flow-value source-value"><small>01 · LOCAL FUNDING</small><b>${escape(money(fundingAmount?.amountMinor, fundingAmount?.scale, fundingAmount?.currency))}</b><p>Company fiat book debited</p></article><div class="flow-conversion"><span><small>${escape(legs[0]?.pair ?? "ORIGIN FX")}</small><b>${escape(legs[0] ? `× ${rate(legs[0].rateUnits, legs[0].rateScale)}` : "RATE PENDING")}</b></span><i>→</i><span class="flow-fee"><small>ORIGIN + PLATFORM FEE</small><b>${escape(money(originFee.amountMinor, originFee.scale, originFee.currency))}</b><em>${escape(`${fees.find(item => item.code === "ORIGIN_AND_PLATFORM")?.basisPoints ?? 0} bps`)}</em></span></div><article class="flow-value escrow-value"><small>02 · STABLE VALUE LOCK</small><b>${escape(money(settlementAmount?.amountMinor, settlementAmount?.scale, "USDC"))}</b><p>${escape(`${binding.network ?? "Algorand"} · App ${binding.applicationId ?? "—"}`)}</p></article><div class="flow-conversion"><span><small>${escape(legs[1]?.pair ?? "PAYOUT FX")}</small><b>${escape(legs[1] ? `× ${rate(legs[1].rateUnits, legs[1].rateScale)}` : "RATE PENDING")}</b></span><i>→</i><span class="flow-fee"><small>DESTINATION OFF-RAMP FEE</small><b>${escape(money(destinationFee.amountMinor, destinationFee.scale, destinationFee.currency))}</b><em>${escape(`${fees.find(item => item.code === "DESTINATION_OFFRAMP")?.basisPoints ?? 0} bps`)}</em></span></div><article class="flow-value payout-value"><small>03 · LOCAL PAYOUT</small><b>${escape(money(payoutAmount?.amountMinor, payoutAmount?.scale, payoutAmount?.currency))}</b><p>Beneficiary fiat book credited</p></article></div><div class="analytics-reconciliation"><span><small>QUOTE → ESCROW</small><b>${escape(escrowDifference === null ? "—" : money(escrowDifference.toString(), 6, "USDC"))}</b></span><span><small>ESCROW → RELEASE</small><b>${escape(releaseDifference === null ? "—" : money(releaseDifference.toString(), 6, "USDC"))}</b></span><span><small>UNEXPLAINED VALUE</small><b>${escape(fullyAccounted ? "0.00" : "INVESTIGATE")}</b></span><span><small>LEDGER CHECK</small><b>${escape(fullyAccounted ? "MATCHED" : reconciliation.status ?? "NOT CHECKED")}</b></span></div><p class="network-fee-note">Algorand network fees are paid separately in TestAlgo and are never removed from the USDC escrow or freelancer payout.</p></section>
       <div class="settlement-detail-grid"><section class="settlement-panel" data-analytics-section="corridor-rules"><header><span>CORRIDOR RULE DECISION</span><b>${escape(compliance.outcome ?? plan.outcome ?? "—")}</b></header><div class="receipt-time-grid"><span><small>REGULATIONS FETCHED</small><b>${escape(formatInstant(regulation.report?.checkedAt ?? regulationEvent?.detail?.checkedAt ?? regulationEvent?.occurredAt))}</b></span><span><small>COMPLIANCE DECIDED</small><b>${escape(formatInstant(compliance.evaluatedAt ?? complianceEvent?.occurredAt))}</b></span><span><small>RULESET</small><b>${escape(compliance.rulesVersion ?? "—")}</b></span><span><small>CORPUS HASH</small><b>${escape(shortRef(regulation.report?.approvedCorpusHash ?? regulationEvent?.detail?.approvedCorpusHash, 10))}</b></span></div><div class="receipt-obligations">${categoryRows}</div><div class="receipt-rule-tags">${rules.map(rule => `<span>${escape(rule)}</span>`).join("") || "<span>NO RULE IDS PROJECTED</span>"}</div></section><section class="settlement-panel" data-analytics-section="fx-provenance"><header><span>FX QUOTE PROVENANCE</span><b>${escape(quote.rateSource ?? "—")}</b></header><div class="receipt-time-grid"><span><small>RATE OBSERVED</small><b>${escape(formatInstant(quote.rateObservedAt))}</b></span><span><small>QUOTE CREATED</small><b>${escape(formatInstant(quote.quotedAt ?? fxEvent?.occurredAt))}</b></span><span><small>QUOTE EXPIRY</small><b>${escape(formatInstant(quote.expiresAt))}</b></span><span><small>QUOTE HASH</small><b>${escape(shortRef(quote.canonicalHash, 10))}</b></span></div><div class="analytics-fx-legs">${fxLegRows || '<p class="settlement-empty">No FX legs were projected.</p>'}</div></section></div>
-      <footer class="analytics-minimal-footer">${role === "COMPANY" ? '<button type="button" data-start-new-deal>START A NEW DEAL <b>→</b></button>' : '<span>DEAL CLOSED · WAITING FOR THE NEXT COMPANY BRIEF</span>'}</footer>
+      <footer class="analytics-minimal-footer">${role === "COMPANY" ? `${r.freelancerRating ? `<span class="analytics-rating-result"><b>${"★".repeat(r.freelancerRating.stars)}${"☆".repeat(5 - r.freelancerRating.stars)}</b> ${escape(`${r.freelancerRating.average.toFixed(1)}/5 · ${r.freelancerRating.freelancerName}`)}</span>` : '<button type="button" data-open-rating>RATE FREELANCER <b>★</b></button>'}<button type="button" data-start-new-deal>START A NEW DEAL <b>→</b></button>` : r.freelancerRating ? `<span class="analytics-rating-result"><b>${"★".repeat(r.freelancerRating.stars)}${"☆".repeat(5 - r.freelancerRating.stars)}</b> ${escape(`RATED ${r.freelancerRating.average.toFixed(1)}/5 BY THE COMPANY`)}</span>` : '<span>DEAL CLOSED · WAITING FOR THE COMPANY RATING</span>'}</footer>
     </section>`;
   }
 
@@ -1045,6 +1267,7 @@
     if (r.quote) rows.push(["FX LOCK", `${r.quote.rateSource} · ${r.quote.rateObservedAt}`]);
     if (r.binding) rows.push(["ARC-4 APP", r.binding.applicationId], ["ASA", r.binding.assetId], ["ESCROW", r.binding.dealId]);
     if (r.submission) rows.push(["FABRIC EVIDENCE", r.submission.evidenceId], ["FILE HASH", r.submission.fileHash]);
+    if (r.freelancerRating) rows.push(["FREELANCER RATING", `${r.freelancerRating.stars}/5 · ${r.freelancerRating.freelancerName}`]);
     $("#workspaceSnapshot").innerHTML = `<header>PRIVATE DEAL RECORD</header>${rows.length ? rows.map(([label, value]) => `<div><span>${escape(label)}</span><b>${escape(value)}</b></div>`).join("") : "<p>No deal record yet.</p>"}`;
   }
 
@@ -1129,6 +1352,7 @@
     renderSnapshot();
     renderCompanion();
     bindActions();
+    renderRatingModal(analyticsVisible);
   }
 
   function renderTimedWorkflowTransition() {
@@ -1163,9 +1387,6 @@
     if (budget instanceof HTMLInputElement) budget.value = total.toFixed(2);
     const label = form.querySelector("[data-milestone-total]");
     if (label) label.textContent = `${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
-    const limit = testnetBudgetLimit(currency);
-    const container = form.querySelector("[data-milestone-editor]");
-    if (container) container.dataset.overLimit = String(Boolean(limit && total > limit));
     return total;
   }
 
@@ -1205,7 +1426,7 @@
     container.innerHTML = `<header><div><small>PROJECT RELEASE SCHEDULE</small><h3>${count} MILESTONE ESCROW${count === 1 ? "" : "S"}</h3></div><span>ALLOCATIONS MUST EQUAL PROJECT TOTAL</span></header><div>${Array.from({ length: count }, (_, index) => {
       const ordinal = index + 1;
       const item = drafts[index] ?? {};
-      return `<article class="milestone-input-card"><header><i>${String(ordinal).padStart(2, "0")}</i><div><small>INDEPENDENT RELEASE</small><b>MILESTONE ${ordinal}</b></div></header><label><span>TITLE</span><input name="milestoneTitle${ordinal}" required minlength="3" value="${escape(item.title ?? "")}" placeholder="e.g. Architecture and acceptance tests"></label><label><span>WHAT MUST BE COMPLETED</span><textarea name="milestoneDescription${ordinal}" required minlength="10" placeholder="Describe the work completed in this milestone">${escape(item.description ?? "")}</textarea></label><label><span>DELIVERABLE / PROOF FILE</span><input name="milestoneDeliverable${ordinal}" required minlength="3" value="${escape(item.deliverable ?? "")}" placeholder="e.g. Signed architecture PDF and test report"></label><label><span>MILESTONE ACCEPTANCE CHECKS</span><textarea name="milestoneAcceptance${ordinal}" required minlength="5" placeholder="One objective check per line">${escape(Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria.join("\n") : item.acceptanceCriteria ?? "")}</textarea></label><div class="field-grid"><label><span>ESCROW ALLOCATION · ${escape(currency)}</span><input name="milestoneAmount${ordinal}" data-milestone-amount type="number" min="0.01" step="0.01" required value="${escape(item.amount ?? "")}" placeholder="1.00"></label><label><span>DUE DATE</span><input name="milestoneDueDate${ordinal}" type="date" required value="${escape(item.dueDate ?? finalDate)}"></label></div></article>`;
+      return `<article class="milestone-input-card"><header><i>${String(ordinal).padStart(2, "0")}</i><div><small>INDEPENDENT RELEASE</small><b>MILESTONE ${ordinal}</b></div></header><label><span>TITLE</span><input name="milestoneTitle${ordinal}" required minlength="3" value="${escape(item.title ?? "")}" placeholder="e.g. Architecture and acceptance tests"></label><label><span>WHAT MUST BE COMPLETED</span><textarea name="milestoneDescription${ordinal}" required minlength="10" placeholder="Describe the work completed in this milestone">${escape(item.description ?? "")}</textarea></label><label><span>DELIVERABLE / PROOF FILE</span><input name="milestoneDeliverable${ordinal}" required minlength="3" value="${escape(item.deliverable ?? "")}" placeholder="e.g. Signed architecture PDF and test report"></label><label><span>MILESTONE ACCEPTANCE CHECKS</span><textarea name="milestoneAcceptance${ordinal}" required minlength="5" placeholder="One objective check per line">${escape(Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria.join("\n") : item.acceptanceCriteria ?? "")}</textarea></label><div class="field-grid"><label><span>ESCROW ALLOCATION · ${escape(currency)}</span><input name="milestoneAmount${ordinal}" data-milestone-amount type="number" min="0.01" step="0.01" required value="${escape(item.amount ?? "")}" placeholder="Enter the amount"></label><label><span>DUE DATE</span><input name="milestoneDueDate${ordinal}" type="date" required value="${escape(item.dueDate ?? finalDate)}"></label></div></article>`;
     }).join("")}</div>`;
     container.querySelectorAll("[data-milestone-amount]").forEach(input => input.addEventListener("input", () => updateMilestoneTotal(form)));
     updateMilestoneTotal(form);
@@ -1251,6 +1472,11 @@
     document.querySelectorAll("[data-inspect-stage]").forEach(button => button.addEventListener("click", () => { inspectedStage = button.dataset.inspectStage; render(); document.querySelector(".portal-main")?.scrollTo({ top: 0, behavior: "smooth" }); }));
     $("[data-return-live]")?.addEventListener("click", () => { inspectedStage = null; render(); document.querySelector(".portal-main")?.scrollTo({ top: 0, behavior: "smooth" }); });
     $("[data-start-new-deal]")?.addEventListener("click", reset);
+    $("[data-open-rating]")?.addEventListener("click", () => {
+      ratingPromptDismissedPaymentId = null;
+      renderRatingModal(true);
+      $("#ratingStar5")?.focus();
+    });
     document.querySelectorAll("[data-select-application]").forEach(button => button.addEventListener("click", () => executeByIds(["select", "assign"], { applicationId: button.dataset.selectApplication })));
     $("[data-approve-company-agreement]")?.addEventListener("click", () => executeByIds(["agreement-company-approve"], { acceptedTermsHash: agreement()?.contractHash }));
     $("[data-approve-agreement]")?.addEventListener("click", () => executeByIds(["agreement-approve"], { acceptedTermsHash: agreement()?.contractHash }));
@@ -1260,25 +1486,8 @@
       const currency = country.form?.elements.namedItem(country.dataset.countrySelect);
       const expected = country.selectedOptions[0]?.dataset.currency;
       if (currency instanceof HTMLSelectElement && expected) currency.value = expected;
-      const budget = country.form?.querySelector("[data-budget-input]");
-      const hint = country.form?.querySelector("[data-testnet-budget-hint]");
-      const limit = testnetBudgetLimit(expected);
-      if (budget instanceof HTMLInputElement) {
-        if (limit) {
-          budget.max = String(limit);
-          budget.placeholder = String(limit);
-        } else {
-          budget.removeAttribute("max");
-        }
-      }
-      if (hint && limit) hint.textContent = `PUBLIC TESTNET FAUCET LIMIT · MAX ${limit} ${expected} FOR THIS LIVE ON-CHAIN DEMO. USE LOCALNET FOR LARGE NOTIONAL VALUES.`;
       const form = country.form;
       if (form?.dataset.workspaceForm === "job") {
-        const singleBudget = form.elements.namedItem("singleBudget");
-        if (singleBudget instanceof HTMLInputElement) {
-          if (limit) singleBudget.max = String(limit);
-          else singleBudget.removeAttribute("max");
-        }
         if (form.elements.namedItem("deliveryMode")?.value === "MILESTONES") renderMilestoneEditor(form, form.elements.namedItem("milestoneCount")?.value);
         else updateMilestoneTotal(form);
       }
@@ -1428,13 +1637,8 @@
     }
     if (kind === "job") {
       if (countryCurrencies[data.get("payerCountry")] !== data.get("fundingCurrency")) return setStatus("PAYER COUNTRY AND FUNDING CURRENCY DO NOT MATCH_", "error");
-      const publicLimit = testnetBudgetLimit(data.get("fundingCurrency"));
-      if (publicLimit && Number(data.get("budget")) > publicLimit) {
-        return setStatus(`PUBLIC TESTNET FAUCET LIMIT · USE ${publicLimit} ${data.get("fundingCurrency")} OR LESS, OR SWITCH TO LOCALNET FOR LARGE NOTIONALS_`, "error");
-      }
       const milestoneDrafts = milestoneDraftsFromForm(event.currentTarget);
       const total = updateMilestoneTotal(event.currentTarget);
-      if (publicLimit && total > publicLimit) return setStatus(`PUBLIC TESTNET FAUCET LIMIT · MILESTONE TOTAL MUST BE ${publicLimit} ${data.get("fundingCurrency")} OR LESS_`, "error");
       const milestonePayload = milestoneDrafts.map((item) => ({
         title: item.title,
         description: item.description,
@@ -1448,10 +1652,18 @@
     if (kind === "apply") {
       if (countryCurrencies[data.get("payoutCountry")] !== data.get("payoutCurrency")) return setStatus("PAYOUT COUNTRY AND PAYOUT CURRENCY DO NOT MATCH_", "error");
       const fundingCurrency = results().job?.fundingCurrency ?? results().job?.budgetCurrency;
-      return executeByIds(["apply"], { jobId: data.get("jobId"), coverLetter: data.get("coverLetter"), approach: data.get("approach"), availability: data.get("availability"), deliveryDays: Number(data.get("deliveryDays")), residenceCountry: data.get("residenceCountry"), payoutCountry: data.get("payoutCountry"), payoutCurrency: data.get("payoutCurrency"), proposedPrice: { amountMinor: String(Math.round(Number(data.get("proposedPrice")) * 100)), currency: fundingCurrency, scale: 2 } });
+      const proposalFile = data.get("draftFile");
+      let resumeObjectId;
+      if (proposalFile instanceof File && proposalFile.size > 0) {
+        setStatus("SAVING PROPOSAL SOURCE TO PRIVATE MINIO LIBRARY_", "working");
+        const uploaded = await request("/api/freelancer/documents", { method: "POST", body: JSON.stringify({ category: "PROPOSAL", ...(await filePayload(proposalFile)) }) });
+        resumeObjectId = uploaded.objectId;
+      }
+      return executeByIds(["apply"], { jobId: data.get("jobId"), coverLetter: data.get("coverLetter"), approach: data.get("approach"), availability: data.get("availability"), deliveryDays: Number(data.get("deliveryDays")), residenceCountry: data.get("residenceCountry"), payoutCountry: data.get("payoutCountry"), payoutCurrency: data.get("payoutCurrency"), proposedPrice: { amountMinor: String(Math.round(Number(data.get("proposedPrice")) * 100)), currency: fundingCurrency, scale: 2 }, ...(resumeObjectId ? { resumeObjectId } : {}) });
     }
     if (kind === "terms") return executeByIds(["terms"], {});
     if (kind === "submit") return executeByIds(["submit"], { ...(await filePayload(data.get("file"))), note: data.get("note") });
+    if (kind === "rating") return executeByIds(["rate-freelancer"], { stars: Number(data.get("stars")), review: data.get("review") });
   }
 
   async function executeByIds(ids, payload = {}) {
@@ -1559,6 +1771,14 @@
   async function init() {
     if (!initialized) {
       initialized = true;
+      document.querySelectorAll("[data-company-section]").forEach(button => button.addEventListener("click", () => openCompanySection(button.dataset.companySection)));
+      document.querySelectorAll("[data-freelancer-section]").forEach(button => button.addEventListener("click", () => openFreelancerSection(button.dataset.freelancerSection)));
+      $("#portalDashboard")?.addEventListener("click", () => {
+        companySection = "home";
+        freelancerSection = "home";
+        document.querySelectorAll("[data-company-section]").forEach(button => button.classList.remove("active"));
+        document.querySelectorAll("[data-freelancer-section]").forEach(button => button.classList.remove("active"));
+      });
       $("#workflowReset")?.addEventListener("click", reset);
       $("#notificationButton")?.addEventListener("click", () => {
         const popover = $("#notificationPopover");
@@ -1573,6 +1793,13 @@
         renderNotificationCenter();
       });
       $("#notificationToast")?.addEventListener("click", openNotificationCenter);
+      $("#freelancerRatingForm")?.addEventListener("submit", event => {
+        event.preventDefault();
+        if (!event.currentTarget.reportValidity()) return;
+        const data = new FormData(event.currentTarget);
+        executeByIds(["rate-freelancer"], { stars: Number(data.get("stars")), review: data.get("review") });
+      });
+      document.querySelectorAll("[data-rating-later]").forEach(button => button.addEventListener("click", () => closeRatingModal({ dismiss: true })));
       document.addEventListener("click", event => {
         const popover = $("#notificationPopover");
         if (popover?.hidden || popover?.contains(event.target) || $("#notificationButton")?.contains(event.target)) return;
@@ -1589,5 +1816,26 @@
     } catch (error) { setStatus(`WORKSPACE UNAVAILABLE · ${error.message}`, "error"); }
   }
 
-  window.OptiWorkWorkflow = { init, setRole(nextRole) { role = nextRole === "FREELANCER" ? "FREELANCER" : "COMPANY"; inspectedStage = null; closeNotificationCenter(); if (initialized) { syncNotifications(); render(); } } };
+  window.OptiWorkWorkflow = {
+    init,
+    showDashboard() {
+      companySection = "home";
+      freelancerSection = "home";
+      document.querySelectorAll("[data-company-section]").forEach(button => button.classList.remove("active"));
+      document.querySelectorAll("[data-freelancer-section]").forEach(button => button.classList.remove("active"));
+      inspectedStage = null;
+      closeNotificationCenter();
+      if (initialized) render();
+    },
+    setRole(nextRole) {
+      role = nextRole === "FREELANCER" ? "FREELANCER" : "COMPANY";
+      companySection = "home";
+      freelancerSection = "home";
+      $("#companyHeaderNav").hidden = role !== "COMPANY";
+      $("#freelancerHeaderNav").hidden = role !== "FREELANCER";
+      inspectedStage = null;
+      closeNotificationCenter();
+      if (initialized) { syncNotifications(); render(); }
+    }
+  };
 })();

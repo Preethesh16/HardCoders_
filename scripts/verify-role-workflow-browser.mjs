@@ -224,6 +224,19 @@ try {
   await sleep(3_600);
   const afterPolling = await freelancer.state();
   if (afterPolling.run?.startedAt !== startedAt) throw new Error('Background polling reset the shared deal.');
+  for (const browser of [company, freelancer]) {
+    const dashboardControl = await browser.evaluate(`({
+      visible: document.querySelector('#portalDashboard')?.offsetParent !== null,
+      label: document.querySelector('#portalDashboard')?.textContent?.trim(),
+      current: document.querySelector('#portalDashboard')?.getAttribute('aria-current')
+    })`);
+    if (!dashboardControl.visible || dashboardControl.label !== 'HOME PAGE' || dashboardControl.current !== 'page') {
+      throw new Error(`${browser.role}: dashboard control is missing or inactive: ${JSON.stringify(dashboardControl)}`);
+    }
+    await browser.click('#portalDashboard');
+    const afterDashboard = await browser.state();
+    if (afterDashboard.run?.startedAt !== startedAt) throw new Error(`${browser.role}: dashboard navigation replaced the active deal.`);
+  }
 
   const roleSeparation = await freelancer.evaluate(`({
     hasCompanyForm: document.querySelector('[data-workspace-form="job"]') !== null,
@@ -259,10 +272,13 @@ try {
     singleVisible: document.querySelector('[data-single-delivery]')?.hidden === false,
     milestoneHidden: document.querySelector('[data-milestone-delivery]')?.hidden === true,
     milestoneFields: document.querySelectorAll('[data-milestone-editor] .milestone-input-card').length,
-    singleBudgetRequired: document.querySelector('[name="singleBudget"]')?.required === true
+    singleBudgetRequired: document.querySelector('[name="singleBudget"]')?.required === true,
+    singleBudgetValue: document.querySelector('[name="singleBudget"]')?.value,
+    singleBudgetPlaceholder: document.querySelector('[name="singleBudget"]')?.placeholder
   })`);
   if (defaultReleaseMode.selected !== 'SINGLE' || !defaultReleaseMode.singleVisible || !defaultReleaseMode.milestoneHidden
-    || defaultReleaseMode.milestoneFields !== 0 || !defaultReleaseMode.singleBudgetRequired) {
+    || defaultReleaseMode.milestoneFields !== 0 || !defaultReleaseMode.singleBudgetRequired
+    || defaultReleaseMode.singleBudgetValue !== '' || defaultReleaseMode.singleBudgetPlaceholder !== 'Enter the amount') {
     throw new Error(`Single-delivery mode is not the clean default: ${JSON.stringify(defaultReleaseMode)}`);
   }
   await company.click('[name="deliveryMode"][value="MILESTONES"]');
@@ -271,10 +287,14 @@ try {
     singleHidden: document.querySelector('[data-single-delivery]')?.hidden === true,
     milestoneVisible: document.querySelector('[data-milestone-delivery]')?.hidden === false,
     milestoneFields: document.querySelectorAll('[data-milestone-editor] .milestone-input-card').length,
-    singleBudgetDisabled: document.querySelector('[name="singleBudget"]')?.disabled === true
+    singleBudgetDisabled: document.querySelector('[name="singleBudget"]')?.disabled === true,
+    amountValues: Array.from(document.querySelectorAll('[data-milestone-amount]')).map(element => element.value),
+    amountPlaceholders: Array.from(document.querySelectorAll('[data-milestone-amount]')).map(element => element.placeholder)
   })`);
   if (milestoneReleaseMode.selected !== 'MILESTONES' || !milestoneReleaseMode.singleHidden || !milestoneReleaseMode.milestoneVisible
-    || milestoneReleaseMode.milestoneFields !== 2 || !milestoneReleaseMode.singleBudgetDisabled) {
+    || milestoneReleaseMode.milestoneFields !== 2 || !milestoneReleaseMode.singleBudgetDisabled
+    || milestoneReleaseMode.amountValues.some(value => value !== '')
+    || milestoneReleaseMode.amountPlaceholders.some(value => value !== 'Enter the amount')) {
     throw new Error(`Milestone release mode did not activate explicitly: ${JSON.stringify(milestoneReleaseMode)}`);
   }
   await company.uploadFile('[data-extract-purpose="JOB_BRIEF"]', jobDraft);
@@ -310,6 +330,8 @@ try {
   if (JSON.stringify(payoutCountryOptions) !== JSON.stringify(supportedCountryCodes)) throw new Error(`Freelancer country selector is incomplete: ${JSON.stringify(payoutCountryOptions)}`);
   const visibleOpportunity = await freelancer.evaluate(`document.querySelector('#workspaceAction')?.innerText ?? ''`);
   if (!/AUDITABLE CROSS-BORDER RECONCILIATION ENGINE/iu.test(visibleOpportunity)) throw new Error('Freelancer did not receive the Company job title.');
+  const emptyProposalPrice = await freelancer.evaluate(`({ value: document.querySelector('[name="proposedPrice"]')?.value, placeholder: document.querySelector('[name="proposedPrice"]')?.placeholder })`);
+  if (emptyProposalPrice.value !== '' || emptyProposalPrice.placeholder !== 'Enter the amount') throw new Error(`Freelancer price was prefilled: ${JSON.stringify(emptyProposalPrice)}`);
 
   await freelancer.uploadFile('[data-extract-purpose="FREELANCER_PROPOSAL"]', proposalDraft);
   await freelancer.waitFor('["success", "warning", "error"].includes(document.querySelector("[data-extraction-status]")?.dataset.tone)', 'Freelancer proposal extraction returned no final status.', 45_000);
@@ -418,8 +440,31 @@ try {
   await freelancer.waitFor('document.querySelector("[data-transfer-screen][data-state=completed] .deal-complete-confirmation") !== null', 'Freelancer payment confirmation did not render the completed release.', 15_000);
   await company.waitFor('document.querySelector("[data-settlement-analytics] .settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Company did not advance from payment confirmation to the fresh reconciled analytics page.', 15_000);
   await freelancer.waitFor('document.querySelector("[data-settlement-analytics] .settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Freelancer did not advance from payment confirmation to the fresh reconciled analytics page.', 15_000);
+  await company.waitFor('document.querySelector("#freelancerRatingModal")?.classList.contains("open") === true', 'The completed company deal did not open the freelancer rating prompt.', 15_000);
+  const ratingPrompt = await Promise.all([company, freelancer].map(browser => browser.evaluate(`({
+    visible: document.querySelector('#freelancerRatingModal')?.hidden === false,
+    name: document.querySelector('#freelancerRatingName')?.textContent,
+    job: document.querySelector('#freelancerRatingJob')?.textContent
+  })`)));
+  if (!ratingPrompt[0].visible || ratingPrompt[1].visible || !ratingPrompt[0].name || ratingPrompt[0].job !== 'Build an auditable cross-border reconciliation engine') {
+    throw new Error(`The post-deal rating prompt is not company-only or deal-derived: ${JSON.stringify(ratingPrompt)}`);
+  }
+  await company.evaluate(`(() => {
+    const star = document.querySelector('#ratingStar5');
+    const review = document.querySelector('#freelancerRatingForm textarea[name="review"]');
+    const form = document.querySelector('#freelancerRatingForm');
+    if (!(star instanceof HTMLInputElement) || !(review instanceof HTMLTextAreaElement) || !(form instanceof HTMLFormElement)) return false;
+    star.checked = true;
+    review.value = 'Excellent delivery, clear evidence and dependable milestone communication.';
+    form.requestSubmit();
+    return true;
+  })()`);
+  await company.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.results?.freelancerRating?.stars === 5 && value.run?.results?.freelancerRating?.ratingCount >= 1)`, 'The freelancer rating was not persisted with the completed deal.', 15_000);
+  await company.waitFor('document.querySelector(".analytics-rating-result")?.textContent.includes("5.0/5") === true', 'The company did not receive the updated freelancer rating summary.', 15_000);
+  await freelancer.waitFor('document.querySelector(".analytics-rating-result")?.textContent.includes("RATED 5.0/5") === true', 'The freelancer portal did not receive the company rating.', 15_000);
   await company.waitFor('document.querySelector("#notificationList")?.innerText.includes("PAYMENT RELEASED") === true', 'Company did not receive the payment-release notification.', 15_000);
   await freelancer.waitFor('document.querySelector("#notificationList")?.innerText.includes("MILESTONE PAYMENT RECEIVED") === true', 'Freelancer did not receive the milestone payout notification.', 15_000);
+  await freelancer.waitFor('document.querySelector("#notificationList")?.innerText.includes("NEW COMPANY RATING") === true', 'The freelancer did not receive the persisted rating notification.', 15_000);
   const notificationInteraction = await freelancer.evaluate(`(() => {
     const button = document.querySelector('#notificationButton');
     if (!(button instanceof HTMLButtonElement)) return null;

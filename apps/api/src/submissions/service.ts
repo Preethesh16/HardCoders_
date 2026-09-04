@@ -122,6 +122,7 @@ export class SubmissionService {
       id: objectId,
       bucket: stored.bucket,
       objectKey: stored.objectKey,
+      fileName: input.fileName,
       contentType: stored.contentType,
       byteLength: String(stored.byteLength),
       sha256: stored.sha256,
@@ -239,6 +240,7 @@ export class SubmissionService {
       ttlSeconds: signed.ttlSeconds,
       fileHash: submission.fileHash,
       contentType: object.contentType,
+      fileName: object.fileName,
       byteLength: object.byteLength,
     };
   }
@@ -401,6 +403,7 @@ export class SubmissionService {
       id: objectId,
       bucket: stored.bucket,
       objectKey: stored.objectKey,
+      fileName: `${code}.bin`,
       contentType,
       byteLength: String(stored.byteLength),
       sha256: stored.sha256,
