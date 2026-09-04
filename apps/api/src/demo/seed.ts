@@ -13,7 +13,7 @@
 import type { VerifiableCredential } from '@optiwork/contracts';
 import { createDemoIssuer, signCredential, subjectCommitment } from '../identity/credentials.js';
 import type { AppContext } from '../context.js';
-import { memberships, organizations, users } from '../db/schema.js';
+import { companyRepresentativeMandates, memberships, organizations, users } from '../db/schema.js';
 import { IdentityService } from '../identity/service.js';
 import { encodeDemoPrincipal, type Principal } from '../auth/authorization.js';
 
@@ -137,11 +137,13 @@ const PARTIES: readonly PartySpec[] = [
   },
   {
     organizationId: 'ORG-GB-COMPANY',
-    legalName: 'Thames Product Systems Ltd.',
+    // Real public-record sample used only to demonstrate registry lookup. The
+    // product and demo representative have no affiliation with this company.
+    legalName: 'WISE PAYMENTS LIMITED',
     country: 'GB',
     kind: 'COMPANY',
     userId: 'USER-GB-BUYER',
-    displayName: 'London product lead',
+    displayName: 'Anchor demo contracting representative',
     roles: ['company_member'],
     assuranceLevel: 'ENHANCED',
     credential: true,
@@ -335,6 +337,23 @@ export async function seedDemo(context: AppContext): Promise<SeedResult> {
       token: encodeDemoPrincipal(principal),
       organizationId: spec.organizationId,
       credentialId,
+    });
+  }
+
+  const demoMandateId = 'CRM-GB-DEMO-001';
+  if (!await context.store.findOne(companyRepresentativeMandates, { id: demoMandateId })) {
+    await context.store.insert(companyRepresentativeMandates, {
+      id: demoMandateId,
+      organizationId: 'ORG-GB-COMPANY',
+      subject: 'USER-GB-BUYER',
+      representativeEmail: 'demo@anchor.dev',
+      representativeRole: 'Anchor demo contracting representative',
+      mandateReference: 'ANCHOR-DEMO-MANDATE-GB-001',
+      authorityBasis: 'Tenant administrator approved this representative for the local demonstration.',
+      status: 'ACTIVE',
+      validFrom: new Date(now.getTime() - 86_400_000).toISOString(),
+      validUntil: new Date(now.getTime() + 365 * 86_400_000).toISOString(),
+      createdAt: now.toISOString(),
     });
   }
 

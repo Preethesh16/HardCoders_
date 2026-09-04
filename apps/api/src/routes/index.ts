@@ -15,6 +15,7 @@ import { PaymentService } from '../payments/service.js';
 import { EXECUTABLE_CORRIDOR_BOOKS, isExecutableCorridorBook } from '../payments/providers.js';
 import { SubmissionService } from '../submissions/service.js';
 import { IdentityService } from '../identity/service.js';
+import { CompanyAuthorizationService } from '../identity/company-authorization.js';
 import { inspect, listCorridors, resolve } from '../corridor/service.js';
 import { evaluate } from '../compliance/engine.js';
 import { buildQuote } from '../fx/quote.js';
@@ -45,6 +46,7 @@ import {
   CreateSubmissionBody,
   DecideSubmissionBody,
   ErrorSchema,
+  EvaluateCompanyAuthorizationBody,
   EvaluateApplicationBody,
   ExtractFormBody,
   HealthSchema,
@@ -98,6 +100,7 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
   const payments = new PaymentService(context);
   const submissions = new SubmissionService(context);
   const identity = new IdentityService(context);
+  const companyAuthorization = new CompanyAuthorizationService(context);
 
   app.get('/health/live', { schema: { response: { 200: HealthSchema } } }, async () => ({
     name: 'optiwork-api' as const,
@@ -125,6 +128,26 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
     const body = request.body as Static<typeof ExtractFormBody>;
     requireRole(principal, body.purpose === 'FREELANCER_PROPOSAL' ? 'freelancer' : 'company_member');
     return extractFormDraft(context.config.ai, body);
+  });
+
+  // Legal-entity verification and representative authority are evaluated
+  // before the company workspace opens. This supplements token verification;
+  // it never replaces the cryptographic identity provider or tenant RBAC.
+  app.get('/v1/company/authorization', async (request) => ({
+    profile: await companyAuthorization.latestProfile(principalOf(request)),
+    decision: await companyAuthorization.latestDecision(principalOf(request)),
+  }));
+
+  app.post('/v1/company/authorization/evaluate', {
+    schema: { body: EvaluateCompanyAuthorizationBody, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    const body = request.body as Static<typeof EvaluateCompanyAuthorizationBody>;
+    return mutate(context, request, reply, principal, {
+      scope: 'company-authorization.evaluate',
+      statusCode: 201,
+      run: async () => companyAuthorization.evaluate(principal, body),
+    });
   });
 
   app.get('/v1/company/policy-profile', async (request) => ({

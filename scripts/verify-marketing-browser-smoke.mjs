@@ -95,17 +95,28 @@ try {
   await waitFor('document.querySelector("#demoModal")?.classList.contains("open")', 'Role selection did not open.');
   await click('#continueRole');
   await waitFor('document.querySelector("#loginWorld")?.classList.contains("open")', 'Demo login did not open.');
+  const companyIdentityText = [
+    'Legal name: WISE PAYMENTS LIMITED', 'Country: GB', 'Registry authority: COMPANIES_HOUSE',
+    'Registration number: 07209813', 'LEI: 213800U4GNTXRFYZKG18',
+    'Registered address: 1st Floor, Worship Square, 65 Clifton Street, London, England, EC2A 4JE',
+    'Directors: Jane Fahey', 'Beneficial owners: Wise Financial Holdings Ltd|PERSON_WITH_SIGNIFICANT_CONTROL',
+    'Representative email: demo@anchor.dev', 'Representative role: Anchor demo contracting representative',
+    'Authority basis: Tenant administrator approved this representative for the local demonstration.',
+    'Mandate reference: ANCHOR-DEMO-MANDATE-GB-001',
+  ].join('\n');
+  await evaluate(`(() => { const input = document.querySelector('#companyIdentityFile'); const transfer = new DataTransfer(); transfer.items.add(new File([${JSON.stringify(companyIdentityText)}], 'company-onboarding.txt', { type: 'text/plain' })); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await waitFor('document.querySelector("#companyIdentityFileStatus")?.dataset.tone === "success" && !document.querySelector("#loginForm .login-submit")?.disabled', 'Company identity document did not unlock authorization.', 45_000);
   await click('#loginForm .login-submit');
-  await waitFor('document.querySelector("#portalWorld")?.classList.contains("open")', 'The portal did not open.', 10_000);
+  await waitFor('document.querySelector("#portalWorld")?.classList.contains("open")', 'The portal did not open.', 35_000);
   await api('/api/workflow/reset');
   await evaluate('window.OptiWorkWorkflow.init()');
   const initialState = await state();
   if (!initialState.run.results.companyPolicyProfile) {
     await api('/api/workflow/action/onboard', {
-      companyCountry: 'PL', fundingCurrency: 'PLN', fileName: 'northstar-policy.txt', contentType: 'text/plain',
+      companyCountry: 'GB', fundingCurrency: 'GBP', fileName: 'anchor-company-policy.txt', contentType: 'text/plain',
       contentBase64: Buffer.from('Approved Northstar policy', 'utf8').toString('base64'),
       policies: ['Confidential information remains private to authorized contract participants.'],
-      legalClauses: ['Polish law governs the agreement and disputes follow written escalation.'],
+      legalClauses: ['English law governs the agreement and disputes follow written escalation.'],
       commercialStandards: ['One evidence-backed revision is included before final acceptance.'],
       authorizedApprovers: ['Procurement Director'], extractionSource: 'FIXTURE', extractionModel: 'browser-smoke',
     });
@@ -121,10 +132,10 @@ try {
 
   await api('/api/workflow/action/job', {
     title: 'Build a cross-border settlement reconciliation service',
-    description: 'Deliver an auditable TypeScript service, tests, operating guide, and reconciliation dashboard for the Poland to India corridor.',
+    description: 'Deliver an auditable TypeScript service, tests, operating guide, and reconciliation dashboard for the United Kingdom to India corridor.',
     acceptanceCriteria: 'All integration tests pass\nBoth ledger references reconcile\nNo PII appears on public ledgers',
-    skills: ['typescript', 'postgresql', 'fabric', 'algorand'], deliveryDate: '2026-10-31', payerCountry: 'PL', fundingCurrency: 'PLN', destinationCountry: 'IN',
-    budget: { amountMinor: '1200000', currency: 'PLN', scale: 2 },
+    skills: ['typescript', 'postgresql', 'fabric', 'algorand'], deliveryDate: '2026-10-31', payerCountry: 'GB', fundingCurrency: 'GBP', destinationCountry: 'IN',
+    budget: { amountMinor: '1200000', currency: 'GBP', scale: 2 },
   });
   await evaluate('window.OptiWorkWorkflow.setRole("FREELANCER")');
   await evaluate('window.OptiWorkWorkflow.init()');
@@ -136,7 +147,7 @@ try {
     coverLetter: 'I have delivered TypeScript settlement services and evidence-led approval systems for regulated workflows.',
     approach: 'Start with acceptance tests, implement reconciliation invariants, then deliver the dashboard and operating evidence.',
     availability: 'Available immediately for 32 hours per week', deliveryDays: 16,
-    proposedPrice: { amountMinor: '1180000', currency: 'PLN', scale: 2 },
+    proposedPrice: { amountMinor: '1180000', currency: 'GBP', scale: 2 },
   });
   await waitFor(`fetch('/api/workspace/state').then(value => value.json()).then(value => value.run?.screening?.status === 'COMPLETED')`, 'Automatic multi-applicant screening did not complete.', 60_000);
   const screened = await state();
@@ -165,11 +176,11 @@ try {
   await evaluate('window.OptiWorkWorkflow.init()');
   await waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'The company journey rail did not complete.');
   const companyResult = await evaluate(`({ text: document.querySelector('#workspaceAction')?.innerText ?? '', snapshot: document.querySelector('#workspaceSnapshot')?.textContent ?? '' })`);
-  if (!/COMPLETED/iu.test(companyResult.text) || !/ARC-4 APP/u.test(companyResult.snapshot) || !/FABRIC EVIDENCE/u.test(companyResult.snapshot)) throw new Error(`Company proof is incomplete: ${JSON.stringify(companyResult)}`);
+  if (!/DEAL COMPLETE|COMPLETED/iu.test(companyResult.text) || !/ARC-4 APP/u.test(companyResult.snapshot) || !/FABRIC EVIDENCE/u.test(companyResult.snapshot)) throw new Error(`Company proof is incomplete: ${JSON.stringify(companyResult)}`);
   await evaluate('window.OptiWorkWorkflow.setRole("FREELANCER")');
   await waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'The freelancer journey rail did not complete.');
   const finalFreelancerText = await evaluate(`document.querySelector('#workspaceAction')?.innerText ?? ''`);
-  if (/POST A JOB/iu.test(finalFreelancerText) || !/COMPLETED/iu.test(finalFreelancerText)) throw new Error('The completed freelancer portal is not differentiated.');
+  if (/POST A JOB/iu.test(finalFreelancerText) || !/DEAL COMPLETE|COMPLETED/iu.test(finalFreelancerText)) throw new Error('The completed freelancer portal is not differentiated.');
 
   if (process.env.OPTIWORK_SCREENSHOT_PATH) {
     const captured = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });

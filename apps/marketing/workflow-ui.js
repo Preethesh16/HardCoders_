@@ -23,6 +23,8 @@
   const firstStep = (...ids) => model.steps.find(step => ids.includes(step.id));
   const hasDone = (...ids) => ids.some(isDone);
   const companyPolicyProfile = () => results().companyPolicyProfile ?? null;
+  const companyVerificationProfile = () => results().companyVerificationProfile ?? null;
+  const companyAuthorization = () => results().companyAuthorization ?? null;
 
   function money(minor, scale = 2, currency = "PLN") {
     if (minor === undefined || minor === null || minor === "") return "—";
@@ -72,6 +74,14 @@
 
   function countryLabel(code) {
     return countryNames[String(code ?? "").toUpperCase()] ?? code ?? "Pending";
+  }
+
+  function countryOptions(selected) {
+    return Object.entries(countryNames).map(([code, name]) => `<option value="${code}" data-currency="${countryCurrencies[code]}" ${code === selected ? "selected" : ""}>${escape(name)} · ${code}</option>`).join("");
+  }
+
+  function currencyOptions(selected) {
+    return Object.entries(countryCurrencies).map(([code, currency]) => `<option value="${currency}" ${currency === selected ? "selected" : ""}>${currency} · ${escape(countryNames[code])}</option>`).join("");
   }
 
   function displayedPolicyOutcome(plan, regulation, compliance) {
@@ -168,7 +178,7 @@
       : settlementHeld ? "Stopped before quote or signing" : "Rules, FX and funding";
     const evidenceDetail = r.submission ? `Fabric ${shortRef(r.submission.evidenceId, 7)}` : "Validate evidence, decide, release";
     const companyPhases = [
-      ["01", "Company profile", companyPolicyProfile() ? `Policy v${companyPolicyProfile().version} approved` : "Upload and approve once", ["onboard"], phase === "COMPANY_ONBOARDING"],
+      ["01", "Company setup", companyPolicyProfile() ? `Identity authorized · policy v${companyPolicyProfile().version}` : "Identity authorized · policy pending", ["onboard"], phase === "COMPANY_ONBOARDING"],
       ["02", "Publish brief", "Define scope and budget", ["job"], phase === "JOB_DRAFT"],
       ["03", "Choose talent", proposalDetail, ["apply", "select"], ["APPLICATIONS_OPEN", "SCREENING", "COMPANY_SELECTION"].includes(phase)],
       ["04", "Lock agreement", agreementDetail, ["terms", "agreement-company-approve", "agreement-approve"], ["AGREEMENT_DRAFT", "AWAITING_COMPANY_AGREEMENT", "AWAITING_FREELANCER_AGREEMENT"].includes(phase)],
@@ -221,31 +231,44 @@
     return `<section class="workspace-card policy-profile-card"><header><span>APPROVED COMPANY POLICY</span><b>VERSION ${escape(profile.version)}</b></header><div class="policy-profile-summary"><span><small>COMPANY COUNTRY</small><b>${escape(countryLabel(profile.country))}</b></span><span><small>FUNDING CURRENCY</small><b>${escape(profile.fundingCurrency)}</b></span><span><small>PROFILE HASH</small><b>${escape(shortRef(profile.profileHash, 10))}</b></span><span><small>SOURCE HASH</small><b>${escape(shortRef(profile.sourceArtifactHash, 10))}</b></span></div><p>Approved once and reused as a versioned agreement source. The original document remains private in MinIO.</p></section>`;
   }
 
+  function companyVerificationCard() {
+    const profile = companyVerificationProfile();
+    const authorization = companyAuthorization();
+    if (!profile || !authorization) return "";
+    const passed = (authorization.checks ?? []).filter(check => check.status === "PASSED").length;
+    return `<section class="workspace-card policy-profile-card"><header><span>LOGIN AUTHORIZATION AGENT</span><b>${escape(authorization.outcome)}</b></header><div class="policy-profile-summary"><span><small>LEGAL ENTITY</small><b>${escape(profile.legalName)}</b></span><span><small>PUBLIC REGISTER</small><b>${escape(`${profile.registryAuthority} · ${profile.registrationNumber}`)}</b></span><span><small>ENTITY STATUS</small><b>${escape(profile.entityStatus)}</b></span><span><small>AUTHORITY CHECKS</small><b>${escape(`${passed}/${authorization.checks?.length ?? 0} PASSED`)}</b></span></div><p>Registry evidence and sanctions/ownership screening are separate from the tenant mandate authorizing this signed-in representative. Public-record demo; no affiliation with the referenced company.</p></section>`;
+  }
+
   function onboardingForm() {
-    return `<section class="workspace-card action-card"><header><span>COMPANY ONBOARDING · ONCE PER POLICY VERSION</span><b>HUMAN APPROVAL REQUIRED</b></header><form class="workspace-form" data-workspace-form="onboard">
+    const identity = companyVerificationProfile() ?? {};
+    const verifiedCountry = identity.country ?? "GB";
+    const verifiedCurrency = countryCurrencies[verifiedCountry] ?? "GBP";
+    return `${companyVerificationCard()}<section class="workspace-card action-card"><header><span>POLICY VAULT · AFTER IDENTITY AUTHORIZATION</span><b>HUMAN APPROVAL REQUIRED</b></header><form class="workspace-form" data-workspace-form="onboard">
       ${documentAutofill("COMPANY_POLICY")}
-      <div class="field-grid corridor-inputs"><label><span>REGISTERED COMPANY COUNTRY</span><select name="companyCountry" data-country-select="fundingCurrency" required><option value="" selected disabled>Choose verified country</option><option value="PL" data-currency="PLN">Poland</option><option value="IN" data-currency="INR">India</option><option value="GB" data-currency="GBP">United Kingdom</option><option value="DE" data-currency="EUR">Germany</option><option value="RU" data-currency="RUB">Russia</option><option value="KP" data-currency="KPW">North Korea</option></select></label><label><span>STANDARD FUNDING CURRENCY</span><select name="fundingCurrency" required><option value="" selected disabled>Derived from company country</option><option value="PLN">PLN · Polish złoty</option><option value="INR">INR · Indian rupee</option><option value="GBP">GBP · Pound sterling</option><option value="EUR">EUR · Euro</option><option value="RUB">RUB · Russian ruble</option><option value="KPW">KPW · North Korean won</option></select></label></div>
+      <div class="selected-talent"><small>VERIFIED COMPANY · FROM LOGIN AUTHORIZATION</small><strong>${escape(identity.legalName ?? "Company identity pending")}</strong><span>${escape(countryLabel(verifiedCountry))} · ${escape(identity.registryAuthority ?? "Registry pending")} ${escape(identity.registrationNumber ?? "")}</span></div><input type="hidden" name="companyCountry" value="${escape(verifiedCountry)}"><input type="hidden" name="fundingCurrency" value="${escape(verifiedCurrency)}">
       <label><span>COMPANY POLICIES</span><textarea name="policies" required minlength="20" placeholder="Security, confidentiality, IP, data handling and communication standards"></textarea></label>
       <label><span>LEGAL STANDARDS</span><textarea name="legalClauses" required minlength="20" placeholder="Governing law, disputes, ownership, termination and warranties"></textarea></label>
       <label><span>COMMERCIAL STANDARDS</span><textarea name="commercialStandards" required minlength="20" placeholder="Invoicing, revisions, payment timing and expense rules"></textarea></label>
       <label><span>AUTHORIZED APPROVERS</span><textarea name="authorizedApprovers" required minlength="5" placeholder="Roles authorized to approve private work agreements"></textarea></label>
       <input type="hidden" name="extractionSource" value="FIXTURE"><input type="hidden" name="extractionModel" value="manual-review-v1">
-      <button type="submit">APPROVE VERSIONED COMPANY PROFILE <b>→</b></button><p class="form-hint">AI extracts a draft; a company representative reviews every field. The approved profile is reusable, but AI never accepts an agreement.</p>
+      <button type="submit">APPROVE VERSIONED POLICY PROFILE <b>→</b></button><p class="form-hint">The legal entity and representative were authorized at login. This separate source defines reusable company standards; AI extracts a draft but never accepts an agreement.</p>
     </form></section>`;
   }
 
   function jobForm() {
     const profile = companyPolicyProfile() ?? {};
+    const payerCountry = profile.country ?? companyVerificationProfile()?.country ?? "GB";
+    const fundingCurrency = countryCurrencies[payerCountry] ?? profile.fundingCurrency ?? "GBP";
     return `<section class="workspace-card action-card"><header><span>COMPANY INPUT · REQUIRED</span><b>NEW BRIEF</b></header><form class="workspace-form" data-workspace-form="job">
       ${documentAutofill("JOB_BRIEF")}
-      <div class="selected-talent"><small>VERIFIED PAYER PROFILE · FROM ONBOARDING</small><strong>${escape(countryLabel(profile.country))}</strong><span>Funding currency ${escape(profile.fundingCurrency)} · policy version ${escape(profile.version)}</span></div>
+      <div class="selected-talent"><small>AUTHORIZED COMPANY · JOB-LEVEL PAYER PROFILE</small><strong>${escape(companyVerificationProfile()?.legalName ?? "Verified demo company")}</strong><span>Choose the payer country for this job. Anchor switches to that country's signed demo entity and reuses the approved policy source; corridor law is evaluated after freelancer selection.</span></div>
       <label><span>WORK TITLE</span><input name="title" required minlength="4" autocomplete="off" placeholder="e.g. Build a settlement reconciliation service"></label>
       <label><span>SCOPE OF WORK</span><textarea name="description" required minlength="20" placeholder="Explain the problem, expected outcome and what must be delivered"></textarea></label>
       <label><span>ACCEPTANCE CRITERIA</span><textarea name="acceptanceCriteria" required minlength="10" placeholder="List the objective checks used to accept the final work"></textarea></label>
       <div class="field-grid"><label><span>REQUIRED SKILLS</span><input name="skills" required placeholder="TypeScript, PostgreSQL, reconciliation"></label><label><span>FUNDING AMOUNT</span><input name="budget" type="number" min="1" step="0.01" required placeholder="12000.00"></label></div>
-      <input type="hidden" name="payerCountry" value="${escape(profile.country)}"><input type="hidden" name="fundingCurrency" value="${escape(profile.fundingCurrency)}">
+      <div class="field-grid corridor-inputs"><label><span>PAYER COUNTRY</span><select name="payerCountry" data-country-select="fundingCurrency" required>${countryOptions(payerCountry)}</select></label><label><span>FUNDING CURRENCY</span><select name="fundingCurrency" required>${currencyOptions(fundingCurrency)}</select></label></div>
       <label><span>TARGET DELIVERY DATE</span><input name="deliveryDate" type="date" required></label>
-      <button type="submit">PUBLISH OPPORTUNITY <b>→</b></button><p class="form-hint">Only job-specific facts are entered here. Company policy and payer identity come from the approved onboarding profile.</p>
+      <button type="submit">PUBLISH OPPORTUNITY <b>→</b></button><p class="form-hint">Country and currency are deal inputs. The server still enforces their mapping and uses an authorized, signed demo payer identity for the selected jurisdiction.</p>
     </form></section>`;
   }
 
@@ -453,12 +476,13 @@
         <figure><div><img src="assets/optiwork-freelancer-pixel.png" alt="Freelancer"></div><figcaption><small>FREELANCER · ${escape(countryLabel(route.destinationCountry).toUpperCase())}</small><b>${completed ? "MONEY RECEIVED" : "AWAITING CREDIT"}</b><em>${escape(payoutAmount ? money(payoutAmount.amountMinor, payoutAmount.scale, payoutAmount.currency) : payoutCurrency)}</em></figcaption></figure>
       </div>
       <dl class="transfer-proof"><div><dt>FABRIC DECISION</dt><dd>${escape(shortRef(results().fabricDecisionTxId, 10))}</dd></div><div><dt>ESCROW DEAL</dt><dd>${escape(shortRef(binding?.dealId, 10))}</dd></div><div><dt>NETWORK</dt><dd>${escape(binding?.network ?? "LOCALNET")}</dd></div></dl>
+      ${completed ? `<section class="deal-complete-confirmation"><i>✓</i><div><small>PAYMENT CONFIRMATION</small><h4>DEAL COMPLETE.</h4><p>${escape(`${money(payoutAmount?.amountMinor, payoutAmount?.scale, payoutCurrency)} credited after Fabric-approved evidence released escrow ${shortRef(binding?.dealId, 8)}.`)}</p></div>${role === "COMPANY" ? '<button type="button" data-start-new-deal>START A NEW DEAL →</button>' : '<span>COMPANY + FREELANCER OBLIGATIONS CLOSED</span>'}</section>` : ""}
       <p class="transfer-explainer">The characters visualize the real provider-mediated flow. The company and freelancer remain fiat-only; neither user receives cryptocurrency or signs a blockchain transaction.</p>
     </section>`;
   }
 
   function showTransferScreen(phase) {
-    return phase === "RELEASING" || Date.now() < transferAnimationUntil;
+    return phase === "RELEASING" || phase === "COMPLETED" || Date.now() < transferAnimationUntil;
   }
 
   function waiting(title, copy) {
@@ -484,7 +508,7 @@
   function renderCompany() {
     const r = results();
     const phase = model.run?.phase;
-    if (!companyPolicyProfile() && !r.job) return stageScreen("01", "COMPANY ONBOARDING", "Approve your reusable policy profile", "Upload the company policy once. AI extracts a reviewable draft; your approval versions the source document and structured obligations for future agreements.", onboardingForm());
+    if (!companyPolicyProfile() && !r.job) return stageScreen("01", "VERIFIED COMPANY SETUP", "Store the reusable company policy", "The Authorization Agent already verified the legal entity, ownership/sanctions evidence and your tenant mandate. Now approve the separate policy source used for future agreements.", onboardingForm());
     if (!r.job) return stageScreen("02", "PUBLISH THE MISSION", "Create the work brief", "Describe only this engagement: outcome, acceptance proof, skills, budget and delivery date. Standard company policies come from onboarding.", `${policyProfileCard()}${jobForm()}`);
     if (!r.selectedApplicationId && !r.contract) return stageScreen("03", "SCREENING DESK", "Choose the right freelancer", "Live proposals are ranked by the advisory agent. You remain responsible for the final award.", `${jobBrief(r.job)}${applicantCards()}`, applications().length ? "HUMAN DECISION" : "WAITING FOR TALENT");
     if (phase === "AGREEMENT_DRAFT" || !agreement()) return stageScreen("04", "PRIVATE AGREEMENT", "Generate from approved sources", "The agreement agent combines the versioned company policy, job brief and selected proposal. No company policy is entered again.", termsForm(selectedApplication()));
@@ -567,6 +591,57 @@
     $("#workspaceSnapshot").innerHTML = `<header>PRIVATE DEAL RECORD</header>${rows.length ? rows.map(([label, value]) => `<div><span>${escape(label)}</span><b>${escape(value)}</b></div>`).join("") : "<p>No deal record yet.</p>"}`;
   }
 
+  function currentMachineStage() {
+    const groups = [model.run?.automation?.stages, model.run?.deliveryAutomation?.stages, model.run?.screening?.stages].filter(Boolean);
+    const rows = groups.flatMap(stages => Object.entries(stages).map(([id, value]) => ({ id, ...value })));
+    return rows.find(stage => stage.status === "RUNNING") ?? rows.findLast?.(stage => ["FAILED", "REVIEW", "COMPLETED"].includes(stage.status)) ?? rows.at(-1);
+  }
+
+  function companionNarration() {
+    const r = results();
+    const phase = model.run?.phase ?? "COMPANY_ONBOARDING";
+    const route = dealRoute();
+    const company = role === "COMPANY";
+    const selected = selectedApplication();
+    const liveStage = currentMachineStage();
+    const payout = r.quote?.payoutAmount ?? (r.payment?.payoutAmountMinor ? { amountMinor: r.payment.payoutAmountMinor, scale: r.payment.payoutScale, currency: r.payment.payoutCurrency } : null);
+    const narration = {
+      COMPANY_ONBOARDING: ["COMPANY SETUP", "Your company identity is authorized. Add the reusable policy source once; it will feed every agreement."],
+      JOB_DRAFT: ["BRIEF THE MISSION", "Choose the payer country and currency for this job. Anchor will derive the legal corridor only after a freelancer is selected."],
+      APPLICATIONS_OPEN: [company ? "PROPOSALS INCOMING" : "MAKE YOUR CASE", company ? `${applications().length} proposal${applications().length === 1 ? " is" : "s are"} currently attached to “${r.job?.title ?? "this job"}”.` : `Set your own price and destination country for “${r.job?.title ?? "this opportunity"}”.`],
+      SCREENING: ["SCREENING LIVE", `The advisory agent is comparing ${applications().length} proposals by skills, price, timing and approach. The company keeps the final choice.`],
+      COMPANY_SELECTION: [company ? "YOU CHOOSE" : "AWAITING THE COMPANY", selected ? `${selected.applicantDisplayName ?? "The selected freelancer"} is ranked and ready for the company's decision.` : "The ranking is complete; no award has been recorded yet."],
+      AGREEMENT_DRAFT: ["AGREEMENT SOURCES READY", `${selected?.applicantDisplayName ?? "The freelancer"}'s proposal will be combined with the job brief and policy profile—not invented from a blank prompt.`],
+      AWAITING_COMPANY_AGREEMENT: [company ? "CHECK BEFORE YOU ACCEPT" : "COMPANY IS REVIEWING", `Agreement ${shortRef(agreement()?.artifactHash ?? agreement()?.contractHash, 7)} is private in MinIO. Approval binds this exact hash.`],
+      AWAITING_FREELANCER_AGREEMENT: [company ? "SENT FOR COUNTERSIGNING" : "YOUR APPROVAL IS NEEDED", `Both parties see agreement ${shortRef(agreement()?.artifactHash ?? agreement()?.contractHash, 7)}. Escrow cannot start until the freelancer accepts it.`],
+      AUTOMATING_ESCROW: ["AUTOPILOT IS WORKING", liveStage?.detail ?? `${countryLabel(route.originCountry)} → ${countryLabel(route.destinationCountry)} rules, taxes and FX are being resolved.`],
+      AUTOMATION_FAILED: ["SETTLEMENT STOPPED SAFELY", r.regulatoryPlan?.hardGate?.reasons?.[0] ?? model.run?.automation?.error ?? "The compliance hard gate stopped funding before any blockchain signature."],
+      AWAITING_DELIVERY: [company ? "ESCROW IS READY" : "YOUR WORK CAN START", `${money(r.binding?.amountUsdcMinor, r.binding?.scale ?? 6, "USDC")} is locked on ${r.binding?.network ?? "Algorand"} for deal ${shortRef(r.binding?.dealId, 7)}.`],
+      VALIDATING_DELIVERY: ["PROOF IS BEING CHECKED", liveStage?.detail ?? `Fabric evidence ${shortRef(r.submission?.evidenceId, 7)} is linked to the private file.`],
+      VALIDATION_FAILED: ["VALIDATION NEEDS ATTENTION", liveStage?.detail ?? "The advisory validation did not complete; no release was authorized."],
+      AWAITING_WORK_APPROVAL: [company ? "YOUR DECISION UNLOCKS PAYMENT" : "COMPANY REVIEW IN PROGRESS", `${r.submission?.fileName ?? "The delivery"} scored ${r.workValidation?.score ?? "—"}/100. Only a company approval can authorize release.`],
+      RELEASING: ["PAYMENT IS MOVING", liveStage?.detail ?? `Fabric approval is releasing escrow ${shortRef(r.binding?.dealId, 7)} through the provider rail.`],
+      RELEASE_FAILED: ["RELEASE HELD", liveStage?.detail ?? "The release did not confirm, so the workflow remains open and no duplicate payout is permitted."],
+      COMPLETED: ["DEAL COMPLETE", `${money(payout?.amountMinor, payout?.scale, payout?.currency ?? route.payoutCurrency)} is credited. Fabric evidence, Algorand release and the local ledger now reconcile.`]
+    };
+    const [title, copy] = narration[phase] ?? ["LIVE DEAL GUIDE", `Current workflow state: ${phase.replaceAll("_", " ")}.`];
+    return { phase, title, copy };
+  }
+
+  function renderCompanion() {
+    const element = $("#dealCompanion");
+    if (!element) return;
+    const narration = companionNarration();
+    const company = role === "COMPANY";
+    element.dataset.phase = narration.phase.toLowerCase();
+    $("#dealCompanionStage").textContent = `${company ? "COMPANY" : "FREELANCER"} GUIDE · ${narration.phase.replaceAll("_", " ")}`;
+    $("#dealCompanionTitle").textContent = narration.title;
+    $("#dealCompanionCopy").textContent = narration.copy;
+    const character = $("#dealCompanionCharacter");
+    character.src = company ? "assets/optiwork-company-pixel.png" : "assets/optiwork-freelancer-pixel.png";
+    character.alt = `${company ? "Company" : "Freelancer"} workflow guide`;
+  }
+
   function render() {
     const company = role === "COMPANY";
     const route = dealRoute();
@@ -585,12 +660,14 @@
     $("#workspaceAction").innerHTML = inspectedStage ? renderInspection(inspectedStage) : company ? renderCompany() : renderFreelancer();
     renderRail();
     renderSnapshot();
+    renderCompanion();
     bindActions();
   }
 
   function bindActions() {
     document.querySelectorAll("[data-inspect-stage]").forEach(button => button.addEventListener("click", () => { inspectedStage = button.dataset.inspectStage; render(); document.querySelector(".portal-main")?.scrollTo({ top: 0, behavior: "smooth" }); }));
     $("[data-return-live]")?.addEventListener("click", () => { inspectedStage = null; render(); document.querySelector(".portal-main")?.scrollTo({ top: 0, behavior: "smooth" }); });
+    $("[data-start-new-deal]")?.addEventListener("click", reset);
     document.querySelectorAll("[data-select-application]").forEach(button => button.addEventListener("click", () => executeByIds(["select", "assign"], { applicationId: button.dataset.selectApplication })));
     $("[data-approve-company-agreement]")?.addEventListener("click", () => executeByIds(["agreement-company-approve"], { acceptedTermsHash: agreement()?.contractHash }));
     $("[data-approve-agreement]")?.addEventListener("click", () => executeByIds(["agreement-approve"], { acceptedTermsHash: agreement()?.contractHash }));
@@ -659,8 +736,6 @@
       });
       const fields = result.fields ?? {};
       if (input.dataset.extractPurpose === "COMPANY_POLICY") {
-        populate(form, "companyCountry", fields.companyCountry);
-        populate(form, "fundingCurrency", fields.fundingCurrency);
         populate(form, "policies", fields.policies);
         populate(form, "legalClauses", fields.legalClauses);
         populate(form, "commercialStandards", fields.commercialStandards);
@@ -674,6 +749,8 @@
         populate(form, "skills", fields.skills);
         populate(form, "budget", fields.budget ?? fields.budgetAmount ?? fields.budgetPln);
         populate(form, "deliveryDate", fields.deliveryDate);
+        populate(form, "payerCountry", fields.payerCountry ?? fields.companyCountry ?? fields.originCountry);
+        populate(form, "fundingCurrency", fields.fundingCurrency ?? fields.currency);
       } else if (input.dataset.extractPurpose === "FREELANCER_PROPOSAL") {
         populate(form, "proposedPrice", fields.proposedPrice ?? fields.proposedPriceAmount ?? fields.proposedPricePln);
         populate(form, "deliveryDays", fields.deliveryDays);

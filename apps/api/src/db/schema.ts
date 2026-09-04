@@ -62,6 +62,24 @@ export const memberships = pgTable('memberships', {
   uniqueIndex('memberships_user_org_role_idx').on(table.userId, table.organizationId, table.role),
 ]);
 
+/** Pre-authorized company mandates. Login input must match one of these rows. */
+export const companyRepresentativeMandates = pgTable('company_representative_mandates', {
+  id: id(),
+  organizationId: ref('organization_id').notNull(),
+  subject: varchar('subject', { length: 128 }).notNull(),
+  representativeEmail: text('representative_email').notNull(),
+  representativeRole: text('representative_role').notNull(),
+  mandateReference: varchar('mandate_reference', { length: 200 }).notNull(),
+  authorityBasis: text('authority_basis').notNull(),
+  status: varchar('status', { length: 16 }).notNull(),
+  validFrom: instant('valid_from').notNull(),
+  validUntil: instant('valid_until').notNull(),
+  createdAt: instant('created_at').notNull(),
+}, (table) => [
+  uniqueIndex('company_representative_mandates_org_subject_ref_idx').on(table.organizationId, table.subject, table.mandateReference),
+  index('company_representative_mandates_subject_idx').on(table.subject, table.validUntil),
+]);
+
 /**
  * Human-approved company policy snapshots. The source bytes remain private in
  * object storage; this table contains the structured, reviewable projection
@@ -89,6 +107,79 @@ export const companyPolicyProfiles = pgTable('company_policy_profiles', {
 }, (table) => [
   uniqueIndex('company_policy_profiles_org_version_idx').on(table.organizationId, table.version),
   index('company_policy_profiles_org_idx').on(table.organizationId, table.approvedAt),
+]);
+
+/**
+ * Versioned legal-entity verification snapshots used by the login-time
+ * authorization gate. Public registry facts and the internal representative
+ * mandate are deliberately separate: a registry can prove that a company
+ * exists, but it cannot prove that an arbitrary user may bind it.
+ */
+export const companyVerificationProfiles = pgTable('company_verification_profiles', {
+  id: id(),
+  organizationId: ref('organization_id').notNull(),
+  version: integer('version').notNull(),
+  legalName: text('legal_name').notNull(),
+  country: varchar('country', { length: 2 }).notNull(),
+  registryAuthority: varchar('registry_authority', { length: 64 }).notNull(),
+  registrationNumber: varchar('registration_number', { length: 64 }).notNull(),
+  lei: varchar('lei', { length: 20 }),
+  taxIdentifier: varchar('tax_identifier', { length: 64 }),
+  registeredAddress: text('registered_address').notNull(),
+  entityStatus: varchar('entity_status', { length: 32 }).notNull(),
+  directors: jsonb('directors').$type<string[]>().notNull(),
+  beneficialOwners: jsonb('beneficial_owners').$type<Array<{
+    name: string;
+    ownershipPercent?: number;
+    controlType: string;
+  }>>().notNull(),
+  sourceRecords: jsonb('source_records').$type<Array<{
+    source: string;
+    uri: string;
+    retrievedAt: string;
+    status: string;
+    dataHash: string;
+  }>>().notNull(),
+  sanctionsScreening: jsonb('sanctions_screening').$type<{
+    outcome: string;
+    screenedNames: string[];
+    lists: Array<{ name: string; uri: string; checkedAt: string; status: string }>;
+    potentialMatches: Array<{ query: string; list: string; score: number }>;
+  }>().notNull(),
+  verificationOutcome: varchar('verification_outcome', { length: 32 }).notNull(),
+  verificationReasons: jsonb('verification_reasons').$type<string[]>().notNull(),
+  profileHash: hash('profile_hash').notNull(),
+  verifiedAt: instant('verified_at').notNull(),
+  expiresAt: instant('expires_at').notNull(),
+  createdAt: instant('created_at').notNull(),
+}, (table) => [
+  uniqueIndex('company_verification_profiles_org_version_idx').on(table.organizationId, table.version),
+  index('company_verification_profiles_org_idx').on(table.organizationId, table.verifiedAt),
+]);
+
+/** Append-only decisions made by the login-time Authorization Agent. */
+export const companyAuthorizationDecisions = pgTable('company_authorization_decisions', {
+  id: id(),
+  organizationId: ref('organization_id').notNull(),
+  subject: varchar('subject', { length: 128 }).notNull(),
+  profileId: ref('profile_id').notNull(),
+  representativeEmail: text('representative_email').notNull(),
+  representativeRole: text('representative_role').notNull(),
+  authorityBasis: text('authority_basis').notNull(),
+  mandateReference: text('mandate_reference').notNull(),
+  outcome: varchar('outcome', { length: 24 }).notNull(),
+  checks: jsonb('checks').$type<Array<{
+    code: string;
+    status: string;
+    detail: string;
+  }>>().notNull(),
+  citations: jsonb('citations').$type<Array<{ title: string; uri: string; retrievedAt: string }>>().notNull(),
+  decisionHash: hash('decision_hash').notNull(),
+  decidedAt: instant('decided_at').notNull(),
+  expiresAt: instant('expires_at').notNull(),
+}, (table) => [
+  index('company_authorization_decisions_subject_idx').on(table.subject, table.decidedAt),
+  index('company_authorization_decisions_org_idx').on(table.organizationId, table.decidedAt),
 ]);
 
 /**
@@ -520,6 +611,7 @@ export const schema = {
   organizations,
   users,
   memberships,
+  companyRepresentativeMandates,
   companyPolicyProfiles,
   credentials,
   credentialStatus,

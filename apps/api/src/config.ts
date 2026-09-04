@@ -47,6 +47,14 @@ export interface ApiConfig {
   readonly regulations: {
     readonly refreshMode: 'fixture' | 'live';
   };
+  readonly companyVerification: {
+    readonly mode: 'fixture' | 'live';
+    readonly gleifBaseUrl: string;
+    readonly companiesHouseBaseUrl: string;
+    readonly companiesHouseApiKey?: string;
+    readonly timeoutMs: number;
+    readonly decisionTtlSeconds: number;
+  };
   readonly algorand: {
     readonly mode: 'executor' | 'simulated';
     readonly executorUrl?: string;
@@ -237,6 +245,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     },
     regulations: {
       refreshMode: choice(env, 'REGULATION_REFRESH_MODE', ['fixture', 'live'] as const, 'live'),
+    },
+    companyVerification: {
+      mode: choice(env, 'COMPANY_VERIFICATION_MODE', ['fixture', 'live'] as const, 'live'),
+      gleifBaseUrl: text(env, 'GLEIF_API_BASE_URL') ?? 'https://api.gleif.org/api/v1',
+      companiesHouseBaseUrl: text(env, 'COMPANIES_HOUSE_BASE_URL') ?? 'https://find-and-update.company-information.service.gov.uk',
+      ...(text(env, 'COMPANIES_HOUSE_API_KEY') === undefined ? {} : { companiesHouseApiKey: text(env, 'COMPANIES_HOUSE_API_KEY')! }),
+      timeoutMs: integer(env, 'COMPANY_VERIFICATION_TIMEOUT_MS', 8_000, 500, 30_000),
+      decisionTtlSeconds: integer(env, 'COMPANY_AUTHORIZATION_TTL_SECONDS', 3_600, 60, 86_400),
     },
     algorand: {
       mode: algorandMode,

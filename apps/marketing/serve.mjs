@@ -19,6 +19,7 @@ import {
   agreementAccess,
   submissionAccess,
   extractForm,
+  authorizePortal,
 } from "./workflow.mjs";
 
 function sendJson(res, status, payload) {
@@ -129,6 +130,15 @@ const server = createServer(async (req, res) => {
   }
   if (requestPath === "/api/workspace/state" && req.method === "GET") {
     sendJson(res, 200, { steps: stepList(), run: currentRun() });
+    return;
+  }
+  if (requestPath === "/api/authorization/evaluate" && req.method === "POST") {
+    try {
+      const role = req.headers["x-anchor-role"] === "FREELANCER" ? "FREELANCER" : "COMPANY";
+      sendJson(res, 200, await authorizePortal(role, await readJson(req)));
+    } catch (error) {
+      sendJson(res, 403, { error: { message: String(error.message ?? error) } });
+    }
     return;
   }
   if (requestPath === "/api/workflow/reset" && req.method === "POST") {

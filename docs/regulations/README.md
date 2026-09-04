@@ -37,6 +37,11 @@ Reviewed on 4 September 2026:
 
 | Source | Official version/date | Used for |
 |---|---|---|
+| [Companies House public register](https://find-and-update.company-information.service.gov.uk/company/07209813) | live public record | UK legal-entity status, officers and PSC onboarding evidence |
+| [GLEIF API](https://www.gleif.org/en/lei-data/gleif-api) | live public API | LEI status and legal-entity/registration-number cross-check |
+| [UK Sanctions List](https://www.gov.uk/government/publications/the-uk-sanctions-list) | current official UK source | Company, officer and beneficial-owner screening at login |
+| [UN consolidated list](https://main.un.org/securitycouncil/en/content/un-sc-consolidated-list) | current official source | Company, officer and beneficial-owner screening at login |
+| [OFAC Sanctions List Service](https://ofac.treasury.gov/sanctions-list-service) | current official source | Company, officer and beneficial-owner screening at login |
 | [RBI PA-CB circular](https://www.rbi.org.in/Scripts/NotificationUser.aspx?Id=12561&Mode=0) | RBI/2023-24/80, 31 October 2023 | ₹25 lakh per-unit cap (8.2), import buyer CDD above ₹2.5 lakh (4.4), separate ICA/ECA (6.1) |
 | [RBI Import of Goods and Services](https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=10201) | updated 29 August 2024 | FEMA/AD-bank context for India-origin supplier payments |
 | [RBI Other Remittance Facilities](https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=10193) | updated 6 September 2024 | Form A2 scope and its imports/intermediary-trade distinction |

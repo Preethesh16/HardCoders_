@@ -64,7 +64,7 @@ export const CreateApplicationBody = Type.Object({
 }, { additionalProperties: false });
 
 export const ExtractFormBody = Type.Object({
-  purpose: Type.Union([Type.Literal('COMPANY_POLICY'), Type.Literal('JOB_BRIEF'), Type.Literal('FREELANCER_PROPOSAL'), Type.Literal('AGREEMENT_TERMS')]),
+  purpose: Type.Union([Type.Literal('COMPANY_IDENTITY'), Type.Literal('COMPANY_POLICY'), Type.Literal('JOB_BRIEF'), Type.Literal('FREELANCER_PROPOSAL'), Type.Literal('AGREEMENT_TERMS')]),
   fileName: Type.String({ minLength: 1, maxLength: 200 }),
   contentType: Type.String({ minLength: 3, maxLength: 128 }),
   contentBase64: Type.String({ minLength: 4, maxLength: 11_200_000 }),
@@ -88,6 +88,26 @@ export const SaveCompanyPolicyProfileBody = Type.Object({
   authorizedApprovers: PolicyList,
   extractionSource: Type.Union([Type.Literal('OPENAI'), Type.Literal('FIXTURE')]),
   extractionModel: Type.String({ minLength: 1, maxLength: 64 }),
+}, { additionalProperties: false });
+
+export const EvaluateCompanyAuthorizationBody = Type.Object({
+  legalName: Type.String({ minLength: 2, maxLength: 300 }),
+  country: CountryCodeSchema,
+  registryAuthority: Type.String({ minLength: 2, maxLength: 64 }),
+  registrationNumber: Type.String({ minLength: 2, maxLength: 64 }),
+  lei: Type.Optional(Type.String({ pattern: '^[A-Z0-9]{20}$' })),
+  taxIdentifier: Type.Optional(Type.String({ minLength: 2, maxLength: 64 })),
+  registeredAddress: Type.String({ minLength: 8, maxLength: 1_000 }),
+  directors: Type.Array(Type.String({ minLength: 2, maxLength: 200 }), { minItems: 1, maxItems: 64, uniqueItems: true }),
+  beneficialOwners: Type.Array(Type.Object({
+    name: Type.String({ minLength: 2, maxLength: 300 }),
+    ownershipPercent: Type.Optional(Type.Number({ minimum: 0, maximum: 100 })),
+    controlType: Type.String({ minLength: 2, maxLength: 200 }),
+  }, { additionalProperties: false }), { minItems: 1, maxItems: 64 }),
+  representativeEmail: Type.String({ format: 'email', maxLength: 320 }),
+  representativeRole: Type.String({ minLength: 2, maxLength: 160 }),
+  authorityBasis: Type.String({ minLength: 12, maxLength: 1_000 }),
+  mandateReference: Type.String({ minLength: 4, maxLength: 200 }),
 }, { additionalProperties: false });
 
 export const EvaluateApplicationBody = Type.Object({

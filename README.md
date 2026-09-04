@@ -65,6 +65,29 @@ cannot create or reset a job; only the Company sees an explicit reset control.
 The cursor survives UI-service restarts, while authoritative business records,
 files and ledger proofs remain in PostgreSQL, MinIO, Fabric and Algorand.
 
+### Company access starts before the deal
+
+The Company portal now opens through a login-time **Authorization Agent**, not
+through an unverified role switch. A reviewable onboarding document can
+autofill the legal name, jurisdiction, registry number, LEI, address,
+directors/PSCs and representative mandate. Anchor then separates two questions:
+
+1. **Does the legal entity exist and remain active?** The demo reads the live
+   [Companies House public register](https://find-and-update.company-information.service.gov.uk/company/07209813)
+   and [GLEIF API](https://www.gleif.org/en/lei-data/gleif-api).
+2. **May this signed-in person act for that tenant?** PostgreSQL tenant
+   membership and a recorded mandate answer this independently; a public
+   company record is never treated as login authority.
+
+Entity, officer and beneficial-owner names are checked against the official
+[UK Sanctions List](https://www.gov.uk/government/publications/the-uk-sanctions-list),
+[UN consolidated list](https://main.un.org/securitycouncil/en/content/un-sc-consolidated-list),
+[EU financial-sanctions dataset](https://data.europa.eu/data/datasets/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions?locale=en)
+and [OFAC Sanctions List Service](https://ofac.treasury.gov/sanctions-list-service).
+The local sample uses public data for **WISE PAYMENTS LIMITED** solely to prove
+the registry connectors; this repository has no affiliation with that company,
+and its representative mandate is explicitly fictional and zero-value.
+
 ## Three ledgers, one workflow
 
 | Boundary | Owns | Explicitly does **not** own |
@@ -362,6 +385,7 @@ Test ALGO and TestNet USDC have no monetary value.
 
 | Capability | Status |
 |---|---|
+| Company onboarding and login authorization | ✅ Live Companies House + GLEIF checks, official-list screening, separate tenant mandate and persisted decision hash |
 | Integrated company/freelancer deal room and seven human decisions | ✅ Role-specific controls, cross-tab job visibility, Company-only reset and restart-persistent shared cursor |
 | Multi-applicant hiring and private agreement | ✅ Three independent proposals, advisory ranking, human selection, party-only MinIO document and stable hashes |
 | Live decision support | ✅ OpenAI advisory agents, Frankfurter reference FX and seven official regulation-source observations, each with visible fallback provenance |

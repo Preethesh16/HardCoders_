@@ -49,6 +49,22 @@ const companyPolicyText = [
   'Authorized approvers: Procurement Director; Engineering Director',
 ].join('\n');
 
+const companyIdentityText = [
+  'Legal name: WISE PAYMENTS LIMITED',
+  'Country: United Kingdom',
+  'Registry authority: COMPANIES_HOUSE',
+  'Registration number: 07209813',
+  'LEI: 213800U4GNTXRFYZKG18',
+  'Tax identifier: DEMO-PRIVATE-TAX-REF',
+  'Registered address: 1st Floor, Worship Square, 65 Clifton Street, London, England, EC2A 4JE',
+  'Director / officer sample: Jane Fahey',
+  'PSC / beneficial owner: Wise Financial Holdings Ltd | PERSON_WITH_SIGNIFICANT_CONTROL',
+  'Representative email: demo@anchor.dev',
+  'Representative role: Anchor demo contracting representative',
+  'Authority basis: Tenant administrator approved this representative for the local demonstration.',
+  'Mandate reference: ANCHOR-DEMO-MANDATE-GB-001',
+].join('\n');
+
 describe('document-to-form extraction', () => {
   it('deterministically extracts labeled job and proposal drafts without publishing either', async () => {
     const config = { mode: 'fixture', baseUrl: 'https://api.openai.com/v1', model: 'fixture' } as const;
@@ -63,6 +79,9 @@ describe('document-to-form extraction', () => {
     });
     const companyPolicy = await extractFormDraft(config, {
       purpose: 'COMPANY_POLICY', fileName: 'company-policy.txt', contentType: 'text/plain', contentBase64: base64(companyPolicyText),
+    });
+    const companyIdentity = await extractFormDraft(config, {
+      purpose: 'COMPANY_IDENTITY', fileName: 'company-onboarding.txt', contentType: 'text/plain', contentBase64: base64(companyIdentityText),
     });
 
     expect(job).toMatchObject({
@@ -92,6 +111,15 @@ describe('document-to-form extraction', () => {
         companyCountry: 'PL', fundingCurrency: 'PLN',
         policies: ['Confidential data remains private', 'repository access follows least privilege'],
         authorizedApprovers: ['Procurement Director', 'Engineering Director'],
+      },
+    });
+    expect(companyIdentity).toMatchObject({
+      source: 'FIXTURE', reviewRequired: true,
+      fields: {
+        legalName: 'WISE PAYMENTS LIMITED', country: 'GB', registryAuthority: 'COMPANIES_HOUSE',
+        registrationNumber: '07209813', lei: '213800U4GNTXRFYZKG18', directors: ['Jane Fahey'],
+        beneficialOwners: ['Wise Financial Holdings Ltd | PERSON_WITH_SIGNIFICANT_CONTROL'],
+        representativeEmail: 'demo@anchor.dev', mandateReference: 'ANCHOR-DEMO-MANDATE-GB-001',
       },
     });
   });
@@ -143,6 +171,7 @@ describe('document-to-form extraction', () => {
     const proposalBody = { purpose: 'FREELANCER_PROPOSAL', fileName: 'proposal.txt', contentType: 'text/plain', contentBase64: base64(proposalText) };
     const agreementBody = { purpose: 'AGREEMENT_TERMS', fileName: 'commercial-terms.txt', contentType: 'text/plain', contentBase64: base64(agreementText) };
     const policyBody = { purpose: 'COMPANY_POLICY', fileName: 'company-policy.txt', contentType: 'text/plain', contentBase64: base64(companyPolicyText) };
+    const identityBody = { purpose: 'COMPANY_IDENTITY', fileName: 'company-onboarding.txt', contentType: 'text/plain', contentBase64: base64(companyIdentityText) };
 
     const companyJob = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.polishCompany.token, body: jobBody });
     const freelancerProposal = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.indianFreelancer.token, body: proposalBody });
@@ -152,6 +181,8 @@ describe('document-to-form extraction', () => {
     const freelancerAgreement = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.indianFreelancer.token, body: agreementBody });
     const companyPolicy = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.polishCompany.token, body: policyBody });
     const freelancerPolicy = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.indianFreelancer.token, body: policyBody });
+    const companyIdentity = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.polishCompany.token, body: identityBody });
+    const freelancerIdentity = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.indianFreelancer.token, body: identityBody });
 
     expect(companyJob.status).toBe(200);
     expect(freelancerProposal.status).toBe(200);
@@ -161,5 +192,7 @@ describe('document-to-form extraction', () => {
     expect(freelancerAgreement.status).toBe(403);
     expect(companyPolicy.status).toBe(200);
     expect(freelancerPolicy.status).toBe(403);
+    expect(companyIdentity.status).toBe(200);
+    expect(freelancerIdentity.status).toBe(403);
   });
 });

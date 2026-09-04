@@ -44,6 +44,22 @@ const OPERATOR = Buffer.from(JSON.stringify({
   displayName: "Platform administrator"
 }), "utf8").toString("base64url");
 
+const PUBLIC_COMPANY_SAMPLE = {
+  legalName: "WISE PAYMENTS LIMITED",
+  country: "GB",
+  registryAuthority: "COMPANIES_HOUSE",
+  registrationNumber: "07209813",
+  lei: "213800U4GNTXRFYZKG18",
+  taxIdentifier: "DEMO-PRIVATE-TAX-REF",
+  registeredAddress: "1st Floor, Worship Square, 65 Clifton Street, London, England, EC2A 4JE",
+  directors: ["Jane Fahey"],
+  beneficialOwners: [{ name: "Wise Financial Holdings Ltd", controlType: "PERSON_WITH_SIGNIFICANT_CONTROL" }],
+  representativeEmail: "demo@anchor.dev",
+  representativeRole: "Anchor demo contracting representative",
+  authorityBasis: "Tenant administrator approved this representative for the local demonstration.",
+  mandateReference: "ANCHOR-DEMO-MANDATE-GB-001",
+};
+
 const ACTIONS = [
   { id: "onboard", actor: "COMPANY", label: "APPROVE COMPANY PROFILE", detail: "Review the extracted policy profile once; its versioned hash becomes a reusable agreement source." },
   { id: "job", actor: "COMPANY", label: "CREATE JOB", detail: "Publish requirements, skills, budget, payer country and funding currency." },
@@ -99,9 +115,11 @@ let releasePromise = null;
 function freshRun(previous = null) {
   const retainedProfile = previous?.results?.companyPolicyProfile ?? null;
   const retainedCompanyPartyKey = previous?.results?.companyPartyKey ?? null;
+  const retainedVerification = previous?.results?.companyVerificationProfile ?? null;
+  const retainedAuthorization = previous?.results?.companyAuthorization ?? null;
   return {
     startedAt: new Date().toISOString(), nonce: Date.now().toString(36), phase: retainedProfile ? "JOB_DRAFT" : "COMPANY_ONBOARDING",
-    results: { applications: [], ...(retainedProfile ? { companyPolicyProfile: retainedProfile } : {}), ...(retainedCompanyPartyKey ? { companyPartyKey: retainedCompanyPartyKey } : {}) }, actions: {}, screening: { status: "IDLE", stages: {} },
+    results: { applications: [], ...(retainedProfile ? { companyPolicyProfile: retainedProfile } : {}), ...(retainedCompanyPartyKey ? { companyPartyKey: retainedCompanyPartyKey } : {}), ...(retainedVerification ? { companyVerificationProfile: retainedVerification } : {}), ...(retainedAuthorization ? { companyAuthorization: retainedAuthorization } : {}) }, actions: {}, screening: { status: "IDLE", stages: {} },
     automation: { status: "IDLE", stages: {} }, deliveryAutomation: { status: "IDLE", stages: {} }
   };
 }
@@ -158,6 +176,43 @@ function providerProfile(country) {
 
 function companyPartyKey() {
   return run?.results?.companyPartyKey ?? companyProfile().partyKey;
+}
+
+async function authorizeJobPayerProfile(country) {
+  const target = companyProfile(country);
+  const source = run.results.companyPolicyProfile;
+  if (!source) throw new Error("Approve the reusable company policy profile before publishing work.");
+  if (source.country === country && source.fundingCurrency === target.currency) {
+    run.results.companyPartyKey = target.partyKey;
+    return source;
+  }
+  const artifact = Buffer.from(JSON.stringify({
+    kind: "ANCHOR_DEMO_DERIVED_POLICY_PROFILE",
+    sourceProfileHash: source.profileHash,
+    sourceArtifactHash: source.sourceArtifactHash,
+    targetCountry: country,
+    fundingCurrency: target.currency,
+    notice: "Demo-only signed payer identity switch. Corridor obligations are evaluated separately for the selected payer and payee."
+  }), "utf8");
+  const created = await call(target.partyKey, "POST", "/v1/company/policy-profile", {
+    companyCountry: country,
+    fundingCurrency: target.currency,
+    fileName: `anchor-approved-policy-${country.toLowerCase()}.json`,
+    contentType: "application/json",
+    contentBase64: artifact.toString("base64"),
+    policies: source.policies,
+    legalClauses: source.legalClauses,
+    commercialStandards: source.commercialStandards,
+    authorizedApprovers: source.authorizedApprovers,
+    extractionSource: source.extractionSource === "OPENAI" ? "OPENAI" : "FIXTURE",
+    extractionModel: String(`${source.extractionModel ?? "approved-profile"}-country-derived`).slice(0, 64)
+  }, `company-policy-${country.toLowerCase()}`);
+  const stored = created.profile ?? created;
+  const { sourceObjectId: _sourceObjectId, approvedByUserId: _approvedByUserId, ...publicProfile } = stored;
+  run.results.companyPolicyProfile = publicProfile;
+  run.results.companyPartyKey = target.partyKey;
+  persistRun();
+  return publicProfile;
 }
 
 function orderedRoute() {
@@ -429,12 +484,10 @@ const EXECUTORS = {
   async job(input) {
     if (run.phase !== "JOB_DRAFT") throw new Error("A job already exists for this deal.");
     const profile = companyProfile(input.payerCountry);
-    if (!run.results.companyPolicyProfile) throw new Error("Approve the reusable company policy profile before publishing work.");
-    if (run.results.companyPolicyProfile.country !== input.payerCountry) throw new Error("The job payer country must match the approved company onboarding profile.");
     if (profile.currency !== input.fundingCurrency || input.budget?.currency !== profile.currency) {
       throw new Error(`The ${input.payerCountry} demo company is verified to fund in ${profile.currency}.`);
     }
-    run.results.companyPartyKey = profile.partyKey;
+    await authorizeJobPayerProfile(input.payerCountry);
     const created = await call(profile.partyKey, "POST", "/v1/jobs", {
       title: input.title, description: input.description, skills: input.skills,
       acceptanceCriteria: termList(input.acceptanceCriteria),
@@ -565,6 +618,57 @@ export function resetRun() {
   return { ok: true, startedAt: run.startedAt };
 }
 
+export async function authorizePortal(role, input = {}) {
+  if (!run) run = freshRun();
+  if (role !== "COMPANY") {
+    const all = await loadParties();
+    const party = all[run.results.primaryProviderPartyKey ?? "indianFreelancer"];
+    if (!party?.credentialId || !party.principal?.roles?.includes("freelancer")) {
+      throw new Error("The freelancer credential or tenant role is unavailable.");
+    }
+    return {
+      outcome: "AUTHORIZED",
+      subject: party.principal.subject,
+      checks: [
+        { code: "SIGNED_CREDENTIAL", status: "PASSED", detail: "Active signed demo credential loaded." },
+        { code: "TENANT_ROLE", status: "PASSED", detail: "Freelancer role is present in the authenticated principal." },
+      ],
+      disclaimer: "Demo identity only; no production KYC assertion is made.",
+    };
+  }
+
+  const payload = { ...PUBLIC_COMPANY_SAMPLE, ...input, country: String(input.country ?? PUBLIC_COMPANY_SAMPLE.country).toUpperCase() };
+  const profile = companyProfile(payload.country);
+  if (run.results.companyPartyKey && run.results.companyPartyKey !== profile.partyKey) run = freshRun(null);
+  run.results.companyPartyKey = profile.partyKey;
+  const evaluated = await call(profile.partyKey, "POST", "/v1/company/authorization/evaluate", payload, `login-authorization-${Date.now()}`);
+  const decision = evaluated.decision;
+  if (decision?.outcome !== "AUTHORIZED") {
+    persistRun();
+    throw new Error(`Authorization Agent returned ${decision?.outcome ?? "NO DECISION"}. ${evaluated.profile?.verificationReasons?.join(" ") ?? ""}`.trim());
+  }
+  const { taxIdentifier: _taxIdentifier, ...safeProfile } = evaluated.profile;
+  run.results.companyVerificationProfile = safeProfile;
+  run.results.companyAuthorization = {
+    id: decision.id,
+    outcome: decision.outcome,
+    checks: decision.checks,
+    citations: decision.citations,
+    decisionHash: decision.decisionHash,
+    decidedAt: decision.decidedAt,
+    expiresAt: decision.expiresAt,
+    representativeRole: decision.representativeRole,
+    mandateReference: decision.mandateReference,
+  };
+  persistRun();
+  return {
+    outcome: decision.outcome,
+    company: safeProfile,
+    authorization: run.results.companyAuthorization,
+    disclaimer: "Public registry sample; no affiliation with the referenced company. Representative authority is simulated for this zero-value demo.",
+  };
+}
+
 export async function runAction(id, input = {}) {
   if (!run) {
     run = freshRun();
@@ -609,7 +713,7 @@ export async function extractForm(role, input) {
     persistRun();
   }
   const freelancer = role === "freelancer";
-  const allowedPurposes = freelancer ? ["FREELANCER_PROPOSAL"] : ["COMPANY_POLICY", "JOB_BRIEF", "AGREEMENT_TERMS"];
+  const allowedPurposes = freelancer ? ["FREELANCER_PROPOSAL"] : ["COMPANY_IDENTITY", "COMPANY_POLICY", "JOB_BRIEF", "AGREEMENT_TERMS"];
   if (!allowedPurposes.includes(input?.purpose)) {
     throw new Error(`The ${freelancer ? "Freelancer" : "Company"} portal cannot extract ${String(input?.purpose ?? "this document")}.`);
   }

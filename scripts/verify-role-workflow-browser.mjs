@@ -9,8 +9,8 @@ const chrome = [process.argv[2], process.env.CHROME_BIN, '/opt/google/chrome/goo
 if (!chrome) throw new Error('Chrome was not found. Pass its path as the first argument or CHROME_BIN.');
 
 const origin = new URL(process.env.ANCHOR_URL ?? 'http://127.0.0.1:4175');
-const companyCountry = process.env.ANCHOR_COMPANY_COUNTRY ?? 'PL';
-const fundingCurrency = process.env.ANCHOR_FUNDING_CURRENCY ?? 'PLN';
+const companyCountry = process.env.ANCHOR_COMPANY_COUNTRY ?? 'GB';
+const fundingCurrency = process.env.ANCHOR_FUNDING_CURRENCY ?? 'GBP';
 const freelancerCountry = process.env.ANCHOR_FREELANCER_COUNTRY ?? 'IN';
 const payoutCurrency = process.env.ANCHOR_PAYOUT_CURRENCY ?? 'INR';
 const freelancerUserId = process.env.ANCHOR_FREELANCER_USER_ID ?? 'USER-IN-FREELANCER';
@@ -26,6 +26,22 @@ const draftDirectory = await mkdtemp(join(tmpdir(), 'anchor-form-drafts-'));
 const jobDraft = join(draftDirectory, 'company-brief.txt');
 const proposalDraft = join(draftDirectory, 'freelancer-proposal.txt');
 const policyDraft = join(draftDirectory, 'company-policy.txt');
+const identityDraft = join(draftDirectory, 'company-onboarding.txt');
+await writeFile(identityDraft, [
+  'Legal name: WISE PAYMENTS LIMITED',
+  'Country: United Kingdom',
+  'Registry authority: COMPANIES_HOUSE',
+  'Registration number: 07209813',
+  'LEI: 213800U4GNTXRFYZKG18',
+  'Tax identifier: DEMO-PRIVATE-TAX-REF',
+  'Registered address: 1st Floor, Worship Square, 65 Clifton Street, London, England, EC2A 4JE',
+  'Director / officer sample: Jane Fahey',
+  'PSC / beneficial owner: Wise Financial Holdings Ltd | PERSON_WITH_SIGNIFICANT_CONTROL',
+  'Representative email: demo@anchor.dev',
+  'Representative role: Anchor demo contracting representative',
+  'Authority basis: Tenant administrator approved this representative for the local demonstration.',
+  'Mandate reference: ANCHOR-DEMO-MANDATE-GB-001',
+].join('\n'));
 await writeFile(policyDraft, [
   `Company country: ${countryNames[companyCountry] ?? companyCountry}`,
   `Funding currency: ${fundingCurrency}`,
@@ -160,8 +176,17 @@ async function launch(role) {
   const navigation = await command('Page.navigate', { url });
   if (navigation.errorText) throw new Error(`${role} navigation failed: ${navigation.errorText}`);
   await waitFor(`location.href === ${JSON.stringify(url)} && document.readyState === 'complete'`, 'role login did not load.');
+  if (role === 'COMPANY') {
+    await uploadFile('#companyIdentityFile', identityDraft);
+    await waitFor('document.querySelector("#companyIdentityFileStatus")?.dataset.tone === "success"', 'company identity document did not autofill.', 45_000);
+    const onboardingSurface = await evaluate(`({
+      visibleDetailFields: Array.from(document.querySelectorAll('#companyOnboarding .company-onboarding-grid input, #companyOnboarding .company-onboarding-grid select, #companyOnboarding .company-onboarding-grid textarea')).filter(element => element.offsetParent !== null).length,
+      submitUnlocked: document.querySelector('#loginForm .login-submit')?.disabled === false
+    })`);
+    if (onboardingSurface.visibleDetailFields !== 0 || !onboardingSurface.submitUnlocked) throw new Error(`COMPANY: onboarding is not upload-only: ${JSON.stringify(onboardingSurface)}`);
+  }
   await click('#loginForm .login-submit');
-  await waitFor('document.querySelector("#portalWorld")?.classList.contains("open")', 'portal did not open.', 12_000);
+  await waitFor('document.querySelector("#portalWorld")?.classList.contains("open")', 'portal did not open.', 35_000);
   await waitFor('document.querySelector("#workflowStatus")?.textContent.includes("READY")', 'workspace did not initialize.', 12_000);
   return { role, command, evaluate, waitFor, click, submit, uploadFile, state, screenshot, close };
 }
@@ -195,8 +220,6 @@ try {
 
   if (initial.run.phase === 'COMPANY_ONBOARDING') {
     await company.waitFor('document.querySelector("[data-workspace-form=onboard]") !== null', 'Company onboarding form is missing.');
-    const companyCountryOptions = await company.evaluate(`Array.from(document.querySelector('[name="companyCountry"]')?.options ?? []).map(option => option.value).filter(Boolean).sort()`);
-    if (JSON.stringify(companyCountryOptions) !== JSON.stringify(supportedCountryCodes)) throw new Error(`Company onboarding country selector is incomplete: ${JSON.stringify(companyCountryOptions)}`);
     await company.uploadFile('[data-extract-purpose="COMPANY_POLICY"]', policyDraft);
     await company.waitFor('document.querySelector("[data-workspace-form=onboard] [data-extraction-status]")?.dataset.tone === "success"', 'Company policy extraction did not complete.', 45_000);
     await company.submit('[data-workspace-form="onboard"]', {
@@ -208,6 +231,11 @@ try {
     });
   }
   await company.waitFor('document.querySelector("[data-workspace-form=job]") !== null', 'Company brief form is missing.');
+  const jobRouteControls = await company.evaluate(`({
+    countries: document.querySelectorAll('[data-workspace-form="job"] [name="payerCountry"] option').length,
+    currencies: document.querySelectorAll('[data-workspace-form="job"] [name="fundingCurrency"] option').length
+  })`);
+  if (jobRouteControls.countries !== 6 || jobRouteControls.currencies !== 6) throw new Error(`Company job route controls are incomplete: ${JSON.stringify(jobRouteControls)}`);
   await company.uploadFile('[data-extract-purpose="JOB_BRIEF"]', jobDraft);
   await company.waitFor('["success", "warning", "error"].includes(document.querySelector("[data-extraction-status]")?.dataset.tone)', 'Company brief extraction returned no final status.', 45_000);
   const companyExtraction = await company.evaluate('({ tone: document.querySelector("[data-extraction-status]")?.dataset.tone, text: document.querySelector("[data-extraction-status]")?.textContent })');
@@ -308,8 +336,12 @@ try {
 
   await company.waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'Company journey rail did not complete.', 15_000);
   await freelancer.waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'Freelancer journey rail did not complete.', 15_000);
-  await company.waitFor('document.querySelector(".payout-card")?.classList.contains("complete") === true', 'Company payout card did not render the completed release.', 15_000);
-  await freelancer.waitFor('document.querySelector(".payout-card")?.classList.contains("complete") === true', 'Freelancer payout card did not render the completed release.', 15_000);
+  await company.waitFor('document.querySelector("[data-transfer-screen][data-state=completed] .deal-complete-confirmation") !== null', 'Company payment confirmation did not render the completed release.', 15_000);
+  await freelancer.waitFor('document.querySelector("[data-transfer-screen][data-state=completed] .deal-complete-confirmation") !== null', 'Freelancer payment confirmation did not render the completed release.', 15_000);
+  const companyGuide = await company.evaluate(`({ title: document.querySelector('#dealCompanionTitle')?.textContent, copy: document.querySelector('#dealCompanionCopy')?.textContent, image: document.querySelector('#dealCompanionCharacter')?.getAttribute('src') })`);
+  const freelancerGuide = await freelancer.evaluate(`({ title: document.querySelector('#dealCompanionTitle')?.textContent, copy: document.querySelector('#dealCompanionCopy')?.textContent, image: document.querySelector('#dealCompanionCharacter')?.getAttribute('src') })`);
+  if (companyGuide.title !== 'DEAL COMPLETE' || !companyGuide.copy?.includes(payoutCurrency) || !companyGuide.image?.includes('company')) throw new Error(`Company live guide is not transaction-derived: ${JSON.stringify(companyGuide)}`);
+  if (freelancerGuide.title !== 'DEAL COMPLETE' || !freelancerGuide.copy?.includes(payoutCurrency) || !freelancerGuide.image?.includes('freelancer')) throw new Error(`Freelancer live guide is not role-aware: ${JSON.stringify(freelancerGuide)}`);
   const finalState = await company.state();
   if (!finalState.run?.results?.fabricDecisionTxId || !finalState.run?.results?.binding?.dealId) throw new Error('Final ledger proofs are incomplete.');
   await company.click('[data-inspect-stage="05"]');

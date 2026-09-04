@@ -1,7 +1,7 @@
 import type { ApiConfig } from '../config.js';
 import { badRequest } from '../errors.js';
 
-export type FormExtractionPurpose = 'COMPANY_POLICY' | 'JOB_BRIEF' | 'FREELANCER_PROPOSAL' | 'AGREEMENT_TERMS';
+export type FormExtractionPurpose = 'COMPANY_IDENTITY' | 'COMPANY_POLICY' | 'JOB_BRIEF' | 'FREELANCER_PROPOSAL' | 'AGREEMENT_TERMS';
 type DemoCountry = 'PL' | 'IN' | 'GB' | 'DE' | 'RU' | 'KP';
 type DemoCurrency = 'PLN' | 'INR' | 'GBP' | 'EUR' | 'RUB' | 'KPW';
 
@@ -51,11 +51,27 @@ export interface CompanyPolicyFields {
   readonly authorizedApprovers: readonly string[];
 }
 
+export interface CompanyIdentityFields {
+  readonly legalName: string | null;
+  readonly country: DemoCountry | null;
+  readonly registryAuthority: string | null;
+  readonly registrationNumber: string | null;
+  readonly lei: string | null;
+  readonly taxIdentifier: string | null;
+  readonly registeredAddress: string | null;
+  readonly directors: readonly string[];
+  readonly beneficialOwners: readonly string[];
+  readonly representativeEmail: string | null;
+  readonly representativeRole: string | null;
+  readonly authorityBasis: string | null;
+  readonly mandateReference: string | null;
+}
+
 export interface FormExtractionResult {
   readonly purpose: FormExtractionPurpose;
   readonly source: 'OPENAI' | 'FIXTURE';
   readonly model: string;
-  readonly fields: JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields;
+  readonly fields: JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields | CompanyIdentityFields;
   readonly warnings: readonly string[];
   readonly reviewRequired: true;
 }
@@ -107,6 +123,10 @@ function list(value: string | null): string[] {
   return value?.split(/[,;|]/u).map((item) => item.trim()).filter(Boolean).slice(0, 32) ?? [];
 }
 
+function structuredList(value: string | null): string[] {
+  return value?.split(/;|\n/u).map((item) => item.trim()).filter(Boolean).slice(0, 64) ?? [];
+}
+
 function number(value: string | null): number | null {
   if (!value) return null;
   const parsed = Number(value.replaceAll(/[^0-9.-]/gu, ''));
@@ -148,10 +168,27 @@ function strings(value: unknown, maximum: number): string[] {
   }))].slice(0, maximum);
 }
 
-function fixtureFields(request: FormExtractionRequest, bytes: Buffer): JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields {
+function fixtureFields(request: FormExtractionRequest, bytes: Buffer): JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields | CompanyIdentityFields {
   const sourceText = TEXT_EXTENSIONS.includes(extension(request.fileName) as typeof TEXT_EXTENSIONS[number])
     ? bytes.toString('utf8').slice(0, 100_000)
     : '';
+  if (request.purpose === 'COMPANY_IDENTITY') {
+    return {
+      legalName: valueFor(sourceText, ['legal name', 'company name']),
+      country: country(valueFor(sourceText, ['jurisdiction', 'country', 'registered country', 'country of incorporation'])),
+      registryAuthority: valueFor(sourceText, ['registry authority', 'registry']),
+      registrationNumber: valueFor(sourceText, ['registration number', 'company number']),
+      lei: valueFor(sourceText, ['lei', 'legal entity identifier']),
+      taxIdentifier: valueFor(sourceText, ['tax reference', 'tax identifier']),
+      registeredAddress: valueFor(sourceText, ['registered address', 'address']),
+      directors: list(valueFor(sourceText, ['directors', 'director / officer sample', 'officers'])),
+      beneficialOwners: structuredList(valueFor(sourceText, ['beneficial owners', 'psc / beneficial owner', 'psc', 'persons with significant control'])),
+      representativeEmail: valueFor(sourceText, ['representative email', 'work email']),
+      representativeRole: valueFor(sourceText, ['representative role', 'role']),
+      authorityBasis: valueFor(sourceText, ['authority basis', 'authority']),
+      mandateReference: valueFor(sourceText, ['mandate reference', 'mandate']),
+    };
+  }
   if (request.purpose === 'COMPANY_POLICY') {
     return {
       companyCountry: country(valueFor(sourceText, ['company country', 'registered country', 'country of incorporation'])),
@@ -207,6 +244,27 @@ const nullableString = { type: ['string', 'null'] } as const;
 const nullableNumber = { type: ['number', 'null'] } as const;
 
 function schemaFor(purpose: FormExtractionPurpose): Record<string, unknown> {
+  if (purpose === 'COMPANY_IDENTITY') {
+    return {
+      type: 'object', additionalProperties: false,
+      properties: {
+        legalName: nullableString,
+        country: { type: ['string', 'null'], enum: ['PL', 'IN', 'GB', 'DE', 'RU', 'KP', null] },
+        registryAuthority: nullableString,
+        registrationNumber: nullableString,
+        lei: nullableString,
+        taxIdentifier: nullableString,
+        registeredAddress: nullableString,
+        directors: { type: 'array', items: { type: 'string' } },
+        beneficialOwners: { type: 'array', items: { type: 'string' } },
+        representativeEmail: nullableString,
+        representativeRole: nullableString,
+        authorityBasis: nullableString,
+        mandateReference: nullableString,
+      },
+      required: ['legalName', 'country', 'registryAuthority', 'registrationNumber', 'lei', 'taxIdentifier', 'registeredAddress', 'directors', 'beneficialOwners', 'representativeEmail', 'representativeRole', 'authorityBasis', 'mandateReference'],
+    };
+  }
   if (purpose === 'COMPANY_POLICY') {
     return {
       type: 'object', additionalProperties: false,
@@ -266,10 +324,28 @@ function schemaFor(purpose: FormExtractionPurpose): Record<string, unknown> {
   };
 }
 
-function normalizeFields(purpose: FormExtractionPurpose, value: unknown): JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields {
+function normalizeFields(purpose: FormExtractionPurpose, value: unknown): JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields | CompanyIdentityFields {
   const record = typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+  if (purpose === 'COMPANY_IDENTITY') {
+    const lei = text(record['lei'], 20)?.toUpperCase() ?? null;
+    return {
+      legalName: text(record['legalName'], 300),
+      country: country(text(record['country'], 32)),
+      registryAuthority: text(record['registryAuthority'], 64),
+      registrationNumber: text(record['registrationNumber'], 64),
+      lei: lei && /^[A-Z0-9]{20}$/u.test(lei) ? lei : null,
+      taxIdentifier: text(record['taxIdentifier'], 64),
+      registeredAddress: text(record['registeredAddress'], 1_000),
+      directors: strings(record['directors'], 64),
+      beneficialOwners: strings(record['beneficialOwners'], 64),
+      representativeEmail: text(record['representativeEmail'], 320),
+      representativeRole: text(record['representativeRole'], 160),
+      authorityBasis: text(record['authorityBasis'], 1_000),
+      mandateReference: text(record['mandateReference'], 200),
+    };
+  }
   if (purpose === 'COMPANY_POLICY') {
     return {
       companyCountry: country(text(record['companyCountry'], 32)),
@@ -318,9 +394,9 @@ function normalizeFields(purpose: FormExtractionPurpose, value: unknown): JobBri
 
 function mergeWithLabeledText(
   purpose: FormExtractionPurpose,
-  extracted: JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields,
-  labeled: JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields,
-): JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields {
+  extracted: JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields | CompanyIdentityFields,
+  labeled: JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields | CompanyIdentityFields,
+): JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields | CompanyIdentityFields {
   const output = { ...extracted } as Record<string, unknown>;
   for (const [key, value] of Object.entries(labeled)) {
     const current = output[key];
@@ -349,7 +425,9 @@ export async function extractFormDraft(
   }
 
   try {
-    const instructions = request.purpose === 'COMPANY_POLICY'
+    const instructions = request.purpose === 'COMPANY_IDENTITY'
+      ? 'Extract only explicitly stated legal-entity identity, registry, ownership, representative and mandate facts. Preserve company numbers and LEIs exactly. Represent each beneficial owner as "name | control type | ownership percent" when those values are stated. Never infer authority, ownership, sanctions status or successful verification.'
+      : request.purpose === 'COMPANY_POLICY'
       ? 'Extract the company onboarding policy into the requested fields, including only explicitly stated company country, funding currency, operational policies, legal clauses, commercial standards, and authorized approver roles. Preserve the meaning of obligations and never invent legal terms.'
       : request.purpose === 'JOB_BRIEF'
       ? 'Extract a company job brief into the requested fields, including an explicitly stated payer company country and funding currency. Never invent missing facts or infer a destination from the work description. The destination country is a preference only; the selected freelancer profile determines the actual payout corridor.'
@@ -374,7 +452,7 @@ export async function extractFormDraft(
           + 'Extract facts only. Return null or an empty array when a fact is absent. This result is a reviewable draft and must never approve, publish or submit anything.',
         input: [{ role: 'user', content: [
           { type: 'input_file', filename: request.fileName, file_data: `data:${request.contentType};base64,${request.contentBase64}` },
-          { type: 'input_text', text: `Extract the ${request.purpose === 'COMPANY_POLICY' ? 'company onboarding policy' : request.purpose === 'JOB_BRIEF' ? 'job brief' : request.purpose === 'FREELANCER_PROPOSAL' ? 'freelancer proposal' : 'agreement terms'} fields from this file.` },
+          { type: 'input_text', text: `Extract the ${request.purpose === 'COMPANY_IDENTITY' ? 'company identity and representative authorization' : request.purpose === 'COMPANY_POLICY' ? 'company onboarding policy' : request.purpose === 'JOB_BRIEF' ? 'job brief' : request.purpose === 'FREELANCER_PROPOSAL' ? 'freelancer proposal' : 'agreement terms'} fields from this file.` },
         ] }],
         text: { format: { type: 'json_schema', name: 'anchor_form_draft', strict: true, schema: schemaFor(request.purpose) } },
       }),

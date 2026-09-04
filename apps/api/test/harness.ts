@@ -22,6 +22,7 @@ export async function createHarness(environment: NodeJS.ProcessEnv = {}): Promis
   const config = loadConfig({
     OPTIWORK_PROFILE: 'demo',
     REGULATION_REFRESH_MODE: 'fixture',
+    COMPANY_VERIFICATION_MODE: 'fixture',
     ...environment,
   });
   const clock = new FixedClock(new Date('2026-09-03T09:00:00.000Z'));

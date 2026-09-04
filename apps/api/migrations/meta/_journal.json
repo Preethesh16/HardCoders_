@@ -50,6 +50,20 @@
       "when": 1788438810995,
       "tag": "0006_company_policy_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788438811995,
+      "tag": "0007_company_authorization_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788438812995,
+      "tag": "0008_company_representative_mandates",
+      "breakpoints": true
     }
   ]
 }
