@@ -340,8 +340,18 @@ try {
   await freelancer.waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'Freelancer journey rail did not complete.', 15_000);
   await company.waitFor('document.querySelector("[data-transfer-screen][data-state=completed] .deal-complete-confirmation") !== null', 'Company payment confirmation did not render the completed release.', 15_000);
   await freelancer.waitFor('document.querySelector("[data-transfer-screen][data-state=completed] .deal-complete-confirmation") !== null', 'Freelancer payment confirmation did not render the completed release.', 15_000);
-  await company.waitFor('document.querySelector(".settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Company settlement receipt did not reconcile every amount.', 15_000);
-  await freelancer.waitFor('document.querySelector(".settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Freelancer settlement receipt did not reconcile every amount.', 15_000);
+  await company.waitFor('document.querySelector("[data-settlement-analytics] .settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Company did not advance from payment confirmation to the fresh reconciled analytics page.', 15_000);
+  await freelancer.waitFor('document.querySelector("[data-settlement-analytics] .settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Freelancer did not advance from payment confirmation to the fresh reconciled analytics page.', 15_000);
+  const analyticsLayout = await company.evaluate(`({
+    view: document.querySelector('#portalWorkflow')?.dataset.view,
+    transferStillVisible: document.querySelector('[data-transfer-screen]') !== null,
+    railVisible: document.querySelector('.stage-rail')?.offsetParent !== null,
+    workspaceHeadingVisible: document.querySelector('.workspace-heading')?.offsetParent !== null,
+    newDealAtBottom: document.querySelector('.settlement-receipt > .settlement-next-deal:last-child [data-start-new-deal]') !== null
+  })`);
+  if (analyticsLayout.view !== 'analytics' || analyticsLayout.transferStillVisible || analyticsLayout.railVisible || analyticsLayout.workspaceHeadingVisible || !analyticsLayout.newDealAtBottom) {
+    throw new Error(`Completed deal did not become a clean analytics destination: ${JSON.stringify(analyticsLayout)}`);
+  }
   const settlementReceipt = await company.evaluate(`({
     conservationChecks: Array.from(document.querySelectorAll('.conservation-proof article b')).map(element => element.textContent),
     analyticsCards: document.querySelectorAll('.settlement-kpis article').length,

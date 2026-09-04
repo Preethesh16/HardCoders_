@@ -11,6 +11,10 @@
   let inspectedStage = null;
   let transferAnimationUntil = 0;
   let transferAnimationTimer = null;
+  let completedPaymentId = null;
+  let completedView = "workflow";
+  let analyticsRevealTimer = null;
+  const completionHoldMilliseconds = 4_500;
 
   const $ = selector => document.querySelector(selector);
   const escape = value => String(value ?? "—").replace(/[&<>"']/g, character => ({
@@ -667,6 +671,22 @@
       <section class="settlement-panel"><header><span>FX QUOTE PROVENANCE</span><b>${escape(quote.rateSource ?? "—")}</b></header><div class="receipt-time-grid"><span><small>RATE OBSERVED</small><b>${escape(formatInstant(quote.rateObservedAt))}</b></span><span><small>QUOTE CREATED</small><b>${escape(formatInstant(quote.quotedAt ?? fxEvent?.occurredAt))}</b></span><span><small>QUOTE EXPIRY</small><b>${escape(formatInstant(quote.expiresAt))}</b></span><span><small>QUOTE HASH</small><b>${escape(shortRef(quote.canonicalHash, 10))}</b></span></div><div class="receipt-sources">${sourceRows}</div></section></div>
       <section class="settlement-panel blockchain-proof"><header><span>TRUST RAIL PROOF</span><b>${escape(`${binding.network ?? "—"} · ${commands.length} COMMANDS`)}</b></header><div class="trust-proof-grid"><article><small>HYPERLEDGER FABRIC</small><b>WORK EVIDENCE + BUYER DECISION</b><p>Submission tx ${escape(shortRef(submissionEvent?.detail?.fabricTxId, 10))}</p><p>Approval tx ${escape(shortRef(approvalEvent?.detail?.fabricTxId ?? r.fabricDecisionTxId, 10))}</p><code>${escape(shortRef(approvalEvent?.detail?.evidenceHash, 12))}</code></article><article><small>ALGORAND ARC-4</small><b>PROVIDER ESCROW + RELEASE</b><p>App ${escape(binding.applicationId)} · ASA ${escape(binding.assetId)}</p><p>${escape(shortRef(binding.originProviderAddress, 9))} → ${escape(shortRef(binding.destinationProviderAddress, 9))}</p><code>${escape(shortRef(binding.bindingHash, 12))}</code></article></div><div class="provider-command-list">${commandRows}</div></section>
       <details class="settlement-audit"><summary><span>OPEN COMPLETE BACKEND EVENT TIMELINE</span><b>${escape(`${auditEvents.length} EVENTS · ${documentCount} DOCUMENT HASHES`)}</b></summary><ol>${eventRows}</ol></details>
+      <footer class="settlement-next-deal">
+        <div><small>TRANSACTION RECORD SEALED</small><h4>${role === "COMPANY" ? "READY FOR THE NEXT DEAL?" : "THIS DEAL IS NOW CLOSED."}</h4><p>${role === "COMPANY" ? "Start with a clean workspace. This completed payment and every proof above remain preserved in the audit ledger." : "The company can open the next opportunity. This receipt remains available as the final record of your payout."}</p></div>
+        ${role === "COMPANY" ? '<button type="button" data-start-new-deal>START A NEW DEAL <b>→</b></button>' : '<span>WAITING FOR THE NEXT COMPANY BRIEF</span>'}
+      </footer>
+    </section>`;
+  }
+
+  function settlementAnalyticsPage() {
+    const route = dealRoute();
+    const payment = results().settlementTimeline?.payment ?? results().payment ?? {};
+    return `<section class="settlement-analytics-page" data-settlement-analytics aria-label="Completed deal analytics">
+      <header class="settlement-analytics-hero">
+        <div><small>ANCHOR / COMPLETED DEAL</small><h1>TRANSACTION<br>ANALYTICS.</h1><p>The transfer is finished. This fresh view reconstructs the exact policy, FX, escrow, evidence and payout path from persisted backend records.</p></div>
+        <aside><span><i></i> FINAL</span><b>${escape(`${route.originCountry ?? "—"} → ${route.destinationCountry ?? "—"}`)}</b><small>${escape(shortRef(payment.id, 9))}</small></aside>
+      </header>
+      ${settlementReceipt()}
     </section>`;
   }
 
@@ -687,9 +707,9 @@
         <figure><div><img src="assets/optiwork-freelancer-pixel.png" alt="Freelancer"></div><figcaption><small>FREELANCER · ${escape(countryLabel(route.destinationCountry).toUpperCase())}</small><b>${completed ? "MONEY RECEIVED" : "AWAITING CREDIT"}</b><em>${escape(payoutAmount ? money(payoutAmount.amountMinor, payoutAmount.scale, payoutAmount.currency) : payoutCurrency)}</em></figcaption></figure>
       </div>
       <dl class="transfer-proof"><div><dt>FABRIC DECISION</dt><dd>${escape(shortRef(results().fabricDecisionTxId, 10))}</dd></div><div><dt>ESCROW DEAL</dt><dd>${escape(shortRef(binding?.dealId, 10))}</dd></div><div><dt>NETWORK</dt><dd>${escape(binding?.network ?? "LOCALNET")}</dd></div></dl>
-      ${completed ? `<section class="deal-complete-confirmation"><i>✓</i><div><small>PAYMENT CONFIRMATION</small><h4>DEAL COMPLETE.</h4><p>${escape(`${money(payoutAmount?.amountMinor, payoutAmount?.scale, payoutCurrency)} credited after Fabric-approved evidence released escrow ${shortRef(binding?.dealId, 8)}.`)}</p></div>${role === "COMPANY" ? '<button type="button" data-start-new-deal>START A NEW DEAL →</button>' : '<span>COMPANY + FREELANCER OBLIGATIONS CLOSED</span>'}</section>` : ""}
+      ${completed ? `<section class="deal-complete-confirmation"><i>✓</i><div><small>PAYMENT CONFIRMATION</small><h4>DEAL COMPLETE.</h4><p>${escape(`${money(payoutAmount?.amountMinor, payoutAmount?.scale, payoutCurrency)} credited after Fabric-approved evidence released escrow ${shortRef(binding?.dealId, 8)}.`)}</p></div><span>COMPANY + FREELANCER OBLIGATIONS CLOSED</span></section><section class="analytics-transition-cue" role="status"><small>SETTLEMENT RECORD SEALED</small><b>OPENING TRANSACTION ANALYTICS…</b></section>` : ""}
       <p class="transfer-explainer">The characters visualize the real provider-mediated flow. The company and freelancer remain fiat-only; neither user receives cryptocurrency or signs a blockchain transaction.</p>
-    </section>${completed ? settlementReceipt() : ""}`;
+    </section>`;
   }
 
   function showTransferScreen(phase) {
@@ -856,9 +876,11 @@
   function render() {
     const company = role === "COMPANY";
     const route = dealRoute();
+    const analyticsVisible = model.run?.phase === "COMPLETED" && completedView === "analytics" && !inspectedStage;
     const network = String(model.runtime?.network ?? results().binding?.network ?? "unknown").toLowerCase();
     const networkLabel = network === "testnet" ? "PUBLIC TESTNET" : network === "localnet" ? "REAL LOCALNET" : "NETWORK UNKNOWN";
     $("#portalWorkflow").dataset.role = role.toLowerCase();
+    $("#portalWorkflow").dataset.view = analyticsVisible ? "analytics" : "workflow";
     $("#workspaceEyebrow").textContent = company ? "COMPANY / HIRING COMMAND" : "FREELANCER / OPPORTUNITY DESK";
     $("#workspaceTitle").textContent = company ? "HIRE WITH PROOF BUILT IN." : "FIND WORK. GET PAID LOCALLY.";
     $("#workspaceIntro").textContent = company ? "Publish a real brief, compare multiple proposals, define the agreement and release only against approved evidence." : "Discover verified work, submit your own terms, review the private agreement and deliver into secured escrow.";
@@ -872,9 +894,11 @@
       ? `${networkLabel} · ${route.originCountry} → ${route.destinationCountry}`
       : route.originCountry ? `${networkLabel} · ${route.originCountry} → PAYEE PENDING` : `${networkLabel} · ROUTE PENDING`;
     const resetButton = $("#workflowReset");
-    resetButton.hidden = !company || !model.run;
+    resetButton.hidden = !company || !model.run || model.run?.phase === "COMPLETED";
     resetButton.textContent = model.run?.phase === "COMPLETED" ? "START NEW DEAL" : "RESET CURRENT DEAL";
-    $("#workspaceAction").innerHTML = inspectedStage ? renderInspection(inspectedStage) : company ? renderCompany() : renderFreelancer();
+    $("#workspaceAction").innerHTML = analyticsVisible
+      ? settlementAnalyticsPage()
+      : inspectedStage ? renderInspection(inspectedStage) : company ? renderCompany() : renderFreelancer();
     renderRail();
     renderSnapshot();
     renderCompanion();
@@ -1060,18 +1084,43 @@
   }
 
   async function refresh({ follow = false } = {}) {
-    model = await request("/api/workspace/state");
+    const previousPhase = model.run?.phase;
+    const nextModel = await request("/api/workspace/state");
     // A poll may start just before document extraction marks the UI busy. Do
     // not let that in-flight response replace the live form and detach the
     // controls that the extractor is about to populate.
     if (!follow && busy) return;
     if (!follow && (document.activeElement?.closest("[data-workspace-form]") || document.querySelector('[data-workspace-form][data-dirty="true"]'))) return;
+    model = nextModel;
+    const nextPhase = model.run?.phase;
+    const paymentId = String(results().settlementTimeline?.payment?.id ?? results().payment?.id ?? model.run?.id ?? "completed-deal");
+    if (nextPhase !== "COMPLETED") {
+      completedPaymentId = null;
+      completedView = "workflow";
+      clearTimeout(analyticsRevealTimer);
+    } else if (completedPaymentId !== paymentId) {
+      completedPaymentId = paymentId;
+      if (previousPhase && previousPhase !== "COMPLETED") {
+        completedView = "completion";
+        clearTimeout(analyticsRevealTimer);
+        analyticsRevealTimer = setTimeout(() => {
+          completedView = "analytics";
+          render();
+          document.querySelector(".portal-main")?.scrollTo({ top: 0, behavior: "smooth" });
+        }, completionHoldMilliseconds);
+      } else {
+        completedView = "analytics";
+      }
+    }
     render();
   }
 
   async function reset() {
     if (role !== "COMPANY" || busy || !confirm("Start a new deal? This clears the shared live workspace for both Company and Freelancer. Existing ledger records remain auditable.")) return;
     inspectedStage = null;
+    completedPaymentId = null;
+    completedView = "workflow";
+    clearTimeout(analyticsRevealTimer);
     await request("/api/workflow/reset", { method: "POST" });
     await refresh({ follow: true });
     setStatus("FRESH WORKSPACE READY · NO BLOCKCHAIN ACTIONS YET_", "success");

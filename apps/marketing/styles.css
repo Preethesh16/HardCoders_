@@ -1406,3 +1406,48 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
   #portalWorkflow .settlement-audit li>div>span{display:block}
   #portalWorkflow .settlement-audit li time{display:block;margin-top:4px}
 }
+
+/* A completed transfer becomes its own analytics destination. The stage rail,
+   action chrome and inline audit drawer belong to the active deal only. */
+#portalWorkflow .analytics-transition-cue{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 28px;background:#102b22;border-top:1px solid #36584c;color:#d9ff45}
+#portalWorkflow .analytics-transition-cue small{font:6px/1.5 "Press Start 2P",monospace;color:#90aaa0}
+#portalWorkflow .analytics-transition-cue b{font:7px/1.5 "Press Start 2P",monospace;text-align:right}
+#portalWorkflow[data-view="analytics"]{max-width:1720px;padding-inline:clamp(18px,4vw,72px)}
+#portalWorkflow[data-view="analytics"] .workspace-shell{display:block}
+#portalWorkflow[data-view="analytics"] .workspace-panel{display:block;min-height:0}
+#portalWorkflow[data-view="analytics"] .workspace-panel>.workspace-heading,
+#portalWorkflow[data-view="analytics"] .workspace-panel>.workflow-status,
+#portalWorkflow[data-view="analytics"] .workspace-panel>.workspace-audit,
+#portalWorkflow[data-view="analytics"] .stage-rail,
+#portalWorkflow[data-view="analytics"] .deal-companion{display:none}
+#portalWorkflow[data-view="analytics"] #workspaceAction{width:100%;max-width:1440px;margin:0 auto}
+#portalWorkflow .settlement-analytics-page{padding:18px 0 54px;animation:settlement-page-enter 180ms ease-out both}
+#portalWorkflow .settlement-analytics-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:40px;align-items:end;padding:34px 4px 30px}
+#portalWorkflow .settlement-analytics-hero>div>small{font:7px/1.5 "Press Start 2P",monospace;color:#27694f;font-family:"Press Start 2P",monospace!important}
+#portalWorkflow .settlement-analytics-hero h1{max-width:880px;margin:14px 0 12px;color:#102b22;font:clamp(28px,4.4vw,58px)/1.13 "Press Start 2P",monospace;font-family:"Press Start 2P",monospace!important;text-wrap:balance}
+#portalWorkflow .settlement-analytics-hero p{max-width:800px;margin:0;color:#586a60;font:14px/1.7 var(--mono);text-wrap:pretty}
+#portalWorkflow .settlement-analytics-hero>aside{min-width:230px;padding:20px 22px;background:#102b22;border-radius:12px;color:#fff}
+#portalWorkflow .settlement-analytics-hero>aside span,#portalWorkflow .settlement-analytics-hero>aside b,#portalWorkflow .settlement-analytics-hero>aside small{display:block}
+#portalWorkflow .settlement-analytics-hero>aside span{font:7px/1.5 "Press Start 2P",monospace;color:#d9ff45;font-family:"Press Start 2P",monospace!important}
+#portalWorkflow .settlement-analytics-hero>aside span i{display:inline-block;width:8px;height:8px;margin-right:7px;background:#44c977;border-radius:50%}
+#portalWorkflow .settlement-analytics-hero>aside b{margin:16px 0 8px;font:700 22px/1.3 var(--mono);font-variant-numeric:tabular-nums}
+#portalWorkflow .settlement-analytics-hero>aside small{overflow:hidden;color:#9db1a7;font:10px/1.5 var(--mono);text-overflow:ellipsis;white-space:nowrap}
+#portalWorkflow[data-view="analytics"] .settlement-receipt{margin-top:0}
+#portalWorkflow .settlement-next-deal{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:30px;align-items:center;padding:30px 28px;background:#eff8e8;border-top:1px solid #cbd8cf}
+#portalWorkflow .settlement-next-deal small{display:block;color:#267b50;font:7px/1.5 "Press Start 2P",monospace;font-family:"Press Start 2P",monospace!important}
+#portalWorkflow .settlement-next-deal h4{margin:10px 0 7px;color:#17372d;font:17px/1.45 "Press Start 2P",monospace;font-family:"Press Start 2P",monospace!important;text-wrap:balance}
+#portalWorkflow .settlement-next-deal p{max-width:760px;margin:0;color:#5a6d62;font:12px/1.65 var(--mono);text-wrap:pretty}
+#portalWorkflow .settlement-next-deal>button{display:flex;align-items:center;justify-content:space-between;gap:22px;min-width:260px;padding:17px 19px;background:#17372d;border:0;border-radius:8px;color:#fff;cursor:pointer;font:7px/1.5 "Press Start 2P",monospace;font-family:"Press Start 2P",monospace!important}
+#portalWorkflow .settlement-next-deal>button b{color:#d9ff45;font-size:14px}
+#portalWorkflow .settlement-next-deal>button:hover{transform:translateY(-2px)}
+#portalWorkflow .settlement-next-deal>span{padding:14px 16px;background:#dfeae2;border-radius:7px;color:#51665a;font:6px/1.5 "Press Start 2P",monospace;text-align:center}
+@keyframes settlement-page-enter{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:780px){
+  #portalWorkflow .analytics-transition-cue{display:block;padding:15px 18px}
+  #portalWorkflow .analytics-transition-cue b{display:block;margin-top:8px;text-align:left}
+  #portalWorkflow .settlement-analytics-hero,#portalWorkflow .settlement-next-deal{grid-template-columns:1fr}
+  #portalWorkflow .settlement-analytics-hero{gap:22px;padding-top:22px}
+  #portalWorkflow .settlement-analytics-hero>aside{min-width:0}
+  #portalWorkflow .settlement-next-deal>button{min-width:0;width:100%}
+}
+@media(prefers-reduced-motion:reduce){#portalWorkflow .settlement-analytics-page{animation:none}#portalWorkflow .settlement-next-deal>button:hover{transform:none}}
