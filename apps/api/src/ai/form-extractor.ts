@@ -1,3 +1,6 @@
+import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
+import { request as httpRequest } from 'node:http';
+
 import type { ApiConfig } from '../config.js';
 import { badRequest } from '../errors.js';
 
@@ -412,11 +415,49 @@ function mergeWithLabeledText(
  * form to an empty manual-entry draft. A 4xx is returned as-is: it is a real
  * rejection and retrying it would only waste a paid call.
  */
-async function fetchWithRetry(url: URL, init: RequestInit, attempts = 3): Promise<Response> {
+interface ProviderResponse { readonly ok: boolean; readonly status: number; readonly text: string }
+
+/**
+ * Node's global fetch pools keep-alive sockets for the life of the process. An
+ * intervening NAT can drop one silently, and every later request then stalls on
+ * the dead socket until it times out — a long-running API degrades every upload
+ * to an empty manual-entry draft until it is restarted. Each attempt here opens
+ * its own connection and closes it, so a poisoned socket cannot outlive one
+ * request.
+ */
+async function postJson(url: URL, headers: Record<string, string>, body: string, timeoutMs: number): Promise<ProviderResponse> {
+  return new Promise<ProviderResponse>((resolve, reject) => {
+    const secure = url.protocol === 'https:';
+    const send = secure ? httpsRequest : httpRequest;
+    const request = send(url, {
+      method: 'POST',
+      headers: { ...headers, 'content-length': String(Buffer.byteLength(body)) },
+      ...(secure ? { agent: new HttpsAgent({ keepAlive: false }) } : {}),
+      timeout: timeoutMs,
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer) => { chunks.push(chunk); });
+      response.on('end', () => {
+        const status = response.statusCode ?? 0;
+        resolve({ ok: status >= 200 && status < 300, status, text: Buffer.concat(chunks).toString('utf8') });
+      });
+      response.on('error', reject);
+    });
+    request.on('timeout', () => { request.destroy(new Error('The extraction request timed out.')); });
+    request.on('error', reject);
+    request.end(body);
+  });
+}
+
+/**
+ * Retry a transport error, a 429 or a 5xx. A 4xx is returned as-is: it is a
+ * real rejection and retrying it would only waste a paid call.
+ */
+async function postWithRetry(url: URL, headers: Record<string, string>, body: string, timeoutMs: number, attempts = 3): Promise<ProviderResponse> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetch(url, init);
+      const response = await postJson(url, headers, body, timeoutMs);
       if (response.status === 429 || response.status >= 500) {
         if (attempt === attempts) return response;
         lastError = new Error(`HTTP ${response.status}`);
@@ -462,17 +503,14 @@ export async function extractFormDraft(
       : request.purpose === 'FREELANCER_PROPOSAL'
         ? 'Extract a freelancer proposal into the requested fields, including explicitly stated tax residence, payout country, and payout currency. Never invent or infer missing locations or currencies. Return the numeric proposed price exactly as written; the proposed price is denominated in the payer currency shown in the job, while payoutCurrency is the freelancer receiving currency.'
         : 'Extract agreement inputs into commercial terms, objective acceptance criteria, company policies, and legal clauses. Preserve obligations accurately and never invent missing terms.';
-    const response = await fetchWithRetry(new URL(`${config.baseUrl.replace(/\/$/u, '')}/responses`), {
-      method: 'POST',
-      redirect: 'error',
-      cache: 'no-store',
-      signal: AbortSignal.timeout(20_000),
-      headers: {
+    const response = await postWithRetry(
+      new URL(`${config.baseUrl.replace(/\/$/u, '')}/responses`),
+      {
         'content-type': 'application/json',
         accept: 'application/json',
         authorization: `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify({
+      JSON.stringify({
         model: config.model,
         store: false,
         instructions:
@@ -484,9 +522,10 @@ export async function extractFormDraft(
         ] }],
         text: { format: { type: 'json_schema', name: 'anchor_form_draft', strict: true, schema: schemaFor(request.purpose) } },
       }),
-    });
-    if (!response.ok) throw new Error(`OpenAI returned HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
-    const payload = await response.json() as ResponsesPayload;
+      20_000,
+    );
+    if (!response.ok) throw new Error(`OpenAI returned HTTP ${response.status}: ${response.text.slice(0, 300)}`);
+    const payload = JSON.parse(response.text) as ResponsesPayload;
     const extracted = normalizeFields(request.purpose, JSON.parse(responseText(payload)));
     const fields = TEXT_EXTENSIONS.includes(extension(request.fileName) as typeof TEXT_EXTENSIONS[number])
       ? mergeWithLabeledText(request.purpose, extracted, fixtureFields(request, bytes))
