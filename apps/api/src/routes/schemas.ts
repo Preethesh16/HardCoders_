@@ -58,6 +58,13 @@ export const CreateApplicationBody = Type.Object({
   resumeObjectId: Type.Optional(IdentifierSchema),
 }, { additionalProperties: false });
 
+export const ExtractFormBody = Type.Object({
+  purpose: Type.Union([Type.Literal('JOB_BRIEF'), Type.Literal('FREELANCER_PROPOSAL'), Type.Literal('AGREEMENT_TERMS')]),
+  fileName: Type.String({ minLength: 1, maxLength: 200 }),
+  contentType: Type.String({ minLength: 3, maxLength: 128 }),
+  contentBase64: Type.String({ minLength: 4, maxLength: 11_200_000 }),
+}, { additionalProperties: false });
+
 export const EvaluateApplicationBody = Type.Object({
   select: Type.Optional(Type.Boolean()),
   amount: Type.Optional(MoneyInput),

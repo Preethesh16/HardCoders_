@@ -18,6 +18,7 @@ import {
   currentRun,
   agreementAccess,
   submissionAccess,
+  extractForm,
 } from "./workflow.mjs";
 
 function sendJson(res, status, payload) {
@@ -136,6 +137,15 @@ const server = createServer(async (req, res) => {
       return;
     }
     sendJson(res, 200, resetRun());
+    return;
+  }
+  if (requestPath === "/api/workflow/extract" && req.method === "POST") {
+    try {
+      const role = req.headers["x-anchor-role"] === "FREELANCER" ? "freelancer" : "company";
+      sendJson(res, 200, await extractForm(role, await readJson(req)));
+    } catch (error) {
+      sendJson(res, 400, { error: { message: String(error.message ?? error) } });
+    }
     return;
   }
   const stepMatch = /^\/api\/workflow\/step\/(\d+)$/.exec(requestPath);

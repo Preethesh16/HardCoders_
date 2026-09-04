@@ -27,6 +27,7 @@ import {
 } from '../regulations/index.js';
 import { mutate } from './mutation.js';
 import { demoState, runWalkthrough } from '../demo/walkthrough.js';
+import { extractFormDraft } from '../ai/form-extractor.js';
 import {
   ApproveContractBody,
   CreateApplicationBody,
@@ -37,6 +38,7 @@ import {
   DecideSubmissionBody,
   ErrorSchema,
   EvaluateApplicationBody,
+  ExtractFormBody,
   HealthSchema,
   IdParams,
   PrepareAgreementBody,
@@ -83,6 +85,17 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
       database: context.config.databaseUrl === undefined ? 'memory' : 'postgres',
     },
   }));
+
+  // Advisory document-to-form extraction. Source bytes are processed in
+  // memory and are neither persisted nor committed to either ledger.
+  app.post('/v1/ai/extract-form', {
+    schema: { body: ExtractFormBody, response: errorResponses },
+  }, async (request) => {
+    const principal = principalOf(request);
+    const body = request.body as Static<typeof ExtractFormBody>;
+    requireRole(principal, body.purpose === 'FREELANCER_PROPOSAL' ? 'freelancer' : 'company_member');
+    return extractFormDraft(context.config.ai, body);
+  });
 
   // ---- marketplace -------------------------------------------------------
 

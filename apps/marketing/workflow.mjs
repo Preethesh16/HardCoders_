@@ -473,6 +473,25 @@ export async function submissionAccess() {
   return call("polishCompany", "GET", `/v1/submissions/${run.results.submissionId}/access`);
 }
 
+export async function extractForm(role, input) {
+  if (!run) {
+    run = freshRun();
+    persistRun();
+  }
+  const freelancer = role === "freelancer";
+  const allowedPurposes = freelancer ? ["FREELANCER_PROPOSAL"] : ["JOB_BRIEF", "AGREEMENT_TERMS"];
+  if (!allowedPurposes.includes(input?.purpose)) {
+    throw new Error(`The ${freelancer ? "Freelancer" : "Company"} portal cannot extract ${String(input?.purpose ?? "this document")}.`);
+  }
+  return call(
+    freelancer ? "indianFreelancer" : "polishCompany",
+    "POST",
+    "/v1/ai/extract-form",
+    input,
+    `extract-${String(input.purpose).toLowerCase()}-${Date.now()}`,
+  );
+}
+
 export function currentRun() {
   if (!run) return null;
   persistRun();
