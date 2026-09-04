@@ -27,6 +27,8 @@ async function supplierContract(current: Harness, fundingMinor: string) {
       title: 'Precision optical assemblies',
       description: 'Supply calibrated optical assemblies against the attached specification and invoice.',
       skills: ['optics', 'manufacturing'],
+      payerCountry: 'IN',
+      fundingCurrency: 'INR',
       destinationCountry: 'GB',
       budget: { amountMinor: fundingMinor, currency: 'INR', scale: 2 },
     },
@@ -34,7 +36,10 @@ async function supplierContract(current: Harness, fundingMinor: string) {
   const application = await call(current, 'POST', `/v1/jobs/${job.body.id}/applications`, {
     token: ukSupplier.token,
     idempotencyKey: `outward-application-${fundingMinor}`,
-    body: { coverLetter: 'Pennine Optics supplies calibrated optics and manufacturing to specification.' },
+    body: {
+      residenceCountry: 'GB', payoutCountry: 'GB', payoutCurrency: 'GBP',
+      coverLetter: 'Pennine Optics supplies calibrated optics and manufacturing to specification.',
+    },
   });
   const evaluated = await call(current, 'POST', `/v1/applications/${application.body.id}/evaluate`, {
     token: indianCompany.token,
@@ -55,7 +60,13 @@ async function supplierContract(current: Harness, fundingMinor: string) {
   return contract;
 }
 
-const IMPORT_DOCUMENTS = ['INVOICE', 'FORM_A2_DEMO', 'TAX_REVIEW_DEMO', 'IMPORT_EVIDENCE', 'BUYER_DUE_DILIGENCE'] as const;
+const IMPORT_DOCUMENTS = [
+  'AUTHORISED_DEALER_REVIEW', 'BUYER_DUE_DILIGENCE', 'BUYER_DUE_DILIGENCE_CONDITIONAL',
+  'COMMODITY_CODE', 'EXPORT_LICENCE_IF_REQUIRED', 'FOREIGN_MERCHANT_CDD', 'FORM_15CA_CONDITIONAL',
+  'FORM_15CB_CONDITIONAL', 'FORM_A2_DEMO', 'FX_AND_FEE_DISCLOSURE', 'IMPORT_EVIDENCE', 'INVOICE',
+  'PACKING_LIST', 'PAYEE_TRANSACTION_RECORD', 'PAYMENT_PURPOSE_DECLARATION', 'RESTRICTED_TRADE_SCREENING',
+  'TAX_REVIEW_DEMO', 'UK_EXPORT_DECLARATION', 'UK_EXPORT_VAT_EVIDENCE', 'UK_SANCTIONS_SCREENING',
+] as const;
 
 function documents(codes: readonly string[]) {
   return codes.map((code) => ({

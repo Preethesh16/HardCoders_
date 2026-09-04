@@ -12,22 +12,30 @@ import type { AppContext } from '../context.js';
 import { badRequest, unauthorized, unprocessable } from '../errors.js';
 import { MarketplaceService } from '../marketplace/service.js';
 import { PaymentService } from '../payments/service.js';
+import { EXECUTABLE_CORRIDOR_BOOKS, isExecutableCorridorBook } from '../payments/providers.js';
 import { SubmissionService } from '../submissions/service.js';
 import { IdentityService } from '../identity/service.js';
-import { listCorridors, resolve } from '../corridor/service.js';
+import { inspect, listCorridors, resolve } from '../corridor/service.js';
+import { evaluate } from '../compliance/engine.js';
 import { buildQuote } from '../fx/quote.js';
 import { money } from '../money.js';
 import { requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import {
-  APPROVED_REGULATION_SOURCES,
-  approvedCorpusHash,
+  checkCorridorRegulations,
+  checkDealRegulations,
   explainRegulationRefresh,
-  refreshOfficialRegulations,
   retrieveRegulations,
+} from '../regulations/index.js';
+import type {
+  CorridorRegulationCheck,
+  RegulationCorridor,
+  RegulatoryPartyType,
+  RegulatoryPurposeType,
 } from '../regulations/index.js';
 import { mutate } from './mutation.js';
 import { demoState, runWalkthrough } from '../demo/walkthrough.js';
 import { extractFormDraft } from '../ai/form-extractor.js';
+import { organizations } from '../db/schema.js';
 import {
   ApproveContractBody,
   CreateApplicationBody,
@@ -42,9 +50,11 @@ import {
   HealthSchema,
   IdParams,
   PrepareAgreementBody,
+  PreviewComplianceBody,
   RecordDocumentBody,
   RefundPaymentBody,
   ResolveCorridorBody,
+  SaveCompanyPolicyProfileBody,
   SelectApplicationBody,
   SupplierPaymentBody,
   VerifyCredentialBody,
@@ -62,6 +72,26 @@ function principalOf(request: FastifyRequest): Principal {
 }
 
 const errorResponses = { 400: ErrorSchema, 401: ErrorSchema, 403: ErrorSchema, 404: ErrorSchema, 409: ErrorSchema, 422: ErrorSchema };
+
+function regulatoryPartyType(kind: string): RegulatoryPartyType {
+  if (kind === 'FREELANCER' || kind === 'SUPPLIER' || kind === 'PROVIDER' || kind === 'COMPANY') return kind;
+  return 'INDIVIDUAL';
+}
+
+function regulatoryPurpose(originCountry: string, destinationCountry: string, providerKind: string): {
+  purposeCode: string;
+  purposeType: RegulatoryPurposeType;
+} {
+  if (destinationCountry === 'IN') return { purposeCode: 'P0802', purposeType: 'SERVICES' };
+  if (originCountry === 'IN') {
+    return { purposeCode: 'S0102', purposeType: providerKind === 'SUPPLIER' ? 'GOODS' : 'SERVICES' };
+  }
+  if (originCountry === 'PL' && destinationCountry === 'GB') {
+    return { purposeCode: 'B2B_DIGITAL_SERVICES', purposeType: 'SERVICES' };
+  }
+  if (providerKind !== 'SUPPLIER') return { purposeCode: 'B2B_DIGITAL_SERVICES', purposeType: 'SERVICES' };
+  return { purposeCode: 'UNCLASSIFIED', purposeType: 'GOODS' };
+}
 
 export async function registerRoutes(app: FastifyInstance, context: AppContext): Promise<void> {
   const marketplace = new MarketplaceService(context);
@@ -97,6 +127,22 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
     return extractFormDraft(context.config.ai, body);
   });
 
+  app.get('/v1/company/policy-profile', async (request) => ({
+    profile: await marketplace.latestCompanyPolicyProfile(principalOf(request)),
+  }));
+
+  app.post('/v1/company/policy-profile', {
+    schema: { body: SaveCompanyPolicyProfileBody, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    const body = request.body as Static<typeof SaveCompanyPolicyProfileBody>;
+    return mutate(context, request, reply, principal, {
+      scope: 'company-policy.approve',
+      statusCode: 201,
+      run: async () => ({ profile: await marketplace.saveCompanyPolicyProfile(principal, body) }),
+    });
+  });
+
   // ---- marketplace -------------------------------------------------------
 
   app.post('/v1/jobs', {
@@ -113,6 +159,8 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
         skills: body.skills,
         ...(body.acceptanceCriteria === undefined ? {} : { acceptanceCriteria: body.acceptanceCriteria }),
         ...(body.targetDeliveryDate === undefined ? {} : { targetDeliveryDate: body.targetDeliveryDate }),
+        payerCountry: body.payerCountry,
+        fundingCurrency: body.fundingCurrency,
         destinationCountry: body.destinationCountry,
         budget: money(body.budget.amountMinor, body.budget.currency, body.budget.scale),
       }),
@@ -140,6 +188,9 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
       scope: 'applications.create',
       statusCode: 201,
       run: async () => marketplace.apply(principal, request.params.id, {
+        residenceCountry: body.residenceCountry,
+        payoutCountry: body.payoutCountry,
+        payoutCurrency: body.payoutCurrency,
         coverLetter: body.coverLetter,
         ...(body.approach === undefined ? {} : { approach: body.approach }),
         ...(body.proposedSkills === undefined ? {} : { proposedSkills: body.proposedSkills }),
@@ -287,6 +338,114 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
     });
   });
 
+  const previewCompliance = async (
+    input: Static<typeof PreviewComplianceBody>,
+    decisionId: string,
+    regulationChecks = new Map<string, Promise<CorridorRegulationCheck>>(),
+  ) => {
+    const corridor = inspect(input.originCountry, input.destinationCountry);
+    const bookId = corridor.bookId as RegulationCorridor;
+    let regulationPromise = regulationChecks.get(bookId);
+    if (regulationPromise === undefined) {
+      regulationPromise = checkCorridorRegulations({
+        bookId,
+        mode: context.config.regulations.refreshMode,
+        checkedAt: context.clock.now(),
+      });
+      regulationChecks.set(bookId, regulationPromise);
+    }
+    const regulation = await regulationPromise;
+    const decision = evaluate({
+      id: decisionId,
+      policy: corridor.policy,
+      inrEquivalent: money(input.inrEquivalentMinor, 'INR', 2),
+      originCredential: {
+        id: `PREVIEW-VC-${input.originCountry}-ORIGIN`, country: input.originCountry,
+        assuranceLevel: input.originAssuranceLevel ?? 'BASIC', status: 'ACTIVE',
+        expiresAt: '2099-12-31T23:59:59.999Z', signatureValid: true,
+      },
+      destinationCredential: {
+        id: `PREVIEW-VC-${input.destinationCountry}-DESTINATION`, country: input.destinationCountry,
+        assuranceLevel: input.destinationAssuranceLevel ?? 'BASIC', status: 'ACTIVE',
+        expiresAt: '2099-12-31T23:59:59.999Z', signatureValid: true,
+      },
+      providedDocuments: input.providedDocuments,
+      ...(input.purposeCode === undefined ? {} : { purposeCode: input.purposeCode }),
+      ...(input.riskSignals === undefined ? {} : { riskSignals: input.riskSignals }),
+      regulationCoverage: regulation.coverage,
+      evaluatedAt: context.clock.now(),
+    });
+    const providerRouteConfigured = isExecutableCorridorBook(corridor.bookId);
+    let indicativeQuote = null;
+    let fxStatus: 'NOT_REQUESTED' | 'LIVE' | 'FIXTURE' | 'UNAVAILABLE' = 'NOT_REQUESTED';
+    let fxError: string | undefined;
+    if (decision.outcome === 'PASSED' && providerRouteConfigured) {
+      try {
+        const quotedAt = context.clock.now();
+        const rates = await context.rates.rates(corridor.policy, quotedAt);
+        indicativeQuote = buildQuote({
+          id: `FXQ-${decisionId}`,
+          policy: corridor.policy,
+          fundingAmount: money(input.fundingAmountMinor ?? '100000', corridor.policy.fundingCurrency, 2),
+          rates,
+          quotedAt,
+          ttlSeconds: context.config.fx.quoteTtlSeconds,
+          provider: rates.source.startsWith('FRANKFURTER_ECB_')
+            ? 'FRANKFURTER_ECB_REFERENCE'
+            : 'OPTIWORK_FIXTURE_PROVIDER',
+        });
+        fxStatus = context.config.fx.mode === 'frankfurter' ? 'LIVE' : 'FIXTURE';
+      } catch (error) {
+        fxStatus = 'UNAVAILABLE';
+        fxError = error instanceof Error ? error.message : 'The configured FX source is unavailable.';
+      }
+    }
+    const gate = decision.outcome === 'BLOCKED'
+      ? 'REJECT_BEFORE_SETTLEMENT'
+      : decision.outcome === 'MANUAL_REVIEW'
+        ? 'HOLD_BEFORE_ESCROW'
+        : fxStatus === 'UNAVAILABLE'
+          ? 'HOLD_FOR_LIVE_FX'
+        : providerRouteConfigured
+          ? 'PAYMENT_ROUTE_READY'
+          : 'POLICY_PASSED_PROVIDER_NOT_CONFIGURED';
+    const settlementReady = decision.outcome === 'PASSED' && providerRouteConfigured && indicativeQuote !== null;
+    return {
+      policy: corridor.policy,
+      policyHash: corridor.canonicalHash,
+      decision,
+      regulation,
+      fx: {
+        status: fxStatus,
+        mode: context.config.fx.mode,
+        quote: indicativeQuote,
+        ...(fxError === undefined ? {} : { error: fxError }),
+      },
+      enforcement: {
+        gate,
+        quoteAllowed: decision.outcome === 'PASSED',
+        escrowFundingAllowed: settlementReady,
+        blockchainSigningAllowed: settlementReady,
+        providerRouteConfigured,
+      },
+      evaluatedBy: 'ANCHOR_DETERMINISTIC_COMPLIANCE_ENGINE',
+      advisoryDisclaimer: 'Demonstration decision only; not legal, tax, sanctions, KYC or payment advice.',
+    };
+  };
+
+  app.post('/v1/compliance/preview', {
+    schema: { body: PreviewComplianceBody, response: errorResponses },
+  }, async (request, reply) => {
+    const principal = principalOf(request);
+    requireRole(principal, 'company_member', 'platform_admin', 'compliance_service', 'audit_service');
+    if (context.config.profile !== 'demo') throw unprocessable('Compliance preview is available only in the local demonstration profile.');
+    const body = request.body as Static<typeof PreviewComplianceBody>;
+    return mutate(context, request, reply, principal, {
+      scope: 'compliance.preview',
+      run: async () => previewCompliance(body, 'CMP-CUSTOM-PREVIEW'),
+    });
+  });
+
   /**
    * An indicative quote. It is never executable and never moves money; a
    * payment stores its own quote at creation time.
@@ -329,29 +488,34 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
     return mutate(context, request, reply, principal, {
       scope: 'regulations.refresh',
       run: async () => {
-        const report = context.config.regulations.refreshMode === 'live'
-          ? await refreshOfficialRegulations()
-          : {
-              schemaVersion: '1.0' as const,
-              checkedAt: context.clock.now().toISOString(),
-              approvedCorpusHash: approvedCorpusHash(APPROVED_REGULATION_SOURCES),
-              observations: APPROVED_REGULATION_SOURCES.map((source) => ({
-                sourceId: source.id,
-                approvedVersion: source.approvedVersion,
-                sourceUri: source.sourceUri,
-                checkedAt: context.clock.now().toISOString(),
-                status: 'UNCHANGED' as const,
-                missingMarkers: [],
-                note: 'Deterministic offline acceptance used the reviewed local source record.',
-                advisoryOnly: true as const,
-              })),
-              requiresHumanReview: false,
-              rulesChanged: false as const,
-            };
+        const [buyer, provider] = await Promise.all([
+          context.store.findOne(organizations, { id: contract.buyerOrganizationId }),
+          context.store.findOne(organizations, { id: contract.providerOrganizationId }),
+        ]);
+        if (!buyer || !provider) throw unprocessable('Both contract organizations are required for a corridor regulation check.');
+        if (buyer.country !== contract.payerCountry || provider.country !== contract.providerResidenceCountry) {
+          throw unprocessable('Current verified organizations do not match the selected contract route.');
+        }
+        const corridor = inspect(contract.payerCountry, contract.payoutCountry);
+        const purpose = regulatoryPurpose(contract.payerCountry, contract.payoutCountry, provider.kind);
+        const regulation = await checkDealRegulations({
+          mode: context.config.regulations.refreshMode,
+          facts: {
+            originCountry: contract.payerCountry,
+            destinationCountry: contract.payoutCountry,
+            direction: contract.corridorDirection as 'INWARD' | 'OUTWARD',
+            purposeCode: purpose.purposeCode,
+            purposeType: purpose.purposeType,
+            originPartyType: regulatoryPartyType(buyer.kind),
+            destinationPartyType: regulatoryPartyType(provider.kind),
+            evaluatedAt: context.clock.now(),
+          },
+        });
+        const report = regulation.report;
         const retrieval = retrieveRegulations({
-          query: 'Poland India cross-border freelancer payment export receipt due diligence value cap separate inward account',
-          bookId: 'PL-IN-INWARD',
-          limit: 5,
+          query: `${contract.payerCountry} ${contract.payoutCountry} ${purpose.purposeType} cross-border payment sanctions AML tax invoicing reporting ${purpose.purposeCode}`,
+          bookId: corridor.bookId as RegulationCorridor,
+          limit: 10,
         });
         const explanation = await explainRegulationRefresh(report, async () => {
           const unchanged = report.observations.filter((item) => item.status === 'UNCHANGED').length;
@@ -362,8 +526,8 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
             instruction:
               'Explain this official-source refresh concisely. Do not invent rules, legal advice, or change the deterministic compliance outcome.',
             facts: {
-              bookId: 'PL-IN-INWARD',
-              outcome: report.requiresHumanReview ? 'HUMAN_REVIEW_REQUIRED' : 'APPROVED_CORPUS_ACTIVE',
+              bookId: corridor.bookId,
+              outcome: regulation.plan.outcome,
               unchangedSources: unchanged,
               reviewRequiredSources: review,
               unavailableSources: unavailable,
@@ -379,12 +543,21 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
           detail: {
             approvedCorpusHash: report.approvedCorpusHash,
             reportHash: explanation.reportHash,
-            requiresHumanReview: report.requiresHumanReview,
+            requiresHumanReview: regulation.plan.outcome === 'MANUAL_REVIEW',
+            regulatoryPlanHash: regulation.plan.planHash,
+            coverageChecks: regulation.plan.categories.map((category) => `${category.category}:${category.status}`),
             rulesChanged: report.rulesChanged,
             checkedAt: report.checkedAt,
           },
         });
-        return { refreshMode: context.config.regulations.refreshMode, report, explanation, retrieval };
+        return {
+          refreshMode: context.config.regulations.refreshMode,
+          corridor: corridor.policy,
+          report,
+          plan: regulation.plan,
+          explanation,
+          retrieval,
+        };
       },
     });
   });
@@ -591,12 +764,24 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
       return {
         parties: [
           { key: 'polishCompany', ...seed.polishCompany },
+          { key: 'polishFreelancer', ...seed.polishFreelancer },
           ...seed.indianFreelancers.map((party, index) => ({
             key: index === 0 ? 'indianFreelancer' : `indianFreelancer${index + 1}`,
             ...party,
           })),
           { key: 'indianCompany', ...seed.indianCompany },
+          { key: 'ukCompany', ...seed.ukCompany },
+          ...seed.ukFreelancers.map((party, index) => ({
+            key: index === 0 ? 'ukFreelancer' : `ukFreelancer${index + 1}`,
+            ...party,
+          })),
           { key: 'ukSupplier', ...seed.ukSupplier },
+          { key: 'germanCompany', ...seed.germanCompany },
+          { key: 'germanFreelancer', ...seed.germanFreelancer },
+          { key: 'russianCompany', ...seed.russianCompany },
+          { key: 'russianFreelancer', ...seed.russianFreelancer },
+          { key: 'northKoreanCompany', ...seed.northKoreanCompany },
+          { key: 'northKoreanFreelancer', ...seed.northKoreanFreelancer },
           { key: 'providerOperator', ...seed.providerOperator },
           { key: 'platformAdmin', ...seed.platformAdmin },
         ],
@@ -609,7 +794,7 @@ export async function registerRoutes(app: FastifyInstance, context: AppContext):
   app.get('/v1/audit/books', async (request) => {
     const principal = principalOf(request);
     requireRole(principal, 'platform_admin', 'audit_service', 'provider_operator');
-    const books = ['PL-IN-INWARD', 'IN-GB-OUTWARD'];
+    const books = EXECUTABLE_CORRIDOR_BOOKS;
     const summaries = [];
     for (const bookId of books) {
       summaries.push({ bookId, balanced: await context.ledger.bookIsBalanced(bookId) });

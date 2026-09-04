@@ -22,10 +22,16 @@ import { minorOf, type Money } from '../money.js';
 import { bookIdFor } from '../corridor/service.js';
 import {
   RULES_VERSION,
+  corridorGateRuleFor,
   documentRulesFor,
+  riskSignalRuleFor,
   thresholdRulesFor,
+  type ComplianceRiskSignal,
   type RuleCitation,
 } from './rules.js';
+import type { CorridorCoverageAssessment } from '../regulations/coverage.js';
+import { APPROVED_REGULATION_SOURCES } from '../regulations/catalog.js';
+import type { DealRegulatoryPlan } from '../regulations/planner.js';
 
 export interface CredentialSnapshot {
   readonly id: string;
@@ -44,6 +50,16 @@ export interface ComplianceInput {
   readonly originCredential: CredentialSnapshot;
   readonly destinationCredential: CredentialSnapshot;
   readonly providedDocuments: readonly string[];
+  readonly purposeCode?: string;
+  readonly riskSignals?: readonly ComplianceRiskSignal[];
+  /**
+   * Proof that every obligation category Anchor declares for this corridor is
+   * backed by a current, reviewed source. Live source observations can hold a
+   * payment for review, but can never rewrite the executable rules here.
+   */
+  readonly regulationCoverage?: CorridorCoverageAssessment;
+  /** Fact-bound, source-pinned plan composed from the selected deal. */
+  readonly regulatoryPlan?: DealRegulatoryPlan;
   readonly evaluatedAt: Date;
 }
 
@@ -106,8 +122,51 @@ export function evaluate(input: ComplianceInput): ComplianceDecision {
   const reasons: string[] = [];
   const appliedRules: string[] = [];
   const citations: RuleCitation[] = [];
-  let outcome: ComplianceOutcome = input.policy.status === 'MANUAL_REVIEW' ? 'MANUAL_REVIEW' : 'PASSED';
-  if (input.policy.status === 'BLOCKED') outcome = 'BLOCKED';
+  let outcome: ComplianceOutcome = 'PASSED';
+
+  const corridorGate = corridorGateRuleFor(bookId);
+  if (corridorGate) {
+    outcome = worst(outcome, corridorGate.effect === 'BLOCK' ? 'BLOCKED' : 'MANUAL_REVIEW');
+    appliedRules.push(corridorGate.code);
+    citations.push(corridorGate.citation);
+    reasons.push(`${corridorGate.code}: ${corridorGate.rationale}`);
+  } else if (input.policy.status !== 'ACTIVE') {
+    outcome = input.policy.status === 'BLOCKED' ? 'BLOCKED' : 'MANUAL_REVIEW';
+    appliedRules.push(`CORRIDOR_STATUS_${input.policy.status}`);
+    reasons.push(`The versioned corridor policy status is ${input.policy.status}.`);
+  }
+
+  if (input.regulationCoverage !== undefined) {
+    if (input.regulationCoverage.bookId !== bookId) {
+      outcome = worst(outcome, 'MANUAL_REVIEW');
+      appliedRules.push('REGULATION_COVERAGE_BOOK_MISMATCH');
+      reasons.push(`Regulation coverage for ${input.regulationCoverage.bookId} cannot authorize ${bookId}.`);
+    } else {
+      for (const check of input.regulationCoverage.checks) {
+        appliedRules.push(`REGULATION_${check.category}_${check.status}`);
+        if (check.status !== 'COVERED') reasons.push(`${check.category}: ${check.reason}`);
+      }
+      if (input.regulationCoverage.outcome === 'MANUAL_REVIEW') {
+        outcome = worst(outcome, 'MANUAL_REVIEW');
+      }
+    }
+  }
+
+  if (input.regulatoryPlan !== undefined) {
+    if (input.regulatoryPlan.bookId !== bookId) {
+      outcome = worst(outcome, 'MANUAL_REVIEW');
+      appliedRules.push('REGULATORY_PLAN_BOOK_MISMATCH');
+      reasons.push(`Regulatory plan for ${input.regulatoryPlan.bookId} cannot authorize ${bookId}.`);
+    } else {
+      for (const category of input.regulatoryPlan.categories) {
+        appliedRules.push(`REGULATORY_PLAN_${category.category}_${category.status}`);
+      }
+      for (const control of input.regulatoryPlan.controls) appliedRules.push(control.controlCode);
+      if (input.regulatoryPlan.outcome === 'BLOCKED') outcome = worst(outcome, 'BLOCKED');
+      if (input.regulatoryPlan.outcome === 'MANUAL_REVIEW') outcome = worst(outcome, 'MANUAL_REVIEW');
+      if (input.regulatoryPlan.outcome !== 'PASSED') reasons.push(...input.regulatoryPlan.reasons);
+    }
+  }
 
   for (const [party, credential, expectedCountry] of [
     ['origin', input.originCredential, input.policy.originCountry],
@@ -123,6 +182,22 @@ export function evaluate(input: ComplianceInput): ComplianceDecision {
     }
   }
 
+  for (const signal of [...new Set(input.riskSignals ?? [])]) {
+    const rule = riskSignalRuleFor(signal);
+    outcome = worst(outcome, 'BLOCKED');
+    appliedRules.push(rule.code);
+    citations.push(rule.citation);
+    reasons.push(`${rule.code}: ${rule.rationale}`);
+  }
+
+  if (input.purposeCode !== undefined) {
+    appliedRules.push('PURPOSE_CODE_ALLOWLIST');
+    if (!input.policy.purposeCodes.includes(input.purposeCode)) {
+      outcome = worst(outcome, 'MANUAL_REVIEW');
+      reasons.push(`Purpose code ${input.purposeCode} is not in policy ${input.policy.id}'s reviewed allowlist.`);
+    }
+  }
+
   const required = new Map<string, RequiredDocumentDecision>();
   for (const rule of documentRulesFor(bookId)) {
     appliedRules.push(rule.code);
@@ -134,6 +209,21 @@ export function evaluate(input: ComplianceInput): ComplianceDecision {
       reason: rule.description,
       citation: rule.citation,
     });
+  }
+
+  if (input.regulatoryPlan?.bookId === bookId) {
+    for (const code of input.regulatoryPlan.requiredDocuments) {
+      if (required.has(code)) continue;
+      const citation = citationForPlanDocument(input.regulatoryPlan, code);
+      citations.push(citation);
+      const control = input.regulatoryPlan.controls.find((candidate) => candidate.requiredDocuments.includes(code));
+      required.set(code, {
+        code,
+        satisfied: input.providedDocuments.includes(code),
+        reason: control?.requirement ?? `Required by regulatory plan ${input.regulatoryPlan.planHash}.`,
+        citation,
+      });
+    }
   }
 
   const amount = minorOf(input.inrEquivalent);
@@ -205,4 +295,18 @@ function dedupeCitations(citations: readonly RuleCitation[]): RuleCitation[] {
   const seen = new Map<string, RuleCitation>();
   for (const citation of citations) seen.set(`${citation.sourceVersion}#${citation.section}`, citation);
   return [...seen.values()];
+}
+
+function citationForPlanDocument(plan: DealRegulatoryPlan, code: string): RuleCitation {
+  const control = plan.controls.find((candidate) => candidate.requiredDocuments.includes(code));
+  const category = plan.categories.find((candidate) => candidate.requiredDocuments.includes(code));
+  const reference = control?.sourceReferences[0] ?? category?.sourceReferences[0];
+  const source = APPROVED_REGULATION_SOURCES.find((candidate) => candidate.id === reference?.sourceId);
+  const chunk = source?.chunks.find((candidate) => reference?.chunkIds.includes(candidate.id));
+  return {
+    sourceUri: source?.sourceUri ?? 'https://www.rbi.org.in/',
+    sourceVersion: source?.approvedVersion ?? plan.planHash,
+    section: chunk?.section ?? category?.category ?? 'Deal regulatory plan',
+    quote: chunk?.quote ?? category?.requirements[0] ?? `Document ${code} is required by the reviewed deal plan.`,
+  };
 }

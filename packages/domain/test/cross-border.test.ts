@@ -8,7 +8,11 @@ import {
   createDemoIssuer,
   createFxQuote,
   createWorkEvidence,
+  corridorPolicies,
   decideWorkEvidence,
+  findCorridorPolicy,
+  MATRIX_COUNTRIES,
+  MATRIX_CURRENCIES,
   resolveCorridor,
   signCredential,
   subjectCommitment,
@@ -40,11 +44,45 @@ function credential(
 }
 
 describe('cross-border domain', () => {
-  it('resolves ordered corridors and blocks configured destinations', () => {
+  it('contains every directed non-self pair in the six-country matrix exactly once', () => {
+    expect(corridorPolicies).toHaveLength(30);
+    const pairs = new Set(corridorPolicies.map((policy) => `${policy.originCountry}-${policy.destinationCountry}`));
+    expect(pairs.size).toBe(30);
+    expect(corridorPolicies
+      .filter((policy) => policy.status === 'ACTIVE')
+      .every((policy) => policy.purposeCodes.length > 0)).toBe(true);
+    for (const origin of MATRIX_COUNTRIES) {
+      for (const destination of MATRIX_COUNTRIES) {
+        if (origin === destination) continue;
+        const policy = findCorridorPolicy(origin, destination);
+        expect(policy.fundingCurrency).toBe(MATRIX_CURRENCIES[origin]);
+        expect(policy.payoutCurrency).toBe(MATRIX_CURRENCIES[destination]);
+        expect(policy.direction).toBe(destination === 'IN' ? 'INWARD' : 'OUTWARD');
+      }
+    }
+  });
+
+  it('resolves ordered corridors and applies the explicit sanctions status matrix', () => {
     expect(resolveCorridor('PL', 'IN').direction).toBe('INWARD');
+    expect(resolveCorridor('GB', 'IN')).toMatchObject({
+      direction: 'INWARD', status: 'ACTIVE', fundingCurrency: 'GBP', payoutCurrency: 'INR',
+    });
     expect(resolveCorridor('IN', 'GB').direction).toBe('OUTWARD');
-    expect(() => resolveCorridor('PL', 'RU')).toThrow(/blocked/iu);
-    expect(() => resolveCorridor('IN', 'PL')).toThrow(/not configured/iu);
+    expect(resolveCorridor('PL', 'GB')).toMatchObject({
+      direction: 'OUTWARD', status: 'ACTIVE', fundingCurrency: 'PLN', payoutCurrency: 'GBP',
+    });
+    expect(resolveCorridor('PL', 'RU').status).toBe('MANUAL_REVIEW');
+    expect(() => resolveCorridor('PL', 'KP')).toThrow(/blocked/iu);
+    expect(resolveCorridor('IN', 'PL').status).toBe('ACTIVE');
+    for (const country of MATRIX_COUNTRIES.filter((country) => country !== 'KP')) {
+      expect(findCorridorPolicy(country, 'KP').status).toBe('BLOCKED');
+      expect(findCorridorPolicy('KP', country).status).toBe('BLOCKED');
+    }
+    for (const country of MATRIX_COUNTRIES.filter((country) => country !== 'RU' && country !== 'KP')) {
+      expect(findCorridorPolicy(country, 'RU').status).toBe('MANUAL_REVIEW');
+      expect(findCorridorPolicy('RU', country).status).toBe('MANUAL_REVIEW');
+    }
+    expect(() => resolveCorridor('US', 'IN')).toThrow(/not configured/iu);
   });
 
   it('builds a deterministic two-leg PLN/USD/INR quote without floating point', () => {

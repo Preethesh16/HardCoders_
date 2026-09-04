@@ -1,7 +1,9 @@
 import type { ApiConfig } from '../config.js';
 import { badRequest } from '../errors.js';
 
-export type FormExtractionPurpose = 'JOB_BRIEF' | 'FREELANCER_PROPOSAL' | 'AGREEMENT_TERMS';
+export type FormExtractionPurpose = 'COMPANY_POLICY' | 'JOB_BRIEF' | 'FREELANCER_PROPOSAL' | 'AGREEMENT_TERMS';
+type DemoCountry = 'PL' | 'IN' | 'GB' | 'DE' | 'RU' | 'KP';
+type DemoCurrency = 'PLN' | 'INR' | 'GBP' | 'EUR' | 'RUB' | 'KPW';
 
 export interface FormExtractionRequest {
   readonly purpose: FormExtractionPurpose;
@@ -17,12 +19,17 @@ export interface JobBriefFields {
   readonly skills: readonly string[];
   readonly budgetPln: number | null;
   readonly deliveryDate: string | null;
-  readonly destinationCountry: 'IN' | null;
+  readonly payerCountry: DemoCountry | null;
+  readonly fundingCurrency: DemoCurrency | null;
+  readonly destinationCountry: DemoCountry | null;
 }
 
 export interface ProposalFields {
   readonly proposedPricePln: number | null;
   readonly deliveryDays: number | null;
+  readonly residenceCountry: DemoCountry | null;
+  readonly payoutCountry: DemoCountry | null;
+  readonly payoutCurrency: DemoCurrency | null;
   readonly availability: string | null;
   readonly approach: string | null;
   readonly coverLetter: string | null;
@@ -35,11 +42,20 @@ export interface AgreementTermsFields {
   readonly legalClauses: readonly string[];
 }
 
+export interface CompanyPolicyFields {
+  readonly companyCountry: DemoCountry | null;
+  readonly fundingCurrency: DemoCurrency | null;
+  readonly policies: readonly string[];
+  readonly legalClauses: readonly string[];
+  readonly commercialStandards: readonly string[];
+  readonly authorizedApprovers: readonly string[];
+}
+
 export interface FormExtractionResult {
   readonly purpose: FormExtractionPurpose;
   readonly source: 'OPENAI' | 'FIXTURE';
   readonly model: string;
-  readonly fields: JobBriefFields | ProposalFields | AgreementTermsFields;
+  readonly fields: JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields;
   readonly warnings: readonly string[];
   readonly reviewRequired: true;
 }
@@ -77,7 +93,10 @@ function decode(request: FormExtractionRequest): Buffer {
 
 function valueFor(text: string, labels: readonly string[]): string | null {
   for (const label of labels) {
-    const pattern = new RegExp(`(?:^|\\n)\\s*${label}\\s*:\\s*([^\\n]+)`, 'iu');
+    // A selected profile determines the actual money currency. Accepting an
+    // optional ISO suffix lets the same reviewable draft say "Budget INR" or
+    // "Proposed price GBP" without baking PLN into document extraction.
+    const pattern = new RegExp(`(?:^|\\n)\\s*${label}(?:\\s+[A-Z]{3})?\\s*:\\s*([^\\n]+)`, 'iu');
     const match = pattern.exec(text);
     if (match?.[1]?.trim()) return match[1].trim();
   }
@@ -98,6 +117,25 @@ function integer(value: unknown, maximum: number): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= maximum ? value : null;
 }
 
+function country(value: string | null): DemoCountry | null {
+  if (!value) return null;
+  const normalized = value.trim().toUpperCase();
+  const aliases: Readonly<Record<string, DemoCountry>> = {
+    PL: 'PL', POLAND: 'PL', IN: 'IN', INDIA: 'IN', GB: 'GB', UK: 'GB',
+    'UNITED KINGDOM': 'GB', DE: 'DE', GERMANY: 'DE', RU: 'RU', RUSSIA: 'RU',
+    KP: 'KP', DPRK: 'KP', 'NORTH KOREA': 'KP',
+  };
+  return aliases[normalized] ?? null;
+}
+
+function currency(value: string | null): DemoCurrency | null {
+  const normalized = value?.trim().toUpperCase();
+  return normalized === 'PLN' || normalized === 'INR' || normalized === 'GBP'
+    || normalized === 'EUR' || normalized === 'RUB' || normalized === 'KPW'
+    ? normalized
+    : null;
+}
+
 function text(value: unknown, maximum = 8_000): string | null {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, maximum) : null;
 }
@@ -110,10 +148,20 @@ function strings(value: unknown, maximum: number): string[] {
   }))].slice(0, maximum);
 }
 
-function fixtureFields(request: FormExtractionRequest, bytes: Buffer): JobBriefFields | ProposalFields | AgreementTermsFields {
+function fixtureFields(request: FormExtractionRequest, bytes: Buffer): JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields {
   const sourceText = TEXT_EXTENSIONS.includes(extension(request.fileName) as typeof TEXT_EXTENSIONS[number])
     ? bytes.toString('utf8').slice(0, 100_000)
     : '';
+  if (request.purpose === 'COMPANY_POLICY') {
+    return {
+      companyCountry: country(valueFor(sourceText, ['company country', 'registered country', 'country of incorporation'])),
+      fundingCurrency: currency(valueFor(sourceText, ['funding currency', 'company currency', 'payment currency'])),
+      policies: list(valueFor(sourceText, ['company policies', 'policies'])),
+      legalClauses: list(valueFor(sourceText, ['legal clauses', 'legal standards', 'legal terms'])),
+      commercialStandards: list(valueFor(sourceText, ['commercial standards', 'payment standards', 'commercial terms'])),
+      authorizedApprovers: list(valueFor(sourceText, ['authorized approvers', 'agreement approvers', 'approvers'])),
+    };
+  }
   if (request.purpose === 'JOB_BRIEF') {
     return {
       title: valueFor(sourceText, ['title', 'work title', 'job title']),
@@ -122,12 +170,17 @@ function fixtureFields(request: FormExtractionRequest, bytes: Buffer): JobBriefF
       skills: list(valueFor(sourceText, ['skills', 'required skills'])),
       budgetPln: number(valueFor(sourceText, ['budget pln', 'budget', 'price'])),
       deliveryDate: valueFor(sourceText, ['delivery date', 'target delivery date']),
-      destinationCountry: 'IN',
+      payerCountry: country(valueFor(sourceText, ['payer country', 'company country', 'origin country'])),
+      fundingCurrency: currency(valueFor(sourceText, ['funding currency', 'payer currency', 'company currency'])),
+      destinationCountry: country(valueFor(sourceText, ['destination country', 'target country'])),
     };
   }
   if (request.purpose === 'FREELANCER_PROPOSAL') return {
     proposedPricePln: number(valueFor(sourceText, ['proposed price pln', 'proposed price', 'price'])),
     deliveryDays: number(valueFor(sourceText, ['delivery days', 'duration'])),
+    residenceCountry: country(valueFor(sourceText, ['tax residence', 'residence country', 'freelancer country'])),
+    payoutCountry: country(valueFor(sourceText, ['payout country', 'destination country'])),
+    payoutCurrency: currency(valueFor(sourceText, ['payout currency', 'receiving currency'])),
     availability: valueFor(sourceText, ['availability']),
     approach: valueFor(sourceText, ['approach', 'delivery approach']),
     coverLetter: valueFor(sourceText, ['cover letter', 'summary']),
@@ -154,6 +207,20 @@ const nullableString = { type: ['string', 'null'] } as const;
 const nullableNumber = { type: ['number', 'null'] } as const;
 
 function schemaFor(purpose: FormExtractionPurpose): Record<string, unknown> {
+  if (purpose === 'COMPANY_POLICY') {
+    return {
+      type: 'object', additionalProperties: false,
+      properties: {
+        companyCountry: { type: ['string', 'null'], enum: ['PL', 'IN', 'GB', 'DE', 'RU', 'KP', null] },
+        fundingCurrency: { type: ['string', 'null'], enum: ['PLN', 'INR', 'GBP', 'EUR', 'RUB', 'KPW', null] },
+        policies: { type: 'array', items: { type: 'string' } },
+        legalClauses: { type: 'array', items: { type: 'string' } },
+        commercialStandards: { type: 'array', items: { type: 'string' } },
+        authorizedApprovers: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['companyCountry', 'fundingCurrency', 'policies', 'legalClauses', 'commercialStandards', 'authorizedApprovers'],
+    };
+  }
   if (purpose === 'JOB_BRIEF') {
     return {
       type: 'object', additionalProperties: false,
@@ -164,9 +231,11 @@ function schemaFor(purpose: FormExtractionPurpose): Record<string, unknown> {
         skills: { type: 'array', items: { type: 'string' } },
         budgetPln: nullableNumber,
         deliveryDate: { type: ['string', 'null'], description: 'YYYY-MM-DD or null' },
-        destinationCountry: { type: ['string', 'null'], enum: ['IN', null] },
+        payerCountry: { type: ['string', 'null'], enum: ['PL', 'IN', 'GB', 'DE', 'RU', 'KP', null] },
+        fundingCurrency: { type: ['string', 'null'], enum: ['PLN', 'INR', 'GBP', 'EUR', 'RUB', 'KPW', null] },
+        destinationCountry: { type: ['string', 'null'], enum: ['PL', 'IN', 'GB', 'DE', 'RU', 'KP', null] },
       },
-      required: ['title', 'description', 'acceptanceCriteria', 'skills', 'budgetPln', 'deliveryDate', 'destinationCountry'],
+      required: ['title', 'description', 'acceptanceCriteria', 'skills', 'budgetPln', 'deliveryDate', 'payerCountry', 'fundingCurrency', 'destinationCountry'],
     };
   }
   if (purpose === 'AGREEMENT_TERMS') {
@@ -186,18 +255,31 @@ function schemaFor(purpose: FormExtractionPurpose): Record<string, unknown> {
     properties: {
       proposedPricePln: nullableNumber,
       deliveryDays: { type: ['integer', 'null'] },
+      residenceCountry: { type: ['string', 'null'], enum: ['PL', 'IN', 'GB', 'DE', 'RU', 'KP', null] },
+      payoutCountry: { type: ['string', 'null'], enum: ['PL', 'IN', 'GB', 'DE', 'RU', 'KP', null] },
+      payoutCurrency: { type: ['string', 'null'], enum: ['PLN', 'INR', 'GBP', 'EUR', 'RUB', 'KPW', null] },
       availability: nullableString,
       approach: nullableString,
       coverLetter: nullableString,
     },
-    required: ['proposedPricePln', 'deliveryDays', 'availability', 'approach', 'coverLetter'],
+    required: ['proposedPricePln', 'deliveryDays', 'residenceCountry', 'payoutCountry', 'payoutCurrency', 'availability', 'approach', 'coverLetter'],
   };
 }
 
-function normalizeFields(purpose: FormExtractionPurpose, value: unknown): JobBriefFields | ProposalFields | AgreementTermsFields {
+function normalizeFields(purpose: FormExtractionPurpose, value: unknown): JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields {
   const record = typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+  if (purpose === 'COMPANY_POLICY') {
+    return {
+      companyCountry: country(text(record['companyCountry'], 32)),
+      fundingCurrency: currency(text(record['fundingCurrency'], 8)),
+      policies: strings(record['policies'], 32),
+      legalClauses: strings(record['legalClauses'], 32),
+      commercialStandards: strings(record['commercialStandards'], 32),
+      authorizedApprovers: strings(record['authorizedApprovers'], 16),
+    };
+  }
   if (purpose === 'JOB_BRIEF') {
     const budget = record['budgetPln'];
     const date = text(record['deliveryDate'], 10);
@@ -208,7 +290,9 @@ function normalizeFields(purpose: FormExtractionPurpose, value: unknown): JobBri
       skills: strings(record['skills'], 24).map((skill) => skill.slice(0, 64)),
       budgetPln: typeof budget === 'number' && Number.isFinite(budget) && budget > 0 ? budget : null,
       deliveryDate: date && /^\d{4}-\d{2}-\d{2}$/u.test(date) ? date : null,
-      destinationCountry: record['destinationCountry'] === 'IN' ? 'IN' : null,
+      payerCountry: country(text(record['payerCountry'], 32)),
+      fundingCurrency: currency(text(record['fundingCurrency'], 8)),
+      destinationCountry: country(text(record['destinationCountry'], 32)),
     };
   }
   if (purpose === 'AGREEMENT_TERMS') {
@@ -223,10 +307,26 @@ function normalizeFields(purpose: FormExtractionPurpose, value: unknown): JobBri
   return {
     proposedPricePln: typeof price === 'number' && Number.isFinite(price) && price > 0 ? price : null,
     deliveryDays: integer(record['deliveryDays'], 730),
+    residenceCountry: country(text(record['residenceCountry'], 32)),
+    payoutCountry: country(text(record['payoutCountry'], 32)),
+    payoutCurrency: currency(text(record['payoutCurrency'], 8)),
     availability: text(record['availability'], 500),
     approach: text(record['approach']),
     coverLetter: text(record['coverLetter']),
   };
+}
+
+function mergeWithLabeledText(
+  purpose: FormExtractionPurpose,
+  extracted: JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields,
+  labeled: JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields,
+): JobBriefFields | ProposalFields | AgreementTermsFields | CompanyPolicyFields {
+  const output = { ...extracted } as Record<string, unknown>;
+  for (const [key, value] of Object.entries(labeled)) {
+    const current = output[key];
+    if (current === null || current === undefined || (Array.isArray(current) && current.length === 0)) output[key] = value;
+  }
+  return normalizeFields(purpose, output);
 }
 
 export async function extractFormDraft(
@@ -249,10 +349,12 @@ export async function extractFormDraft(
   }
 
   try {
-    const instructions = request.purpose === 'JOB_BRIEF'
-      ? 'Extract a company job brief into the requested fields. Never invent missing facts. Budget is PLN. Destination is India only for this workflow.'
+    const instructions = request.purpose === 'COMPANY_POLICY'
+      ? 'Extract the company onboarding policy into the requested fields, including only explicitly stated company country, funding currency, operational policies, legal clauses, commercial standards, and authorized approver roles. Preserve the meaning of obligations and never invent legal terms.'
+      : request.purpose === 'JOB_BRIEF'
+      ? 'Extract a company job brief into the requested fields, including an explicitly stated payer company country and funding currency. Never invent missing facts or infer a destination from the work description. The destination country is a preference only; the selected freelancer profile determines the actual payout corridor.'
       : request.purpose === 'FREELANCER_PROPOSAL'
-        ? 'Extract a freelancer proposal into the requested fields. Never invent missing facts. Proposed price is PLN.'
+        ? 'Extract a freelancer proposal into the requested fields, including explicitly stated tax residence, payout country, and payout currency. Never invent or infer missing locations or currencies. Return the numeric proposed price exactly as written; the proposed price is denominated in the payer currency shown in the job, while payoutCurrency is the freelancer receiving currency.'
         : 'Extract agreement inputs into commercial terms, objective acceptance criteria, company policies, and legal clauses. Preserve obligations accurately and never invent missing terms.';
     const response = await fetch(new URL(`${config.baseUrl.replace(/\/$/u, '')}/responses`), {
       method: 'POST',
@@ -272,18 +374,22 @@ export async function extractFormDraft(
           + 'Extract facts only. Return null or an empty array when a fact is absent. This result is a reviewable draft and must never approve, publish or submit anything.',
         input: [{ role: 'user', content: [
           { type: 'input_file', filename: request.fileName, file_data: `data:${request.contentType};base64,${request.contentBase64}` },
-          { type: 'input_text', text: `Extract the ${request.purpose === 'JOB_BRIEF' ? 'job brief' : request.purpose === 'FREELANCER_PROPOSAL' ? 'freelancer proposal' : 'agreement terms'} fields from this file.` },
+          { type: 'input_text', text: `Extract the ${request.purpose === 'COMPANY_POLICY' ? 'company onboarding policy' : request.purpose === 'JOB_BRIEF' ? 'job brief' : request.purpose === 'FREELANCER_PROPOSAL' ? 'freelancer proposal' : 'agreement terms'} fields from this file.` },
         ] }],
         text: { format: { type: 'json_schema', name: 'anchor_form_draft', strict: true, schema: schemaFor(request.purpose) } },
       }),
     });
     if (!response.ok) throw new Error(`OpenAI returned HTTP ${response.status}.`);
     const payload = await response.json() as ResponsesPayload;
+    const extracted = normalizeFields(request.purpose, JSON.parse(responseText(payload)));
+    const fields = TEXT_EXTENSIONS.includes(extension(request.fileName) as typeof TEXT_EXTENSIONS[number])
+      ? mergeWithLabeledText(request.purpose, extracted, fixtureFields(request, bytes))
+      : extracted;
     return {
       purpose: request.purpose,
       source: 'OPENAI',
       model: typeof payload.model === 'string' ? payload.model : config.model,
-      fields: normalizeFields(request.purpose, JSON.parse(responseText(payload))),
+      fields,
       warnings: [],
       reviewRequired: true,
     };

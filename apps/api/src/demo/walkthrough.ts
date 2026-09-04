@@ -59,10 +59,15 @@ async function inwardJourney(context: AppContext, seed: SeedResult): Promise<Jou
       'Build a reconciliation service that compares settlement evidence against the business ledger, '
       + 'with a complete test suite and an operational runbook.',
     skills: ['typescript', 'postgres', 'reconciliation'],
+    payerCountry: 'PL',
+    fundingCurrency: 'PLN',
     destinationCountry: 'IN',
     budget: money('1200000', 'PLN', 2),
   });
   const application = await marketplace.apply(provider, job.id, {
+    residenceCountry: 'IN',
+    payoutCountry: 'IN',
+    payoutCurrency: 'INR',
     coverLetter:
       'I have delivered typescript and postgres reconciliation services for two licensed payment providers, '
       + 'including ledger-to-settlement comparison and exception handling.',
@@ -73,7 +78,11 @@ async function inwardJourney(context: AppContext, seed: SeedResult): Promise<Jou
   await marketplace.approveContract(buyer, contract.id, { party: 'BUYER', acceptedTermsHash: contract.contractHash });
   await marketplace.approveContract(provider, contract.id, { party: 'PROVIDER', acceptedTermsHash: contract.contractHash });
 
-  for (const code of ['INVOICE', 'SERVICE_EXPORT_DECLARATION']) {
+  for (const code of [
+    'CESOP_REPORTING_ASSESSMENT', 'EU_PARTY_SCREENING', 'INDIA_MERCHANT_CDD', 'INVOICE',
+    'PAYER_PAYEE_TRANSFER_DATA', 'PAYMENT_RECIPIENT_RECORD', 'PURPOSE_CODE_P0802',
+    'RESTRICTED_TRADE_SCREENING', 'SERVICE_EXPORT_DECLARATION',
+  ]) {
     await submissions.recordDocument(buyer, contract.id, code, 'application/pdf', encode(`${code} (demonstration only)`));
   }
 
@@ -125,10 +134,15 @@ async function outwardJourney(context: AppContext, seed: SeedResult): Promise<Jo
       'Supply calibrated optical assemblies against the attached specification, with certificates of '
       + 'calibration and shipping documentation.',
     skills: ['optics', 'manufacturing'],
+    payerCountry: 'IN',
+    fundingCurrency: 'INR',
     destinationCountry: 'GB',
     budget: money('80000000', 'INR', 2),
   });
   const application = await marketplace.apply(supplier, job.id, {
+    residenceCountry: 'GB',
+    payoutCountry: 'GB',
+    payoutCurrency: 'GBP',
     coverLetter:
       'Pennine Optics manufactures calibrated optical assemblies to specification and ships with full '
       + 'calibration certificates and customs documentation.',
@@ -140,7 +154,13 @@ async function outwardJourney(context: AppContext, seed: SeedResult): Promise<Jo
 
   // Outward payments demand more: Form A2 and a tax review simulation, import
   // evidence, and buyer due diligence above the Indian import threshold.
-  for (const code of ['INVOICE', 'FORM_A2_DEMO', 'TAX_REVIEW_DEMO', 'IMPORT_EVIDENCE', 'BUYER_DUE_DILIGENCE']) {
+  for (const code of [
+    'AUTHORISED_DEALER_REVIEW', 'BUYER_DUE_DILIGENCE', 'BUYER_DUE_DILIGENCE_CONDITIONAL',
+    'COMMODITY_CODE', 'EXPORT_LICENCE_IF_REQUIRED', 'FOREIGN_MERCHANT_CDD', 'FORM_15CA_CONDITIONAL',
+    'FORM_15CB_CONDITIONAL', 'FORM_A2_DEMO', 'FX_AND_FEE_DISCLOSURE', 'IMPORT_EVIDENCE', 'INVOICE',
+    'PACKING_LIST', 'PAYEE_TRANSACTION_RECORD', 'PAYMENT_PURPOSE_DECLARATION', 'RESTRICTED_TRADE_SCREENING',
+    'TAX_REVIEW_DEMO', 'UK_EXPORT_DECLARATION', 'UK_EXPORT_VAT_EVIDENCE', 'UK_SANCTIONS_SCREENING',
+  ]) {
     await submissions.recordDocument(buyer, contract.id, code, 'application/pdf', encode(`${code} (demonstration only)`));
   }
 

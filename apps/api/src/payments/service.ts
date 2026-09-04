@@ -31,20 +31,29 @@ import {
   providerCommands,
   reconciliationRecords,
   requiredDocuments,
+  organizations,
   workContracts,
 } from '../db/schema.js';
 import type { Select } from '../db/store.js';
 import { requireOwnership, requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import { bookIdFor, resolve } from '../corridor/service.js';
 import { assertComplianceDecision, evaluate, type ComplianceDecision } from '../compliance/engine.js';
-import { buildQuote, assertQuoteCurrent, SETTLEMENT_SCALE, totalFeesMinor, type FxQuoteRecord } from '../fx/quote.js';
-import { convertMoney, money, parseRate, type Money } from '../money.js';
+import { assertQuoteIntegrity, buildQuote, assertQuoteCurrent, SETTLEMENT_SCALE, totalFeesMinor, type FxQuoteRecord } from '../fx/quote.js';
+import { convertMoney, money, parseRate, sameDenomination, type Money } from '../money.js';
 import { providersForBook, providerCapabilitiesSatisfied, type CorridorProviders } from './providers.js';
 import { escrowBindingCommitment, releaseBindingCommitment, type EscrowBindingInput, type ReleaseBinding } from '../algorand/executor-client.js';
 import { fabricTransactionHash, workEvidenceHash } from '../fabric/evidence-reader.js';
 import { IdentityService } from '../identity/service.js';
 import { SubmissionService } from '../submissions/service.js';
 import { FIXTURE_RATES } from '../fx/rates.js';
+import {
+  checkCorridorRegulations,
+  checkDealRegulations,
+  type CorridorCoverageAssessment,
+  type RegulationCorridor,
+  type RegulatoryPartyType,
+  type RegulatoryPurposeType,
+} from '../regulations/index.js';
 
 export type Payment = Select<typeof paymentInstructions>;
 
@@ -94,12 +103,26 @@ export class PaymentService {
     if (!['RULES_VERIFIED', 'FX_LOCKED'].includes(contract.state)) {
       throw conflict(`Contract ${contract.id} must be approved by both parties before payment.`);
     }
+    const agreedAmount = money(contract.amountMinor, contract.amountCurrency, contract.amountScale);
+    if (!sameDenomination(agreedAmount, input.fundingAmount)
+      || agreedAmount.amountMinor !== input.fundingAmount.amountMinor) {
+      throw unprocessable('Payment funding must exactly match the bilaterally approved contract amount.');
+    }
     const existing = await this.context.store.findOne(paymentInstructions, { contractId: contract.id });
     if (existing) return this.hydrate(existing);
 
     const { origin, destination } = await this.parties(contract.buyerOrganizationId, contract.providerOrganizationId);
-    const corridor = resolve(origin.country, destination.country);
+    const corridor = resolve(contract.payerCountry, contract.payoutCountry);
+    this.assertDealCorridor(contract, corridor.policy, corridor.bookId, origin.country, destination.country);
     const bookId = corridor.bookId;
+    if (corridor.policy.status !== 'ACTIVE') {
+      throw unprocessable(`Corridor ${bookId} requires regulatory manual review before payment or FX.`, {
+        corridorId: corridor.policy.id,
+        bookId,
+        status: corridor.policy.status,
+        gate: 'MANUAL_REVIEW_REQUIRED',
+      });
+    }
     const providers = this.providers(bookId);
     const capabilities = providerCapabilitiesSatisfied(providers, corridor.policy.requiredProviderCapabilities);
     if (!capabilities.satisfied) {
@@ -122,6 +145,64 @@ export class PaymentService {
       },
     });
 
+    const purpose = this.regulatoryPurpose(
+      contract.payerCountry,
+      contract.payoutCountry,
+      destination.organizationKind,
+      input.purposeCode,
+    );
+    const dealRegulation = await checkDealRegulations({
+      mode: this.context.config.regulations.refreshMode,
+      facts: {
+        originCountry: contract.payerCountry,
+        destinationCountry: contract.payoutCountry,
+        direction: contract.corridorDirection as 'INWARD' | 'OUTWARD',
+        purposeCode: purpose.purposeCode,
+        purposeType: purpose.purposeType,
+        originPartyType: this.regulatoryPartyType(origin.organizationKind),
+        destinationPartyType: this.regulatoryPartyType(destination.organizationKind),
+        evaluatedAt: this.context.clock.now(),
+      },
+    });
+    if (!dealRegulation.plan.hardGate.canQuoteOrFund) {
+      throw unprocessable('The deal-derived regulatory plan cannot authorize quoting or escrow funding.', {
+        gate: dealRegulation.plan.hardGate.code,
+        reasons: dealRegulation.plan.hardGate.reasons,
+        planHash: dealRegulation.plan.planHash,
+      });
+    }
+    // The legacy shared compliance contract still consumes the five-category
+    // projection; the deal plan above is the stricter, fact-bound hard gate.
+    const regulationCheck = await checkCorridorRegulations({
+      bookId: bookId as RegulationCorridor,
+      mode: this.context.config.regulations.refreshMode,
+      checkedAt: this.context.clock.now(),
+    });
+    await this.context.timeline.append({
+      kind: 'REGULATIONS_REFRESHED',
+      actor: { subject: 'anchor-regulation-gate', role: 'compliance_service' },
+      contractId: contract.id,
+      detail: {
+        mode: regulationCheck.mode,
+        bookId,
+        coverageVersion: regulationCheck.coverage.coverageVersion ?? 'MISSING',
+        coverageOutcome: regulationCheck.coverage.outcome,
+        regulatoryPlanHash: dealRegulation.plan.planHash,
+        regulatoryPlanOutcome: dealRegulation.plan.outcome,
+        coverageChecks: dealRegulation.plan.categories.map((category) => `${category.category}:${category.status}`),
+        requiredDocuments: dealRegulation.plan.requiredDocuments,
+        approvedCorpusHash: dealRegulation.report.approvedCorpusHash,
+        checkedAt: dealRegulation.report.checkedAt,
+        changedSources: dealRegulation.report.observations
+          .filter((observation) => observation.status === 'REVIEW_REQUIRED')
+          .map((observation) => observation.sourceId),
+        unavailableSources: dealRegulation.report.observations
+          .filter((observation) => observation.status === 'UNAVAILABLE')
+          .map((observation) => observation.sourceId),
+        rulesChanged: dealRegulation.report.rulesChanged,
+      },
+    });
+
     const quote = await this.quote(contract.id, corridor.policy, input.fundingAmount);
     const compliance = await this.evaluateCompliance(
       principal,
@@ -130,6 +211,9 @@ export class PaymentService {
       quote,
       origin.credentialId,
       destination.credentialId,
+      purpose.purposeCode,
+      regulationCheck.coverage,
+      dealRegulation.plan,
     );
     if (compliance.outcome === 'BLOCKED') {
       throw unprocessable('The corridor rules block this payment.', {
@@ -195,12 +279,16 @@ export class PaymentService {
       throw conflict(`Payment ${paymentId} cannot be funded from state ${payment.state}.`);
     }
 
-    const { quote, compliance } = await this.hydrate(payment);
+    const { quote, compliance, corridor } = await this.hydrate(payment);
     assertQuoteCurrent({ id: quote.id, expiresAt: quote.expiresAt }, this.context.clock.now());
     if (compliance.outcome !== 'PASSED') {
       throw conflict('Funding requires a passed compliance decision.');
     }
     const providers = this.providers(payment.bookId);
+    this.assertFundingGate(payment, contract, quote, compliance, corridor, providers);
+    // Resolve and validate any previously persisted binding before a fiat book
+    // entry is posted or the executor is asked to sign a transaction.
+    const binding = await this.binding(payment, contract, providers, quote);
 
     const accounts = await this.accounts(payment, contract, providers, quote);
     // 1. The buyer's funding currency leaves their book.
@@ -245,7 +333,6 @@ export class PaymentService {
     });
 
     // 3. Create and fund the on-chain escrow between the two provider treasuries.
-    const binding = await this.binding(payment, contract, providers, quote);
     const created = await this.context.escrow.create(binding.input, `${idempotencyKey}:CREATE`);
     await this.recordCommand(payment.id, 'create', `${idempotencyKey}:CREATE`, binding.input, created);
     current = await this.transition(current, 'ESCROW_CREATED');
@@ -615,9 +702,21 @@ export class PaymentService {
     if (!quoteRow) throw notFound(`Payment ${payment.id} has no stored FX quote.`);
     const complianceRow = await this.context.store.findOne(complianceResults, { id: payment.complianceResultId });
     if (!complianceRow) throw notFound(`Payment ${payment.id} has no stored compliance decision.`);
+    if (quoteRow.contractId !== payment.contractId || quoteRow.corridorId !== payment.corridorId) {
+      throw unprocessable(`Payment ${payment.id} references an FX quote from another contract or corridor.`);
+    }
+    if (complianceRow.contractId !== payment.contractId || complianceRow.corridorId !== payment.corridorId) {
+      throw unprocessable(`Payment ${payment.id} references a compliance decision from another contract or corridor.`);
+    }
     const documents = await this.context.store.findMany(requiredDocuments, { complianceResultId: complianceRow.id }, { orderBy: 'code' });
-    const [originCountry, destinationCountry] = payment.corridorId.split('-');
-    const corridor = resolve(originCountry ?? '', destinationCountry ?? '');
+    const contract = await this.requireContract(payment.contractId);
+    const corridor = resolve(contract.payerCountry, contract.payoutCountry);
+    if (corridor.policy.id !== contract.corridorId
+      || corridor.bookId !== contract.corridorBookId
+      || payment.corridorId !== contract.corridorId
+      || payment.bookId !== contract.corridorBookId) {
+      throw unprocessable(`Payment ${payment.id} does not match its selected deal corridor.`);
+    }
 
     const compliance: ComplianceDecision = {
       id: complianceRow.id,
@@ -640,9 +739,37 @@ export class PaymentService {
       canonicalHash: complianceRow.canonicalHash,
     };
     assertComplianceDecision(compliance);
+    const quote = quoteRow.quote as unknown as FxQuoteRecord;
+    assertQuoteIntegrity(quote);
+    const sameInstant = (left: string, right: string) =>
+      new Date(left).toISOString() === new Date(right).toISOString();
+    if (quote.id !== quoteRow.id
+      || quote.corridorId !== quoteRow.corridorId
+      || quote.canonicalHash !== quoteRow.canonicalHash
+      || quote.provider !== quoteRow.provider
+      || quote.rateSource.slice(0, 32) !== quoteRow.rateSource
+      || !sameInstant(quote.rateObservedAt, quoteRow.rateObservedAt)
+      || !sameInstant(quote.quotedAt, quoteRow.quotedAt)
+      || !sameInstant(quote.expiresAt, quoteRow.expiresAt)
+      || quote.fundingAmount.amountMinor !== quoteRow.fundingAmountMinor
+      || quote.fundingAmount.currency !== quoteRow.fundingCurrency
+      || quote.fundingAmount.scale !== quoteRow.fundingScale
+      || quote.settlementAmount.amountMinor !== quoteRow.settlementAmountMinor
+      || quote.settlementAmount.scale !== quoteRow.settlementScale
+      || quote.payoutAmount.amountMinor !== quoteRow.payoutAmountMinor
+      || quote.payoutAmount.currency !== quoteRow.payoutCurrency
+      || quote.payoutAmount.scale !== quoteRow.payoutScale
+      || quote.fundingAmount.amountMinor !== payment.fundingAmountMinor
+      || quote.fundingAmount.currency !== payment.fundingCurrency
+      || quote.fundingAmount.scale !== payment.fundingScale
+      || quote.payoutAmount.amountMinor !== payment.payoutAmountMinor
+      || quote.payoutAmount.currency !== payment.payoutCurrency
+      || quote.payoutAmount.scale !== payment.payoutScale) {
+      throw unprocessable(`Payment ${payment.id} does not match its persisted FX quote projection.`);
+    }
     return {
       payment,
-      quote: quoteRow.quote as unknown as FxQuoteRecord,
+      quote,
       compliance,
       corridor: corridor.policy,
     };
@@ -660,6 +787,9 @@ export class PaymentService {
       rates,
       quotedAt: now,
       ttlSeconds: this.context.config.fx.quoteTtlSeconds,
+      provider: rates.source.startsWith('FRANKFURTER_ECB_')
+        ? 'FRANKFURTER_ECB_REFERENCE'
+        : 'OPTIWORK_FIXTURE_PROVIDER',
     });
     await this.context.store.insert(fxQuotes, {
       id: quote.id,
@@ -720,6 +850,9 @@ export class PaymentService {
     quote: FxQuoteRecord,
     originCredentialId: string,
     destinationCredentialId: string,
+    purposeCode?: string,
+    regulationCoverage?: CorridorCoverageAssessment,
+    regulatoryPlan?: import('../regulations/index.js').DealRegulatoryPlan,
   ): Promise<ComplianceDecision> {
     const providedDocuments = await this.submissions.documentCodes(contractId);
     const decision = evaluate({
@@ -729,6 +862,9 @@ export class PaymentService {
       originCredential: await this.identity.snapshot(originCredentialId),
       destinationCredential: await this.identity.snapshot(destinationCredentialId),
       providedDocuments,
+      ...(purposeCode === undefined ? {} : { purposeCode }),
+      ...(regulationCoverage === undefined ? {} : { regulationCoverage }),
+      ...(regulatoryPlan === undefined ? {} : { regulatoryPlan }),
       evaluatedAt: this.context.clock.now(),
     });
     await this.context.store.insert(complianceResults, {
@@ -787,16 +923,127 @@ export class PaymentService {
     return convertMoney(quote.settlementAmount, 'INR', 2, usdToInr);
   }
 
+  private regulatoryPartyType(kind: string): RegulatoryPartyType {
+    if (kind === 'FREELANCER' || kind === 'SUPPLIER' || kind === 'PROVIDER' || kind === 'COMPANY') return kind;
+    return 'INDIVIDUAL';
+  }
+
+  private regulatoryPurpose(
+    originCountry: string,
+    destinationCountry: string,
+    providerKind: string,
+    requestedPurposeCode?: string,
+  ): { purposeCode: string; purposeType: RegulatoryPurposeType } {
+    const purposeType: RegulatoryPurposeType = providerKind === 'SUPPLIER' ? 'GOODS' : 'SERVICES';
+    const defaultCode = destinationCountry === 'IN'
+      ? 'P0802'
+      : originCountry === 'IN'
+        ? 'S0102'
+        : originCountry === 'PL' && destinationCountry === 'GB'
+          ? 'B2B_DIGITAL_SERVICES'
+        : purposeType === 'SERVICES'
+          ? 'B2B_DIGITAL_SERVICES'
+          : 'UNCLASSIFIED';
+    return { purposeCode: requestedPurposeCode ?? defaultCode, purposeType };
+  }
+
   private async parties(buyerOrganizationId: string, providerOrganizationId: string) {
-    const originCredential = await this.identity.forOrganization(buyerOrganizationId);
-    const destinationCredential = await this.identity.forOrganization(providerOrganizationId);
-    if (!originCredential || !destinationCredential) {
+    const [originCredential, destinationCredential, originOrganization, destinationOrganization] = await Promise.all([
+      this.identity.forOrganization(buyerOrganizationId),
+      this.identity.forOrganization(providerOrganizationId),
+      this.context.store.findOne(organizations, { id: buyerOrganizationId }),
+      this.context.store.findOne(organizations, { id: providerOrganizationId }),
+    ]);
+    if (!originCredential || !destinationCredential || !originOrganization || !destinationOrganization) {
       throw unprocessable('Both parties must hold a registered credential before a payment can be created.');
     }
     return {
-      origin: { country: originCredential.country, credentialId: originCredential.id },
-      destination: { country: destinationCredential.country, credentialId: destinationCredential.id },
+      origin: {
+        country: originCredential.country,
+        credentialId: originCredential.id,
+        organizationKind: originOrganization.kind,
+      },
+      destination: {
+        country: destinationCredential.country,
+        credentialId: destinationCredential.id,
+        organizationKind: destinationOrganization.kind,
+      },
     };
+  }
+
+  /**
+   * A payment request cannot supply or reverse corridor facts. The immutable
+   * contract snapshot is derived from the company job and selected proposal;
+   * current verified credentials must still agree with that snapshot.
+   */
+  private assertDealCorridor(
+    contract: Select<typeof workContracts>,
+    corridor: CorridorPolicy,
+    bookId: string,
+    originCredentialCountry: string,
+    destinationCredentialCountry: string,
+  ): void {
+    if (originCredentialCountry !== contract.payerCountry
+      || destinationCredentialCountry !== contract.providerResidenceCountry
+      || contract.providerResidenceCountry !== contract.payoutCountry) {
+      throw unprocessable('Verified participant countries do not match the selected deal corridor.', {
+        payerCountry: contract.payerCountry,
+        providerResidenceCountry: contract.providerResidenceCountry,
+        payoutCountry: contract.payoutCountry,
+      });
+    }
+    if (corridor.id !== contract.corridorId
+      || corridor.originCountry !== contract.payerCountry
+      || corridor.destinationCountry !== contract.payoutCountry
+      || corridor.fundingCurrency !== contract.fundingCurrency
+      || corridor.payoutCurrency !== contract.payoutCurrency
+      || corridor.direction !== contract.corridorDirection
+      || bookId !== contract.corridorBookId
+      || contract.amountCurrency !== contract.fundingCurrency) {
+      throw unprocessable('The selected deal facts no longer match the configured corridor policy.', {
+        contractId: contract.id,
+        corridorId: contract.corridorId,
+        bookId: contract.corridorBookId,
+      });
+    }
+  }
+
+  private assertFundingGate(
+    payment: Payment,
+    contract: Select<typeof workContracts>,
+    quote: FxQuoteRecord,
+    compliance: ComplianceDecision,
+    corridor: CorridorPolicy,
+    providers: CorridorProviders,
+  ): void {
+    const agreed = money(contract.amountMinor, contract.amountCurrency, contract.amountScale);
+    const expectedBook = bookIdFor(corridor);
+    const expectedLive = this.context.config.fx.mode === 'frankfurter';
+    const sourceMatchesMode = expectedLive
+      ? quote.rateSource.startsWith('FRANKFURTER_ECB_') && quote.provider === 'FRANKFURTER_ECB_REFERENCE'
+      : quote.rateSource.startsWith('FIXTURE_') && quote.provider === 'OPTIWORK_FIXTURE_PROVIDER';
+    const capabilityCheck = providerCapabilitiesSatisfied(providers, corridor.requiredProviderCapabilities);
+    if (compliance.outcome !== 'PASSED'
+      || compliance.id !== payment.complianceResultId
+      || compliance.corridorId !== payment.corridorId
+      || compliance.bookId !== payment.bookId
+      || quote.id !== payment.quoteId
+      || quote.corridorId !== payment.corridorId
+      || !sameDenomination(agreed, quote.fundingAmount)
+      || agreed.amountMinor !== quote.fundingAmount.amountMinor
+      || payment.direction !== corridor.direction
+      || payment.bookId !== expectedBook
+      || contract.corridorId !== corridor.id
+      || contract.corridorDirection !== corridor.direction
+      || contract.corridorBookId !== expectedBook
+      || contract.payerCountry !== corridor.originCountry
+      || contract.payoutCountry !== corridor.destinationCountry
+      || contract.fundingCurrency !== quote.fundingAmount.currency
+      || contract.payoutCurrency !== quote.payoutAmount.currency
+      || !sourceMatchesMode
+      || !capabilityCheck.satisfied) {
+      throw unprocessable('The compliance, FX quote, contract, corridor, or provider configuration changed before funding.');
+    }
   }
 
   private async binding(
@@ -805,9 +1052,6 @@ export class PaymentService {
     providers: CorridorProviders,
     quote: FxQuoteRecord,
   ) {
-    const existing = await this.context.store.findOne(escrowBindings, { paymentId: payment.id });
-    if (existing) return { row: existing, input: this.toEscrowInput(existing), hash: existing.bindingHash };
-
     const network = this.context.config.algorand.network;
     const deployment = this.context.config.algorand.deployment;
     if (this.context.config.algorand.mode === 'executor' && deployment === undefined) {
@@ -832,6 +1076,15 @@ export class PaymentService {
       applicationId: deployment?.applicationId ?? '1',
     };
     const hash = escrowBindingCommitment(input);
+    const existing = await this.context.store.findOne(escrowBindings, { paymentId: payment.id });
+    if (existing) {
+      const persistedInput = this.toEscrowInput(existing);
+      if (existing.bindingHash !== hash
+        || escrowBindingCommitment(persistedInput) !== existing.bindingHash) {
+        throw unprocessable(`Escrow binding for payment ${payment.id} no longer matches its locked quote and providers.`);
+      }
+      return { row: existing, input: persistedInput, hash: existing.bindingHash };
+    }
     const now = this.context.clock.now().toISOString();
     const row = await this.context.store.insert(escrowBindings, {
       id: this.context.ids.next('ESC'),
@@ -857,10 +1110,17 @@ export class PaymentService {
 
   private providers(bookId: string): CorridorProviders {
     const configured = this.context.config.algorand.deployment?.providers[bookId];
-    return providersForBook(bookId, configured === undefined ? {} : {
-      originAddress: configured.originAddress,
-      destinationAddress: configured.destinationAddress,
-    });
+    try {
+      return providersForBook(bookId, configured === undefined ? {} : {
+        originAddress: configured.originAddress,
+        destinationAddress: configured.destinationAddress,
+      });
+    } catch (error) {
+      throw unprocessable(`No deployed provider rail is configured for ${bookId}.`, {
+        bookId,
+        cause: error instanceof Error ? error.message : 'Unknown provider registry error.',
+      });
+    }
   }
 
   private toEscrowInput(row: Select<typeof escrowBindings>): EscrowBindingInput {

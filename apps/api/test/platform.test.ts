@@ -145,6 +145,8 @@ describe('idempotency', () => {
       title: 'Idempotency probe',
       description: 'A posting used to prove that a repeated command executes exactly once.',
       skills: ['typescript'],
+      payerCountry: 'PL',
+      fundingCurrency: 'PLN',
       destinationCountry: 'IN',
       budget: { amountMinor: '100000', currency: 'PLN', scale: 2 },
     };
@@ -175,6 +177,8 @@ describe('idempotency', () => {
       title: 'Conflict probe',
       description: 'A posting used to prove that a reused key with different content is refused.',
       skills: ['typescript'],
+      payerCountry: 'PL',
+      fundingCurrency: 'PLN',
       destinationCountry: 'IN',
       budget: { amountMinor: '100000', currency: 'PLN', scale: 2 },
     };
@@ -231,6 +235,8 @@ describe('authorization', () => {
         title: 'Unauthorized posting',
         description: 'A freelancer must not be able to post work on behalf of a company.',
         skills: ['typescript'],
+        payerCountry: 'IN',
+        fundingCurrency: 'PLN',
         destinationCountry: 'IN',
         budget: { amountMinor: '100000', currency: 'PLN', scale: 2 },
       },
@@ -244,6 +250,8 @@ describe('authorization', () => {
         title: 'Ownership probe',
         description: 'A posting used to prove another tenant cannot read or act on it.',
         skills: ['typescript'],
+        payerCountry: 'PL',
+        fundingCurrency: 'PLN',
         destinationCountry: 'IN',
         budget: { amountMinor: '100000', currency: 'PLN', scale: 2 },
       },
@@ -265,6 +273,8 @@ describe('authorization', () => {
         title: 'Audit probe',
         description: 'A posting used to prove the audit role reads across tenants without writing.',
         skills: ['typescript'],
+        payerCountry: 'PL',
+        fundingCurrency: 'PLN',
         destinationCountry: 'IN',
         budget: { amountMinor: '100000', currency: 'PLN', scale: 2 },
       },
@@ -277,7 +287,10 @@ describe('authorization', () => {
     const write = await call(current, 'POST', `/v1/jobs/${job.body.id}/applications`, {
       token: current.seed.platformAdmin.token,
       idempotencyKey: 'authz-apply-0003',
-      body: { coverLetter: 'An auditor must never be able to apply for work on a tenant behalf.' },
+      body: {
+        residenceCountry: 'PL', payoutCountry: 'PL', payoutCurrency: 'PLN',
+        coverLetter: 'An auditor must never be able to apply for work on a tenant behalf.',
+      },
     });
     expect(write.status).toBe(403);
   });
@@ -398,12 +411,18 @@ describe('simulated escrow lifecycle', () => {
   it('derives distinct provider treasuries for the inward and outward books', () => {
     const inward = providersForBook('PL-IN-INWARD');
     const outward = providersForBook('IN-GB-OUTWARD');
+    const polandToUk = providersForBook('PL-GB-OUTWARD');
     const addresses = [
       inward.origin.address, inward.destination.address,
       outward.origin.address, outward.destination.address,
     ];
     expect(new Set(addresses).size).toBe(4);
     for (const address of addresses) expect(address).toMatch(/^[A-Z2-7]{58}$/u);
+    expect(polandToUk.origin.address).toBe(inward.origin.address);
+    expect(polandToUk.destination.address).toBe(outward.destination.address);
+    expect(providersForBook('GB-IN-INWARD').bookId).toBe('GB-IN-INWARD');
+    expect(providersForBook('DE-PL-OUTWARD').bookId).toBe('DE-PL-OUTWARD');
+    expect(() => providersForBook('PL-RU-OUTWARD')).toThrow(/No provider treasuries/u);
   });
 });
 
@@ -456,6 +475,8 @@ describe('no personal data reaches a ledger, a trace or a log', () => {
         title: 'Privacy probe',
         description: 'A posting used to prove no personal identifier reaches a ledger payload.',
         skills: ['typescript'],
+        payerCountry: 'PL',
+        fundingCurrency: 'PLN',
         destinationCountry: 'IN',
         budget: { amountMinor: '1200000', currency: 'PLN', scale: 2 },
       },
@@ -463,7 +484,10 @@ describe('no personal data reaches a ledger, a trace or a log', () => {
     const application = await call(current, 'POST', `/v1/jobs/${job.body.id}/applications`, {
       token: indianFreelancer.token,
       idempotencyKey: 'pii-application-0001',
-      body: { coverLetter: 'A cover letter that names nobody but demonstrates the workflow end to end.' },
+      body: {
+        residenceCountry: 'IN', payoutCountry: 'IN', payoutCurrency: 'INR',
+        coverLetter: 'A cover letter that names nobody but demonstrates the workflow end to end.',
+      },
     });
     const evaluated = await call(current, 'POST', `/v1/applications/${application.body.id}/evaluate`, {
       token: polishCompany.token,

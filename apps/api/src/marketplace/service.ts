@@ -15,6 +15,7 @@ import {
   aiEvaluationCitations,
   aiEvaluations,
   applications,
+  companyPolicyProfiles,
   contractApprovals,
   jobs,
   memberships,
@@ -27,10 +28,12 @@ import { money, type Money } from '../money.js';
 import { requireOwnership, requireReadAccess, requireRole, type Principal } from '../auth/authorization.js';
 import type { Select } from '../db/store.js';
 import { objectKeyFor } from '../storage/object-store.js';
+import { inspect } from '../corridor/service.js';
 
 export type Job = Select<typeof jobs>;
 export type Application = Select<typeof applications>;
 export type WorkContract = Select<typeof workContracts>;
+export type CompanyPolicyProfile = Select<typeof companyPolicyProfiles>;
 
 export interface CreateJobInput {
   readonly title: string;
@@ -38,11 +41,16 @@ export interface CreateJobInput {
   readonly skills: readonly string[];
   readonly acceptanceCriteria?: readonly string[];
   readonly targetDeliveryDate?: string;
+  readonly payerCountry: string;
+  readonly fundingCurrency: string;
   readonly destinationCountry: string;
   readonly budget: Money;
 }
 
 export interface ApplyInput {
+  readonly residenceCountry: string;
+  readonly payoutCountry: string;
+  readonly payoutCurrency: string;
   readonly coverLetter: string;
   readonly approach?: string;
   readonly proposedSkills?: readonly string[];
@@ -54,10 +62,32 @@ export interface ApplyInput {
 }
 
 export interface AgreementTermsInput {
+  readonly policies?: readonly string[];
+  readonly legalClauses?: readonly string[];
+  readonly acceptanceCriteria?: readonly string[];
+  readonly commercialTerms?: readonly string[];
+}
+
+export interface CompanyPolicyProfileInput {
+  readonly companyCountry: string;
+  readonly fundingCurrency: string;
+  readonly fileName: string;
+  readonly contentType: string;
+  readonly contentBase64: string;
   readonly policies: readonly string[];
   readonly legalClauses: readonly string[];
-  readonly acceptanceCriteria: readonly string[];
-  readonly commercialTerms: readonly string[];
+  readonly commercialStandards: readonly string[];
+  readonly authorizedApprovers: readonly string[];
+  readonly extractionSource: 'OPENAI' | 'FIXTURE';
+  readonly extractionModel: string;
+}
+
+interface AgreementClauseSource {
+  readonly section: 'POLICIES' | 'LEGAL_CLAUSES' | 'ACCEPTANCE_CRITERIA' | 'COMMERCIAL_TERMS';
+  readonly text: string;
+  readonly sourceType: 'COMPANY_POLICY' | 'JOB_BRIEF' | 'FREELANCER_PROPOSAL' | 'DEAL_OVERRIDE';
+  readonly sourceRef: string;
+  readonly sourceHash: string;
 }
 
 export interface ApproveContractInput {
@@ -78,6 +108,104 @@ export class MarketplaceService {
     return { subject: principal.subject, role: principal.roles[0] ?? 'unknown' };
   }
 
+  async latestCompanyPolicyProfile(principal: Principal): Promise<CompanyPolicyProfile | null> {
+    requireRole(principal, 'company_member', 'platform_admin');
+    const [latest] = await this.context.store.findMany(
+      companyPolicyProfiles,
+      { organizationId: principal.organizationId },
+      { orderBy: 'version', direction: 'desc', limit: 1 },
+    );
+    return latest ?? null;
+  }
+
+  async saveCompanyPolicyProfile(
+    principal: Principal,
+    input: CompanyPolicyProfileInput,
+  ): Promise<CompanyPolicyProfile> {
+    requireRole(principal, 'company_member', 'platform_admin');
+    const organization = await this.context.store.findOne(organizations, { id: principal.organizationId });
+    if (!organization) throw notFound(`Unknown organization ${principal.organizationId}.`);
+    if (input.companyCountry !== organization.country) {
+      throw unprocessable('The onboarding country must match the verified company organization country.');
+    }
+    const required = [input.policies, input.legalClauses, input.commercialStandards, input.authorizedApprovers];
+    if (required.some((values) => values.map((value) => value.trim()).filter(Boolean).length === 0)) {
+      throw unprocessable('The approved company profile requires policy, legal, commercial, and approver entries.');
+    }
+    if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(input.contentBase64) || input.contentBase64.length % 4 !== 0) {
+      throw unprocessable('The company policy document is not valid base64.');
+    }
+    const bytes = Buffer.from(input.contentBase64, 'base64');
+    if (bytes.length === 0 || bytes.length > 8 * 1024 * 1024) {
+      throw unprocessable('The company policy document must be between 1 byte and 8 MB.');
+    }
+    const existing = await this.context.store.findMany(companyPolicyProfiles, {
+      organizationId: principal.organizationId,
+    }, { orderBy: 'version', direction: 'desc', limit: 1 });
+    const version = (existing[0]?.version ?? 0) + 1;
+    const objectId = this.context.ids.next('OBJ');
+    const stored = await this.context.objects.put(
+      objectKeyFor('company-policy', principal.organizationId, objectId),
+      bytes,
+      input.contentType,
+    );
+    await this.context.store.insert(uploadedObjects, {
+      id: objectId,
+      bucket: stored.bucket,
+      objectKey: stored.objectKey,
+      contentType: stored.contentType,
+      byteLength: String(stored.byteLength),
+      sha256: stored.sha256,
+      ownerOrganizationId: principal.organizationId,
+      classification: 'COMPANY_POLICY',
+      createdAt: this.context.clock.now().toISOString(),
+    });
+    const normalized = {
+      policies: input.policies.map((value) => value.trim()).filter(Boolean),
+      legalClauses: input.legalClauses.map((value) => value.trim()).filter(Boolean),
+      commercialStandards: input.commercialStandards.map((value) => value.trim()).filter(Boolean),
+      authorizedApprovers: input.authorizedApprovers.map((value) => value.trim()).filter(Boolean),
+    };
+    const approvedAt = this.context.clock.now().toISOString();
+    const profileHash = canonicalHash({
+      organizationId: principal.organizationId,
+      version,
+      country: organization.country,
+      fundingCurrency: input.fundingCurrency,
+      sourceArtifactHash: stored.sha256,
+      ...normalized,
+    });
+    const profile = await this.context.store.insert(companyPolicyProfiles, {
+      id: this.context.ids.next('CPP'),
+      organizationId: principal.organizationId,
+      version,
+      country: organization.country,
+      fundingCurrency: input.fundingCurrency,
+      sourceObjectId: objectId,
+      sourceFileName: input.fileName,
+      sourceArtifactHash: stored.sha256,
+      ...normalized,
+      extractionSource: input.extractionSource,
+      extractionModel: input.extractionModel,
+      profileHash,
+      approvedByUserId: principal.subject,
+      approvedAt,
+      createdAt: approvedAt,
+    });
+    await this.context.timeline.append({
+      kind: 'COMPANY_POLICY_APPROVED',
+      actor: this.actor(principal),
+      detail: {
+        profileId: profile.id,
+        organizationId: profile.organizationId,
+        version: profile.version,
+        profileHash: profile.profileHash,
+        sourceArtifactHash: profile.sourceArtifactHash,
+      },
+    });
+    return profile;
+  }
+
   async createJob(principal: Principal, input: CreateJobInput): Promise<Job> {
     requireRole(principal, 'company_member', 'platform_admin');
     if (input.skills.length === 0) throw unprocessable('A job needs at least one skill.');
@@ -88,6 +216,12 @@ export class MarketplaceService {
 
     const organization = await this.context.store.findOne(organizations, { id: principal.organizationId });
     if (!organization) throw notFound(`Unknown organization ${principal.organizationId}.`);
+    if (input.payerCountry !== organization.country) {
+      throw unprocessable('The payer country must match the verified company organization country.');
+    }
+    if (input.fundingCurrency !== input.budget.currency) {
+      throw unprocessable('The job funding currency must match the budget denomination.');
+    }
 
     const job = await this.context.store.insert(jobs, {
       id: this.context.ids.next('JOB'),
@@ -98,6 +232,8 @@ export class MarketplaceService {
       skills: [...input.skills],
       acceptanceCriteria: input.acceptanceCriteria === undefined ? null : [...input.acceptanceCriteria],
       targetDeliveryDate: input.targetDeliveryDate ?? null,
+      payerCountry: input.payerCountry,
+      fundingCurrency: input.fundingCurrency,
       destinationCountry: input.destinationCountry,
       budgetAmountMinor: input.budget.amountMinor,
       budgetCurrency: input.budget.currency,
@@ -111,6 +247,8 @@ export class MarketplaceService {
       detail: {
         jobId: job.id,
         organizationId: job.organizationId,
+        payerCountry: job.payerCountry,
+        fundingCurrency: job.fundingCurrency,
         destinationCountry: job.destinationCountry,
         budgetMinor: job.budgetAmountMinor,
         budgetCurrency: job.budgetCurrency,
@@ -139,6 +277,14 @@ export class MarketplaceService {
     if (job.organizationId === principal.organizationId) {
       throw unprocessable('An organization cannot apply to its own posting.');
     }
+    const applicantOrganization = await this.context.store.findOne(organizations, { id: principal.organizationId });
+    if (!applicantOrganization) throw notFound(`Unknown organization ${principal.organizationId}.`);
+    if (input.residenceCountry !== applicantOrganization.country) {
+      throw unprocessable('The proposal residence country must match the verified applicant organization country.');
+    }
+    if (input.payoutCountry !== input.residenceCountry) {
+      throw unprocessable('The current payment rails require the verified provider and payout country to match.');
+    }
     const existing = await this.context.store.findOne(applications, { jobId, applicantUserId: principal.subject });
     if (existing) throw conflict('You have already applied to this job.');
     const proposedPrice = input.proposedPrice ?? money(
@@ -165,6 +311,9 @@ export class MarketplaceService {
       jobId,
       applicantUserId: principal.subject,
       applicantOrganizationId: principal.organizationId,
+      residenceCountry: input.residenceCountry,
+      payoutCountry: input.payoutCountry,
+      payoutCurrency: input.payoutCurrency,
       coverLetter: input.coverLetter,
       approach: input.approach ?? input.coverLetter,
       proposedSkills: [...proposedSkills],
@@ -181,7 +330,14 @@ export class MarketplaceService {
     await this.context.timeline.append({
       kind: 'APPLICATION_SUBMITTED',
       actor: this.actor(principal),
-      detail: { jobId, applicationId: application.id, applicantOrganizationId: principal.organizationId },
+      detail: {
+        jobId,
+        applicationId: application.id,
+        applicantOrganizationId: principal.organizationId,
+        residenceCountry: application.residenceCountry,
+        payoutCountry: application.payoutCountry,
+        payoutCurrency: application.payoutCurrency,
+      },
     });
     return application;
   }
@@ -252,6 +408,9 @@ export class MarketplaceService {
           availability: application.availability,
           approach: application.approach,
           skills: application.proposedSkills,
+          residenceCountry: application.residenceCountry,
+          payoutCountry: application.payoutCountry,
+          payoutCurrency: application.payoutCurrency,
         },
       });
     }
@@ -356,6 +515,22 @@ export class MarketplaceService {
     if (amount.currency !== job.budgetCurrency || amount.scale !== job.budgetScale) {
       throw unprocessable(`The agreed amount must use the job denomination ${job.budgetCurrency}/${job.budgetScale}.`);
     }
+    if (job.fundingCurrency !== amount.currency) {
+      throw unprocessable(`The agreed amount must use the persisted funding currency ${job.fundingCurrency}.`);
+    }
+
+    // The route is ordered and becomes immutable only after the human chooses
+    // a provider. It can never be reversed by a later payment request.
+    // Selection binds even a review/blocked route so both parties can inspect
+    // and approve the private agreement. Only payment creation uses `resolve`
+    // and therefore refuses a blocked policy before any FX or chain action.
+    const corridor = inspect(job.payerCountry, application.payoutCountry);
+    if (corridor.policy.fundingCurrency !== job.fundingCurrency) {
+      throw unprocessable(`Corridor ${corridor.bookId} requires ${corridor.policy.fundingCurrency} funding.`);
+    }
+    if (corridor.policy.payoutCurrency !== application.payoutCurrency) {
+      throw unprocessable(`Corridor ${corridor.bookId} requires ${corridor.policy.payoutCurrency} payout.`);
+    }
 
     const existingForJob = await this.context.store.findOne(workContracts, { jobId: job.id });
     if (existingForJob) {
@@ -369,7 +544,9 @@ export class MarketplaceService {
       facts: {
         skills: [...job.skills],
         currency: amount.currency,
-        destinationCountry: job.destinationCountry,
+        payerCountry: job.payerCountry,
+        payoutCountry: application.payoutCountry,
+        corridorBookId: corridor.bookId,
         milestoneCount: 1,
       },
     });
@@ -401,6 +578,14 @@ export class MarketplaceService {
       buyerOrganizationId: job.organizationId,
       providerOrganizationId: application.applicantOrganizationId,
       providerUserId: application.applicantUserId,
+      payerCountry: job.payerCountry,
+      fundingCurrency: job.fundingCurrency,
+      providerResidenceCountry: application.residenceCountry,
+      payoutCountry: application.payoutCountry,
+      payoutCurrency: application.payoutCurrency,
+      corridorId: corridor.policy.id,
+      corridorDirection: corridor.policy.direction,
+      corridorBookId: corridor.bookId,
       state: 'CANDIDATE_SELECTED' satisfies WorkContractState,
       terms: agreement.text,
       contractHash: agreement.contractHash,
@@ -436,6 +621,12 @@ export class MarketplaceService {
         milestoneId,
         amountMinor: contract.amountMinor,
         amountCurrency: contract.amountCurrency,
+        payerCountry: contract.payerCountry,
+        payoutCountry: contract.payoutCountry,
+        payoutCurrency: contract.payoutCurrency,
+        corridorId: contract.corridorId,
+        corridorDirection: contract.corridorDirection,
+        corridorBookId: contract.corridorBookId,
         draftingSource: drafted.source,
       },
     });
@@ -459,15 +650,76 @@ export class MarketplaceService {
     }
     const job = await this.requireJob(contract.jobId);
     const application = await this.requireApplication(contract.applicationId);
+    const [profile] = await this.context.store.findMany(companyPolicyProfiles, {
+      organizationId: contract.buyerOrganizationId,
+    }, { orderBy: 'version', direction: 'desc', limit: 1 });
+    const overrides = {
+      policies: input.policies ?? [],
+      legalClauses: input.legalClauses ?? [],
+      acceptanceCriteria: input.acceptanceCriteria ?? [],
+      commercialTerms: input.commercialTerms ?? [],
+    };
+    if (!profile && Object.values(overrides).every((values) => values.length === 0)) {
+      throw unprocessable('Complete and approve the company policy onboarding profile before generating an agreement.');
+    }
+    const unique = (values: readonly string[]) => [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+    const jobHash = canonicalHash({
+      jobId: job.id,
+      title: job.title,
+      description: job.description,
+      acceptanceCriteria: job.acceptanceCriteria,
+      targetDeliveryDate: job.targetDeliveryDate,
+    });
+    const proposalHash = canonicalHash({
+      applicationId: application.id,
+      proposedAmountMinor: application.proposedAmountMinor,
+      proposedCurrency: application.proposedCurrency,
+      proposedScale: application.proposedScale,
+      deliveryDays: application.deliveryDays,
+      availability: application.availability,
+      approach: application.approach,
+    });
+    const agreementInput: AgreementTermsInput = {
+      policies: unique([...(profile?.policies ?? []), ...overrides.policies]),
+      legalClauses: unique([...(profile?.legalClauses ?? []), ...overrides.legalClauses]),
+      acceptanceCriteria: unique([...(job.acceptanceCriteria ?? []), ...overrides.acceptanceCriteria]),
+      commercialTerms: unique([
+        `The agreed fixed price is ${contract.amountMinor} ${contract.amountCurrency} minor units at scale ${contract.amountScale}.`,
+        `The selected proposal commits to delivery within ${application.deliveryDays} days.`,
+        `The selected freelancer stated: ${application.availability}`,
+        ...(profile?.commercialStandards ?? []),
+        ...overrides.commercialTerms,
+      ]),
+    };
+    const policySources: AgreementClauseSource[] = profile ? [
+      ...profile.policies.map((text) => ({ section: 'POLICIES' as const, text, sourceType: 'COMPANY_POLICY' as const, sourceRef: profile.id, sourceHash: profile.profileHash })),
+      ...profile.legalClauses.map((text) => ({ section: 'LEGAL_CLAUSES' as const, text, sourceType: 'COMPANY_POLICY' as const, sourceRef: profile.id, sourceHash: profile.profileHash })),
+      ...profile.commercialStandards.map((text) => ({ section: 'COMMERCIAL_TERMS' as const, text, sourceType: 'COMPANY_POLICY' as const, sourceRef: profile.id, sourceHash: profile.profileHash })),
+    ] : [];
+    const sources: AgreementClauseSource[] = [
+      ...policySources,
+      ...(job.acceptanceCriteria ?? []).map((text) => ({ section: 'ACCEPTANCE_CRITERIA' as const, text, sourceType: 'JOB_BRIEF' as const, sourceRef: job.id, sourceHash: jobHash })),
+      { section: 'COMMERCIAL_TERMS', text: `The agreed fixed price is ${contract.amountMinor} ${contract.amountCurrency} minor units at scale ${contract.amountScale}.`, sourceType: 'FREELANCER_PROPOSAL', sourceRef: application.id, sourceHash: proposalHash },
+      { section: 'COMMERCIAL_TERMS', text: `The selected proposal commits to delivery within ${application.deliveryDays} days.`, sourceType: 'FREELANCER_PROPOSAL', sourceRef: application.id, sourceHash: proposalHash },
+      { section: 'COMMERCIAL_TERMS', text: `The selected freelancer stated: ${application.availability}`, sourceType: 'FREELANCER_PROPOSAL', sourceRef: application.id, sourceHash: proposalHash },
+      ...Object.entries(overrides).flatMap(([section, values]) => values.map((text) => ({
+        section: ({ policies: 'POLICIES', legalClauses: 'LEGAL_CLAUSES', acceptanceCriteria: 'ACCEPTANCE_CRITERIA', commercialTerms: 'COMMERCIAL_TERMS' } as const)[section as keyof typeof overrides],
+        text,
+        sourceType: 'DEAL_OVERRIDE' as const,
+        sourceRef: contractId,
+        sourceHash: canonicalHash({ contractId, section, text }),
+      }))),
+    ];
     const drafted = await this.context.ai.evaluate({
       purpose: 'CONTRACT_DRAFTING',
-      instruction: 'Formalize the supplied agreement headings without changing their meaning. You are advisory only.',
+      instruction: 'Formalize the approved company policy, job brief and selected proposal without changing their meaning. Preserve source attribution. You are advisory only.',
       facts: {
-        policyCount: input.policies.length,
-        legalClauseCount: input.legalClauses.length,
-        acceptanceCriterionCount: input.acceptanceCriteria.length,
-        commercialTermCount: input.commercialTerms.length,
-        destinationCountry: job.destinationCountry,
+        companyPolicyProfileHash: profile?.profileHash ?? 'LEGACY_EXPLICIT_INPUT',
+        policyCount: agreementInput.policies?.length ?? 0,
+        legalClauseCount: agreementInput.legalClauses?.length ?? 0,
+        acceptanceCriterionCount: agreementInput.acceptanceCriteria?.length ?? 0,
+        commercialTermCount: agreementInput.commercialTerms?.length ?? 0,
+        orderedDestinationCountry: application.payoutCountry,
       },
     });
     const agreement = await this.storeAgreement({
@@ -476,7 +728,9 @@ export class MarketplaceService {
       job,
       application,
       amount: this.contractAmount(contract),
-      input,
+      input: agreementInput,
+      sources,
+      ...(profile ? { profile } : {}),
       draftingSummary: drafted.summary,
     });
     const [updated] = await this.context.store.update(workContracts, { id: contractId }, {
@@ -568,14 +822,17 @@ export class MarketplaceService {
     application: Application;
     amount: Money;
     input: AgreementTermsInput;
+    sources?: readonly AgreementClauseSource[];
+    profile?: CompanyPolicyProfile;
     draftingSummary: string;
   }) {
     const clean = (values: readonly string[]) => values.map((value) => value.trim()).filter(Boolean);
     const terms = {
-      policies: clean(args.input.policies),
-      legalClauses: clean(args.input.legalClauses),
-      acceptanceCriteria: clean(args.input.acceptanceCriteria),
-      commercialTerms: clean(args.input.commercialTerms),
+      policies: clean(args.input.policies ?? []),
+      legalClauses: clean(args.input.legalClauses ?? []),
+      acceptanceCriteria: clean(args.input.acceptanceCriteria ?? []),
+      commercialTerms: clean(args.input.commercialTerms ?? []),
+      sources: [...(args.sources ?? [])],
     };
     if (terms.legalClauses.length === 0 || terms.acceptanceCriteria.length === 0) {
       throw unprocessable('An agreement needs at least one legal clause and one acceptance criterion.');
@@ -594,16 +851,23 @@ export class MarketplaceService {
       `Application reference: ${args.application.id}`,
       `Buyer organization reference: ${args.job.organizationId}`,
       `Provider organization reference: ${args.application.applicantOrganizationId}`,
+      `Ordered payment corridor: ${args.job.payerCountry} -> ${args.application.payoutCountry}`,
+      `Funding currency: ${args.job.fundingCurrency}`,
+      `Provider residence country: ${args.application.residenceCountry}`,
+      `Payout currency: ${args.application.payoutCurrency}`,
       `Scope: ${args.job.title}`,
       `Target delivery date: ${args.job.targetDeliveryDate ?? 'Not specified'}`,
       `Agreed price: ${args.amount.amountMinor} ${args.amount.currency} minor units (scale ${args.amount.scale})`,
       `Proposal delivery estimate: ${args.application.deliveryDays} days`,
       `Proposal availability: ${args.application.availability}`,
+      `Company policy profile: ${args.profile?.id ?? 'Explicit deal input'}`,
+      `Company policy profile hash: ${args.profile?.profileHash ?? 'Not available'}`,
       '',
       ...section('Company policies', terms.policies),
       ...section('Legal clauses', terms.legalClauses),
       ...section('Acceptance criteria', terms.acceptanceCriteria),
       ...section('Commercial terms', terms.commercialTerms),
+      ...section('Clause source provenance', terms.sources.map((source) => `${source.section} | ${source.sourceType} | ${source.sourceRef} | ${source.sourceHash} | ${source.text}`)),
       '## Advisory drafting note',
       '',
       args.draftingSummary.trim(),
@@ -635,6 +899,11 @@ export class MarketplaceService {
       applicationId: args.application.id,
       buyerOrganizationId: args.job.organizationId,
       providerOrganizationId: args.application.applicantOrganizationId,
+      payerCountry: args.job.payerCountry,
+      fundingCurrency: args.job.fundingCurrency,
+      providerResidenceCountry: args.application.residenceCountry,
+      payoutCountry: args.application.payoutCountry,
+      payoutCurrency: args.application.payoutCurrency,
       proposal: {
         amountMinor: args.application.proposedAmountMinor,
         currency: args.application.proposedCurrency,
@@ -647,6 +916,13 @@ export class MarketplaceService {
       },
       agreedAmount: args.amount,
       companyTerms: terms,
+      companyPolicyProfile: args.profile ? {
+        id: args.profile.id,
+        version: args.profile.version,
+        profileHash: args.profile.profileHash,
+        sourceArtifactHash: args.profile.sourceArtifactHash,
+        authorizedApprovers: args.profile.authorizedApprovers,
+      } : null,
     });
     return {
       objectId,

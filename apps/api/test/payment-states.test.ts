@@ -6,19 +6,20 @@
  * silently repairing it.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { base64, call, createHarness, type Harness } from './harness.js';
 import { canTransitionPayment } from '@optiwork/domain';
-import { escrowBindings, paymentInstructions } from '../src/db/schema.js';
+import { escrowBindings, fxQuotes, paymentInstructions, providerCommands } from '../src/db/schema.js';
 
 let harness: Harness | undefined;
 
 afterEach(async () => {
   await harness?.close();
   harness = undefined;
+  vi.unstubAllGlobals();
 });
 
-async function quotedPayment(current: Harness) {
+async function quotedPayment(current: Harness, purposeCode?: string) {
   const { polishCompany, indianFreelancer } = current.seed;
   const job = await call(current, 'POST', '/v1/jobs', {
     token: polishCompany.token,
@@ -27,6 +28,8 @@ async function quotedPayment(current: Harness) {
       title: 'State machine probe',
       description: 'A posting used to walk the payment state machine through its legal transitions.',
       skills: ['typescript'],
+      payerCountry: 'PL',
+      fundingCurrency: 'PLN',
       destinationCountry: 'IN',
       budget: { amountMinor: '1200000', currency: 'PLN', scale: 2 },
     },
@@ -34,7 +37,10 @@ async function quotedPayment(current: Harness) {
   const application = await call(current, 'POST', `/v1/jobs/${job.body.id}/applications`, {
     token: indianFreelancer.token,
     idempotencyKey: 'state-application-0001',
-    body: { coverLetter: 'An application used to walk the payment state machine end to end.' },
+    body: {
+      residenceCountry: 'IN', payoutCountry: 'IN', payoutCurrency: 'INR',
+      coverLetter: 'An application used to walk the payment state machine end to end.',
+    },
   });
   const evaluated = await call(current, 'POST', `/v1/applications/${application.body.id}/evaluate`, {
     token: polishCompany.token,
@@ -52,7 +58,11 @@ async function quotedPayment(current: Harness) {
     idempotencyKey: 'state-approve-provider',
     body: { party: 'PROVIDER', acceptedTermsHash: contract.contractHash },
   });
-  for (const [index, code] of ['INVOICE', 'SERVICE_EXPORT_DECLARATION'].entries()) {
+  for (const [index, code] of [
+    'CESOP_REPORTING_ASSESSMENT', 'EU_PARTY_SCREENING', 'INDIA_MERCHANT_CDD', 'INVOICE',
+    'PAYER_PAYEE_TRANSFER_DATA', 'PAYMENT_RECIPIENT_RECORD', 'PURPOSE_CODE_P0802',
+    'RESTRICTED_TRADE_SCREENING', 'SERVICE_EXPORT_DECLARATION',
+  ].entries()) {
     await call(current, 'POST', `/v1/contracts/${contract.id}/documents`, {
       token: polishCompany.token,
       idempotencyKey: `state-document-${index}`,
@@ -62,9 +72,13 @@ async function quotedPayment(current: Harness) {
   const payment = await call(current, 'POST', '/v1/payments', {
     token: polishCompany.token,
     idempotencyKey: 'state-payment-0001',
-    body: { contractId: contract.id, fundingAmount: { amountMinor: '1200000', currency: 'PLN', scale: 2 } },
+    body: {
+      contractId: contract.id,
+      fundingAmount: { amountMinor: '1200000', currency: 'PLN', scale: 2 },
+      ...(purposeCode === undefined ? {} : { purposeCode }),
+    },
   });
-  return { contract, payment: payment.body.payment };
+  return { contract, payment: payment.body.payment, result: payment.body };
 }
 
 describe('payment state machine', () => {
@@ -149,5 +163,84 @@ describe('payment state machine', () => {
 
     const stored = await current.context.store.findOne(paymentInstructions, { id: payment.id });
     expect(stored?.state).toBe('FAILED_RECONCILIATION');
+  });
+
+  it('refuses an expired quote before any fiat post or escrow signing', async () => {
+    harness = await createHarness();
+    const current = harness;
+    const { contract, payment } = await quotedPayment(current);
+    current.clock.advance(1_000_000);
+
+    const funded = await call(current, 'POST', `/v1/payments/${payment.id}/fund`, {
+      token: current.seed.polishCompany.token,
+      idempotencyKey: 'state-fund-expired',
+    });
+    expect(funded.status).toBe(422);
+    expect(funded.body.error.message).toMatch(/FX quote .* expired/u);
+    expect(await current.context.escrow.get(contract.id)).toBeNull();
+    expect(await current.context.store.findMany(providerCommands, { paymentId: payment.id })).toHaveLength(0);
+  });
+
+  it('refuses a tampered persisted quote before any escrow signing', async () => {
+    harness = await createHarness();
+    const current = harness;
+    const { contract, payment } = await quotedPayment(current);
+    const stored = await current.context.store.findOne(fxQuotes, { id: payment.quoteId });
+    const quote = stored!.quote as Record<string, any>;
+    await current.context.store.update(fxQuotes, { id: payment.quoteId }, {
+      quote: {
+        ...quote,
+        settlementAmount: { ...quote['settlementAmount'], amountMinor: '1' },
+      },
+    });
+
+    const funded = await call(current, 'POST', `/v1/payments/${payment.id}/fund`, {
+      token: current.seed.polishCompany.token,
+      idempotencyKey: 'state-fund-tampered-quote',
+    });
+    expect(funded.status).toBe(422);
+    expect(funded.body.error.message).toMatch(/canonical commitment/u);
+    expect(await current.context.escrow.get(contract.id)).toBeNull();
+    expect(await current.context.store.findMany(providerCommands, { paymentId: payment.id })).toHaveLength(0);
+  });
+
+  it('never creates an escrow for a non-passed compliance decision', async () => {
+    harness = await createHarness();
+    const current = harness;
+    const { contract, result } = await quotedPayment(current, 'NOT_REVIEWED_FOR_CORRIDOR');
+    expect(result.error.message).toMatch(/regulatory plan cannot authorize/u);
+    expect(result.error.detail.gate).toBe('MANUAL_REVIEW_REQUIRED');
+    expect(await current.context.escrow.get(contract.id)).toBeNull();
+    expect(await current.context.store.findMany(providerCommands, {})).toHaveLength(0);
+  });
+
+  it('persists live reference provenance and locks the exact quoted USDC amount', async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      const to = url.searchParams.get('to');
+      const response = new Response(JSON.stringify({
+        date: '2026-09-03', rates: { [String(to)]: to === 'USD' ? 0.25 : 83.4 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      Object.defineProperty(response, 'url', { value: url.toString() });
+      return response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    harness = await createHarness({ FX_MODE: 'frankfurter' });
+    const current = harness;
+    const { payment, result } = await quotedPayment(current);
+    expect(result.quote).toMatchObject({
+      provider: 'FRANKFURTER_ECB_REFERENCE',
+      rateSource: 'FRANKFURTER_ECB_2026-09-03',
+      rateObservedAt: '2026-09-03T00:00:00.000Z',
+    });
+
+    const funded = await call(current, 'POST', `/v1/payments/${payment.id}/fund`, {
+      token: current.seed.polishCompany.token,
+      idempotencyKey: 'state-fund-live-reference',
+    });
+    expect(funded.status).toBe(200);
+    const binding = await current.context.store.findOne(escrowBindings, { paymentId: payment.id });
+    expect(binding?.amountUsdcMinor).toBe(result.quote.settlementAmount.amountMinor);
+    expect(funded.body.quote.canonicalHash).toBe(result.quote.canonicalHash);
   });
 });

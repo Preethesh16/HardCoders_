@@ -492,6 +492,27 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
 #portalWorkflow .hash-panel small,#portalWorkflow .agreement-terms dt{color:#66776e}
 #portalWorkflow .agreement-terms{background:#c5d0c8}
 #portalWorkflow .agreement-terms>div{background:#fff}
+
+/* Reusable company-policy onboarding and source-attributed agreements. */
+#portalWorkflow .policy-profile-card>p{margin:0;padding:18px 22px;color:#53655b;font:14px/1.65 var(--sans);text-wrap:pretty}
+#portalWorkflow .policy-profile-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid #e0e6e1}
+#portalWorkflow .policy-profile-summary>span{padding:20px;border-right:1px solid #e0e6e1;min-width:0}
+#portalWorkflow .policy-profile-summary>span:last-child{border-right:0}
+#portalWorkflow .policy-profile-summary small,#portalWorkflow .agreement-source-grid small{display:block;margin-bottom:8px;color:#66776e;font:8px "Press Start 2P",monospace}
+#portalWorkflow .policy-profile-summary b{display:block;color:#143d30;font:600 14px/1.45 var(--mono);overflow-wrap:anywhere}
+#portalWorkflow .agreement-source-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;margin:24px;background:#dce4de;border:1px solid #dce4de}
+#portalWorkflow .agreement-source-grid article{background:#f8faf8;padding:22px;min-width:0}
+#portalWorkflow .agreement-source-grid b{display:block;color:#143d30;font:600 15px/1.45 var(--mono);text-wrap:balance}
+#portalWorkflow .agreement-source-grid p{margin:10px 0 0;color:#5d6d64;font:13px/1.6 var(--sans);text-wrap:pretty}
+#portalWorkflow .agreement-provenance{border-top:1px solid #e0e6e1}
+#portalWorkflow .agreement-provenance>header{display:flex;justify-content:space-between;padding:16px 20px;background:#f2f6f2;color:#143d30;font:8px "Press Start 2P",monospace}
+#portalWorkflow .agreement-provenance>div{display:grid;grid-template-columns:145px 170px minmax(0,1fr) 155px;gap:14px;align-items:start;padding:15px 20px;border-top:1px solid #e7ece8}
+#portalWorkflow .agreement-provenance>div span{color:#238560;font:8px "Press Start 2P",monospace}
+#portalWorkflow .agreement-provenance>div b{font:600 12px/1.5 var(--mono)}
+#portalWorkflow .agreement-provenance>div p{margin:0;color:#4f6158;font:13px/1.55 var(--sans);text-wrap:pretty}
+#portalWorkflow .agreement-provenance>div code{font:11px/1.5 var(--mono);overflow-wrap:anywhere}
+@media(max-width:900px){#portalWorkflow .policy-profile-summary,#portalWorkflow .agreement-source-grid{grid-template-columns:1fr 1fr}#portalWorkflow .agreement-provenance>div{grid-template-columns:1fr 1fr}#portalWorkflow .agreement-provenance>div p{grid-column:1/-1}}
+@media(max-width:650px){#portalWorkflow .policy-profile-summary,#portalWorkflow .agreement-source-grid{grid-template-columns:1fr}#portalWorkflow .agreement-provenance>div{grid-template-columns:1fr}}
 #portalWorkflow .document-actions>a,#portalWorkflow .document-actions>span{background:#f2f6ef;border-color:#9caf9f;color:var(--role-ink)}
 #portalWorkflow .automation-card>p,#portalWorkflow .automation-track small,#portalWorkflow .rate-lock p{color:#53655b}
 #portalWorkflow .automation-track article{border-color:#c5d0c8}
@@ -643,6 +664,8 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
 #portalWorkflow .role-stage-item[data-state="done"]>i{background:var(--role-accent);color:#fff}
 #portalWorkflow .role-stage-item[data-state="current"]{background:var(--role-soft);box-shadow:none}
 #portalWorkflow .role-stage-item[data-state="current"]>i{background:var(--role-accent);color:#fff}
+#portalWorkflow .role-stage-item[data-state="held"]{background:#fff8e5;box-shadow:inset 3px 0 #d39b25}
+#portalWorkflow .role-stage-item[data-state="held"]>i{background:#f2c75c;color:#4f3908}
 #portalWorkflow .role-stage-item:not(:last-child):after{left:30px;top:55px;bottom:-33px;width:1px;background:#c7d2ca}
 #portalWorkflow .role-stage-item b{font-size:12px;font-weight:700;text-transform:none}
 #portalWorkflow .role-stage-item small{font-size:11px;line-height:1.45}
@@ -1090,3 +1113,90 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
   #portalWorkflow .transfer-proof{grid-template-columns:1fr}
   #portalWorkflow .transfer-proof>div{border-right:0;border-bottom:1px solid #e1e8e2}
 }
+
+/* Deal-derived corridor decision trace. Passive automation stages are status only. */
+#portalWorkflow .proposal-receipt>div{grid-template-columns:repeat(4,1fr)}
+#portalWorkflow .automation-workspace>header>span[data-state="active"]{background:#dff5e7;color:#17603d}
+#portalWorkflow .automation-workspace>header>span[data-state="review"]{background:#fff0c4;color:#74500b}
+#portalWorkflow .automation-workspace>header>span[data-state="blocked"]{background:#ffe0de;color:#8c2b25}
+#portalWorkflow .automation-stream.status-only{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid #e2e9e3;border-bottom:1px solid #e2e9e3}
+#portalWorkflow .automation-stream.status-only article{display:grid;grid-template-columns:32px minmax(0,1fr);gap:11px;min-width:0;min-height:126px;padding:16px 14px;background:#fff;border-right:1px solid #e2e9e3}
+#portalWorkflow .automation-stream.status-only article:last-child{border-right:0}
+#portalWorkflow .automation-stream.status-only article>i{display:grid;place-items:center;width:28px;height:28px;background:#edf2ee;color:#607068;border-radius:50%;font:700 10px var(--mono);font-style:normal}
+#portalWorkflow .automation-stream.status-only article[data-state="completed"]>i{background:var(--role-accent);color:#fff}
+#portalWorkflow .automation-stream.status-only article>div>span{display:grid;gap:5px}
+#portalWorkflow .automation-stream.status-only article b{font:6px/1.65 "Press Start 2P",monospace!important}
+#portalWorkflow .automation-stream.status-only article em{color:var(--role-ink);font:6px/1.5 "Press Start 2P",monospace;font-style:normal}
+#portalWorkflow .automation-stream.status-only article p{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:3;margin:8px 0 0;color:#65756c;font:11px/1.5 var(--mono)!important}
+#portalWorkflow .automation-stream.status-only article[data-state="review"],
+#portalWorkflow .automation-stream.status-only article[data-state="not requested"],
+#portalWorkflow .automation-stream.status-only article[data-state="not created"]{background:#fffaf0}
+#portalWorkflow .automation-stream.status-only article[data-state="blocked"]{background:#fff3f1}
+#portalWorkflow .corridor-trace{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 22px;background:#17372d;color:#fff}
+#portalWorkflow .corridor-trace small,#portalWorkflow .corridor-trace h4,#portalWorkflow .corridor-trace p{margin:0}
+#portalWorkflow .corridor-trace small{color:#d9ff45;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .corridor-trace h4{margin-top:7px;color:#fff;font:11px/1.55 "Press Start 2P",monospace}
+#portalWorkflow .corridor-trace p{margin-top:5px;color:#c2d2ca;font:11px/1.5 var(--mono)}
+#portalWorkflow .corridor-trace dl{display:grid;grid-template-columns:repeat(3,auto);gap:1px;margin:0;background:#35574b;border:1px solid #35574b}
+#portalWorkflow .corridor-trace dl>div{min-width:96px;padding:10px 12px;background:#102b22}
+#portalWorkflow .corridor-trace dt{color:#8da89b;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .corridor-trace dd{margin:6px 0 0;color:#fff;font:700 10px/1.4 var(--mono)}
+#portalWorkflow .corridor-trace dd[data-outcome="passed"]{color:#d9ff45}
+#portalWorkflow .corridor-trace dd[data-outcome="active"]{color:#d9ff45}
+#portalWorkflow .corridor-trace dd[data-outcome="review"]{color:#ffd876}
+#portalWorkflow .corridor-trace dd[data-outcome="blocked"]{color:#ffaaa5}
+#portalWorkflow .hard-gate{display:grid;grid-template-columns:minmax(190px,.8fr) auto minmax(260px,1.2fr);gap:16px;align-items:center;padding:14px 20px;background:#eff8e8;border-bottom:1px solid #d8e4d4;color:#17372d}
+#portalWorkflow .hard-gate small,#portalWorkflow .hard-gate b{display:block;font-family:"Press Start 2P",monospace}
+#portalWorkflow .hard-gate small{color:#65766d;font-size:5px;line-height:1.5}
+#portalWorkflow .hard-gate b{margin-top:5px;color:#17603d;font-size:6px;line-height:1.6}
+#portalWorkflow .hard-gate>span{padding:6px 8px;background:#fff;color:#17603d;border:1px solid #cbdcca;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .hard-gate>p{margin:0;color:#50645a;font:10px/1.55 var(--mono)}
+#portalWorkflow .hard-gate[data-state="review"]{background:#fff6dc;border-color:#ead7a4}
+#portalWorkflow .hard-gate[data-state="review"] b,#portalWorkflow .hard-gate[data-state="review"]>span{color:#74500b}
+#portalWorkflow .hard-gate[data-state="blocked"]{background:#fff0ef;border-color:#eccbc8}
+#portalWorkflow .hard-gate[data-state="blocked"] b,#portalWorkflow .hard-gate[data-state="blocked"]>span{color:#8c2b25}
+#portalWorkflow .decision-trace{margin:16px 18px 0;border:1px solid #dde5df;border-radius:8px;overflow:hidden;background:#fff}
+#portalWorkflow .decision-trace>header{display:flex;justify-content:space-between;gap:16px;padding:12px 14px;background:#f4f7f4;border-bottom:1px solid #dde5df}
+#portalWorkflow .decision-trace>header span,#portalWorkflow .decision-trace>header b{font:5px/1.6 "Press Start 2P",monospace}
+#portalWorkflow .decision-trace>header span{color:#17372d}
+#portalWorkflow .decision-trace>header b{color:#66776e}
+#portalWorkflow .obligation-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+#portalWorkflow .obligation-grid article{min-width:0;padding:14px;border-right:1px solid #e4eae4;border-bottom:1px solid #e4eae4}
+#portalWorkflow .obligation-grid article header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+#portalWorkflow .obligation-grid article b{color:#17372d;font:5px/1.6 "Press Start 2P",monospace}
+#portalWorkflow .obligation-grid article em{padding:4px;background:#edf3ee;color:#50665b;font:5px/1.5 "Press Start 2P",monospace;font-style:normal}
+#portalWorkflow .obligation-grid article[data-state="covered"] em{background:#dff5e7;color:#17603d}
+#portalWorkflow .obligation-grid article[data-state="blocked"] em{background:#ffe0de;color:#8c2b25}
+#portalWorkflow .obligation-grid article p{margin:9px 0;color:#51645a;font:10px/1.55 var(--mono)}
+#portalWorkflow .obligation-grid article small{color:#738179;font:8px/1.45 var(--mono)}
+#portalWorkflow .trace-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+#portalWorkflow .trace-grid>.decision-trace{margin-right:0}
+#portalWorkflow .trace-grid>.decision-trace+ .decision-trace{margin-left:10px;margin-right:18px}
+#portalWorkflow .source-observations,#portalWorkflow .responsibility-list{display:grid;gap:1px;background:#e4eae4}
+#portalWorkflow .source-observations>a,#portalWorkflow .source-observations>div,#portalWorkflow .responsibility-list>div{display:grid;gap:5px;padding:12px 14px;background:#fff;color:#17372d}
+#portalWorkflow .source-observations b,#portalWorkflow .responsibility-list b{font:700 10px/1.5 var(--mono)}
+#portalWorkflow .source-observations span,#portalWorkflow .responsibility-list p{margin:0;color:#65756c;font:9px/1.5 var(--mono)}
+#portalWorkflow .responsibility-list>div{grid-template-columns:minmax(0,1fr) auto}
+#portalWorkflow .responsibility-list span small{display:block;margin-top:4px;color:#718078;font:5px/1.4 "Press Start 2P",monospace}
+#portalWorkflow .responsibility-list em{font:5px/1.5 "Press Start 2P",monospace;font-style:normal;color:#74500b}
+#portalWorkflow .responsibility-list em[data-state="completed"]{color:#17603d}
+#portalWorkflow .responsibility-list p{grid-column:1/-1}
+#portalWorkflow .trace-empty{padding:14px;background:#fff;color:#718078;font:10px/1.55 var(--mono)}
+#portalWorkflow .payout-structure{margin-bottom:18px}
+#portalWorkflow .payout-plan{display:grid;grid-template-columns:1fr 1.2fr 1fr 1fr;gap:1px;background:#dfe6e0}
+#portalWorkflow .payout-plan>span,#portalWorkflow .fx-leg-list{min-width:0;padding:13px;background:#fff}
+#portalWorkflow .payout-plan small,#portalWorkflow .payout-plan b{display:block}
+#portalWorkflow .payout-plan small{color:#738179;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .payout-plan b{margin-top:7px;color:#17372d;font:700 10px/1.5 var(--mono)}
+#portalWorkflow .fx-leg-list{display:grid;gap:7px}
+#portalWorkflow .fx-leg-list>div{display:grid;grid-template-columns:24px 1fr;gap:8px;align-items:center}
+#portalWorkflow .fx-leg-list i{display:grid;place-items:center;width:22px;height:22px;background:#edf3ee;color:#17372d;font:700 8px var(--mono);font-style:normal}
+#portalWorkflow .fee-line{margin:0;padding:11px 14px;border-top:1px solid #e2e9e3;color:#64756b;font:9px/1.5 var(--mono)}
+#portalWorkflow .fee-line b{color:#17372d}
+#portalWorkflow .escrow-proof{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;padding:0;background:#35574b!important;color:#fff}
+#portalWorkflow .escrow-proof span{min-width:0;padding:13px;background:#17372d}
+#portalWorkflow .escrow-proof small,#portalWorkflow .escrow-proof b{display:block}
+#portalWorkflow .escrow-proof small{color:#9fb4a9;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .escrow-proof b{margin-top:6px;overflow:hidden;color:#fff;font:700 10px var(--mono);text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:1000px){#portalWorkflow .automation-stream.status-only{grid-template-columns:1fr 1fr}#portalWorkflow .automation-stream.status-only article{border-bottom:1px solid #e2e9e3}#portalWorkflow .corridor-trace{align-items:flex-start;flex-direction:column}#portalWorkflow .trace-grid{grid-template-columns:1fr}#portalWorkflow .trace-grid>.decision-trace+ .decision-trace{margin-left:18px}#portalWorkflow .payout-plan{grid-template-columns:1fr 1fr}}
+@media(max-width:620px){#portalWorkflow .automation-stream.status-only,#portalWorkflow .payout-plan,#portalWorkflow .escrow-proof,#portalWorkflow .hard-gate{grid-template-columns:1fr}#portalWorkflow .corridor-trace dl{width:100%;grid-template-columns:1fr}#portalWorkflow .trace-grid>.decision-trace{margin-left:12px;margin-right:12px}#portalWorkflow .trace-grid>.decision-trace+ .decision-trace{margin-left:12px;margin-right:12px}}

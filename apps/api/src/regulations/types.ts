@@ -2,9 +2,31 @@ export type RegulationAuthority =
   | 'RBI'
   | 'INDIA_INCOME_TAX'
   | 'EU'
-  | 'POLAND_MINISTRY_OF_FINANCE';
+  | 'EU_COUNCIL'
+  | 'POLAND_MINISTRY_OF_FINANCE'
+  | 'GERMAN_BAFIN'
+  | 'RUSSIA_CENTRAL_BANK'
+  | 'UK_FCA'
+  | 'UK_GOVERNMENT'
+  | 'UN_SECURITY_COUNCIL';
 
-export type RegulationCorridor = 'PL-IN-INWARD' | 'IN-GB-OUTWARD';
+export const REGULATION_COUNTRIES = ['PL', 'IN', 'GB', 'DE', 'RU', 'KP'] as const;
+export type RegulationCountry = typeof REGULATION_COUNTRIES[number];
+
+/**
+ * Complete ordered matrix for Anchor's six selectable countries. `INWARD` is
+ * reserved for routes whose payout jurisdiction is India; every other ordered
+ * payer route is represented as `OUTWARD`.
+ */
+export const REGULATION_CORRIDOR_MATRIX = [
+  'PL-IN-INWARD', 'PL-GB-OUTWARD', 'PL-DE-OUTWARD', 'PL-RU-OUTWARD', 'PL-KP-OUTWARD',
+  'IN-PL-OUTWARD', 'IN-GB-OUTWARD', 'IN-DE-OUTWARD', 'IN-RU-OUTWARD', 'IN-KP-OUTWARD',
+  'GB-PL-OUTWARD', 'GB-IN-INWARD', 'GB-DE-OUTWARD', 'GB-RU-OUTWARD', 'GB-KP-OUTWARD',
+  'DE-PL-OUTWARD', 'DE-IN-INWARD', 'DE-GB-OUTWARD', 'DE-RU-OUTWARD', 'DE-KP-OUTWARD',
+  'RU-PL-OUTWARD', 'RU-IN-INWARD', 'RU-GB-OUTWARD', 'RU-DE-OUTWARD', 'RU-KP-OUTWARD',
+  'KP-PL-OUTWARD', 'KP-IN-INWARD', 'KP-GB-OUTWARD', 'KP-DE-OUTWARD', 'KP-RU-OUTWARD',
+] as const;
+export type RegulationCorridor = typeof REGULATION_CORRIDOR_MATRIX[number];
 
 export interface RegulationChunk {
   readonly id: string;
@@ -23,7 +45,7 @@ export interface ApprovedRegulationSource {
   readonly id: string;
   readonly title: string;
   readonly authority: RegulationAuthority;
-  readonly jurisdiction: 'IN' | 'EU' | 'PL';
+  readonly jurisdiction: 'IN' | 'EU' | 'PL' | 'GB' | 'DE' | 'RU' | 'UN';
   readonly sourceUri: string;
   /** Optional official machine-readable endpoint used only for refresh. */
   readonly refreshUri?: string;

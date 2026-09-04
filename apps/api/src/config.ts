@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { EXECUTABLE_CORRIDOR_BOOKS } from './payments/providers.js';
 
 /**
  * Runtime configuration.
@@ -126,17 +127,18 @@ function loadAlgorandManifest(path: string | undefined): AlgorandDeploymentManif
     || typeof providers !== 'object' || providers === null || Array.isArray(providers)) {
     throw new Error('The Algorand deployment manifest is invalid.');
   }
+  const executableBooks: readonly string[] = EXECUTABLE_CORRIDOR_BOOKS;
   for (const [bookId, pair] of Object.entries(providers as Record<string, unknown>)) {
-    if (!['PL-IN-INWARD', 'IN-GB-OUTWARD'].includes(bookId)
+    if (!executableBooks.includes(bookId)
       || typeof pair !== 'object' || pair === null || Array.isArray(pair)
       || !address.test(String((pair as Record<string, unknown>)['originAddress']))
       || !address.test(String((pair as Record<string, unknown>)['destinationAddress']))) {
       throw new Error(`The Algorand provider mapping for ${bookId} is invalid.`);
     }
   }
-  if (!['PL-IN-INWARD', 'IN-GB-OUTWARD'].every((bookId) => Object.hasOwn(providers, bookId))
-    || Object.keys(providers).length !== 2) {
-    throw new Error('The Algorand deployment manifest must map both supported corridor books exactly once.');
+  if (!executableBooks.every((bookId) => Object.hasOwn(providers, bookId))
+    || Object.keys(providers).length !== executableBooks.length) {
+    throw new Error('The Algorand deployment manifest must map every supported corridor book exactly once.');
   }
   return parsed as AlgorandDeploymentManifest;
 }

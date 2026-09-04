@@ -1,9 +1,10 @@
 /**
  * Demonstration seed.
  *
- * Creates the two journeys the prototype demonstrates - a Polish company paying
- * an Indian freelancer, and an Indian company paying a United Kingdom supplier -
- * with real signed `did:key` credentials generated at run time.
+ * Creates country-matched companies and freelancers for every country in the
+ * six-country policy matrix, including the two flagship executable journeys,
+ * with real signed `did:key` credentials generated at run time. Review-only
+ * and blocked identities exist solely to demonstrate their backend gates.
  *
  * No key material is committed: the issuer keypair is generated in process on
  * every start and never written to disk or returned by a route.
@@ -25,10 +26,20 @@ export interface SeededParty {
 
 export interface SeedResult {
   readonly polishCompany: SeededParty;
+  readonly polishFreelancer: SeededParty;
   readonly indianFreelancer: SeededParty;
   readonly indianFreelancers: readonly SeededParty[];
   readonly indianCompany: SeededParty;
+  readonly ukCompany: SeededParty;
+  readonly ukFreelancer: SeededParty;
+  readonly ukFreelancers: readonly SeededParty[];
   readonly ukSupplier: SeededParty;
+  readonly germanCompany: SeededParty;
+  readonly germanFreelancer: SeededParty;
+  readonly russianCompany: SeededParty;
+  readonly russianFreelancer: SeededParty;
+  readonly northKoreanCompany: SeededParty;
+  readonly northKoreanFreelancer: SeededParty;
   readonly providerOperator: SeededParty;
   readonly platformAdmin: SeededParty;
   readonly issuerDid: string;
@@ -55,6 +66,17 @@ const PARTIES: readonly PartySpec[] = [
     userId: 'USER-PL-BUYER',
     displayName: 'Warsaw engineering lead',
     roles: ['company_member'],
+    assuranceLevel: 'ENHANCED',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-PL-TALENT',
+    legalName: 'Wisla Digital Studio',
+    country: 'PL',
+    kind: 'FREELANCER',
+    userId: 'USER-PL-FREELANCER',
+    displayName: 'Krakow contract engineer',
+    roles: ['freelancer'],
     assuranceLevel: 'ENHANCED',
     credential: true,
   },
@@ -103,6 +125,50 @@ const PARTIES: readonly PartySpec[] = [
     credential: true,
   },
   {
+    organizationId: 'ORG-GB-TALENT',
+    legalName: 'Rowan Ellis Digital Ltd.',
+    country: 'GB',
+    kind: 'FREELANCER',
+    userId: 'USER-GB-FREELANCER',
+    displayName: 'Manchester contract engineer',
+    roles: ['freelancer'],
+    assuranceLevel: 'ENHANCED',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-GB-COMPANY',
+    legalName: 'Thames Product Systems Ltd.',
+    country: 'GB',
+    kind: 'COMPANY',
+    userId: 'USER-GB-BUYER',
+    displayName: 'London product lead',
+    roles: ['company_member'],
+    assuranceLevel: 'ENHANCED',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-GB-TALENT-2',
+    legalName: 'Ada North Software Studio Ltd.',
+    country: 'GB',
+    kind: 'FREELANCER',
+    userId: 'USER-GB-FREELANCER-2',
+    displayName: 'London platform specialist',
+    roles: ['freelancer'],
+    assuranceLevel: 'BASIC',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-GB-TALENT-3',
+    legalName: 'Caledonia Systems Consulting Ltd.',
+    country: 'GB',
+    kind: 'FREELANCER',
+    userId: 'USER-GB-FREELANCER-3',
+    displayName: 'Edinburgh distributed-systems engineer',
+    roles: ['freelancer'],
+    assuranceLevel: 'ENHANCED',
+    credential: true,
+  },
+  {
     organizationId: 'ORG-GB-SUPPLIER',
     legalName: 'Pennine Optics Ltd.',
     country: 'GB',
@@ -110,6 +176,72 @@ const PARTIES: readonly PartySpec[] = [
     userId: 'USER-GB-SUPPLIER',
     displayName: 'Leeds account manager',
     roles: ['supplier'],
+    assuranceLevel: 'ENHANCED',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-DE-COMPANY',
+    legalName: 'Rheinland Software GmbH',
+    country: 'DE',
+    kind: 'COMPANY',
+    userId: 'USER-DE-BUYER',
+    displayName: 'Cologne engineering lead',
+    roles: ['company_member'],
+    assuranceLevel: 'ENHANCED',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-DE-TALENT',
+    legalName: 'Elbe Digital Engineering',
+    country: 'DE',
+    kind: 'FREELANCER',
+    userId: 'USER-DE-FREELANCER',
+    displayName: 'Hamburg contract engineer',
+    roles: ['freelancer'],
+    assuranceLevel: 'ENHANCED',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-RU-COMPANY',
+    legalName: 'Northern Research Systems Demo',
+    country: 'RU',
+    kind: 'COMPANY',
+    userId: 'USER-RU-BUYER',
+    displayName: 'Russia demo company operator',
+    roles: ['company_member'],
+    assuranceLevel: 'ENHANCED',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-RU-TALENT',
+    legalName: 'Northern Digital Services Demo',
+    country: 'RU',
+    kind: 'FREELANCER',
+    userId: 'USER-RU-FREELANCER',
+    displayName: 'Russia demo freelancer',
+    roles: ['freelancer'],
+    assuranceLevel: 'ENHANCED',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-KP-COMPANY',
+    legalName: 'DPRK Blocked-Route Company Demo',
+    country: 'KP',
+    kind: 'COMPANY',
+    userId: 'USER-KP-BUYER',
+    displayName: 'DPRK blocked-route company',
+    roles: ['company_member'],
+    assuranceLevel: 'ENHANCED',
+    credential: true,
+  },
+  {
+    organizationId: 'ORG-KP-TALENT',
+    legalName: 'DPRK Blocked-Route Freelancer Demo',
+    country: 'KP',
+    kind: 'FREELANCER',
+    userId: 'USER-KP-FREELANCER',
+    displayName: 'DPRK blocked-route freelancer',
+    roles: ['freelancer'],
     assuranceLevel: 'ENHANCED',
     credential: true,
   },
@@ -211,12 +343,27 @@ export async function seedDemo(context: AppContext): Promise<SeedResult> {
     seeded.get('ORG-IN-TALENT-2')!,
     seeded.get('ORG-IN-TALENT-3')!,
   ];
+  const ukFreelancers = [
+    seeded.get('ORG-GB-TALENT')!,
+    seeded.get('ORG-GB-TALENT-2')!,
+    seeded.get('ORG-GB-TALENT-3')!,
+  ];
   return {
     polishCompany: seeded.get('ORG-PL-NOVA')!,
+    polishFreelancer: seeded.get('ORG-PL-TALENT')!,
     indianFreelancer: indianFreelancers[0]!,
     indianFreelancers,
     indianCompany: seeded.get('ORG-IN-IMPORTER')!,
+    ukCompany: seeded.get('ORG-GB-COMPANY')!,
+    ukFreelancer: ukFreelancers[0]!,
+    ukFreelancers,
     ukSupplier: seeded.get('ORG-GB-SUPPLIER')!,
+    germanCompany: seeded.get('ORG-DE-COMPANY')!,
+    germanFreelancer: seeded.get('ORG-DE-TALENT')!,
+    russianCompany: seeded.get('ORG-RU-COMPANY')!,
+    russianFreelancer: seeded.get('ORG-RU-TALENT')!,
+    northKoreanCompany: seeded.get('ORG-KP-COMPANY')!,
+    northKoreanFreelancer: seeded.get('ORG-KP-TALENT')!,
     providerOperator: seeded.get('ORG-OPTIWORK-OPS')!,
     platformAdmin: seeded.get('ORG-OPTIWORK-ADMIN')!,
     issuerDid: issuer.issuerDid,

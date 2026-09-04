@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
+import { EXECUTABLE_CORRIDOR_BOOKS } from '../src/payments/providers.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -21,10 +22,9 @@ async function manifest(overrides: Record<string, unknown> = {}): Promise<string
     applicationId: '1001',
     assetId: 1002,
     executorAddress: 'A'.repeat(58),
-    providers: {
-      'PL-IN-INWARD': { originAddress: 'B'.repeat(58), destinationAddress: 'C'.repeat(58) },
-      'IN-GB-OUTWARD': { originAddress: 'D'.repeat(58), destinationAddress: 'E'.repeat(58) },
-    },
+    providers: Object.fromEntries(EXECUTABLE_CORRIDOR_BOOKS.map((bookId) => [bookId, {
+      originAddress: 'B'.repeat(58), destinationAddress: 'C'.repeat(58),
+    }])),
     ...overrides,
   }));
   return path;
@@ -46,6 +46,13 @@ function environment(path: string, overrides: NodeJS.ProcessEnv = {}): NodeJS.Pr
 }
 
 describe('API Algorand deployment manifest', () => {
+  it('accepts exactly the ACTIVE provider books', async () => {
+    const path = await manifest();
+    const config = loadConfig(environment(path));
+    expect(Object.keys(config.algorand.deployment!.providers).sort())
+      .toEqual([...EXECUTABLE_CORRIDOR_BOOKS].sort());
+  });
+
   it('requires a provider pair for each supported corridor', async () => {
     const path = await manifest({
       providers: {
@@ -53,12 +60,25 @@ describe('API Algorand deployment manifest', () => {
       },
     });
 
-    expect(() => loadConfig(environment(path))).toThrow(/both supported corridor books/iu);
+    expect(() => loadConfig(environment(path))).toThrow(/every supported corridor book/iu);
   });
 
   it('rejects a deployment from another Algorand network', async () => {
     const path = await manifest({ network: 'testnet' });
 
     expect(() => loadConfig(environment(path))).toThrow(/network does not match/iu);
+  });
+
+  it('rejects a manifest that tries to make a review-only book executable', async () => {
+    const active = Object.fromEntries(EXECUTABLE_CORRIDOR_BOOKS.map((bookId) => [bookId, {
+      originAddress: 'B'.repeat(58), destinationAddress: 'C'.repeat(58),
+    }]));
+    const path = await manifest({
+      providers: {
+        ...active,
+        'PL-RU-OUTWARD': { originAddress: 'F'.repeat(58), destinationAddress: 'G'.repeat(58) },
+      },
+    });
+    expect(() => loadConfig(environment(path))).toThrow(/PL-RU-OUTWARD is invalid/u);
   });
 });

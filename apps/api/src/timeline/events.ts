@@ -14,6 +14,7 @@ import type { DataStore } from '../db/store.js';
 import type { Clock, IdGenerator } from '../runtime.js';
 
 export type TimelineKind =
+  | 'COMPANY_POLICY_APPROVED'
   | 'JOB_POSTED'
   | 'APPLICATION_SUBMITTED'
   | 'APPLICATION_EVALUATED'

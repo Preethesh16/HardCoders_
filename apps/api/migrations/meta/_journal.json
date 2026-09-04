@@ -36,6 +36,20 @@
       "when": 1788438808995,
       "tag": "0004_role_workflow",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788438809995,
+      "tag": "0005_dynamic_deal_corridor",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788438810995,
+      "tag": "0006_company_policy_profiles",
+      "breakpoints": true
     }
   ]
 }

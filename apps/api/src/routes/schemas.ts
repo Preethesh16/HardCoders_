@@ -39,11 +39,16 @@ export const CreateJobBody = Type.Object({
     uniqueItems: true,
   })),
   targetDeliveryDate: Type.Optional(Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })),
+  payerCountry: CountryCodeSchema,
+  fundingCurrency: CurrencySchema,
   destinationCountry: CountryCodeSchema,
   budget: MoneyInput,
 }, { additionalProperties: false });
 
 export const CreateApplicationBody = Type.Object({
+  residenceCountry: CountryCodeSchema,
+  payoutCountry: CountryCodeSchema,
+  payoutCurrency: CurrencySchema,
   coverLetter: Type.String({ minLength: 20, maxLength: 8_000 }),
   approach: Type.Optional(Type.String({ minLength: 20, maxLength: 8_000 })),
   proposedSkills: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 64 }), {
@@ -59,10 +64,30 @@ export const CreateApplicationBody = Type.Object({
 }, { additionalProperties: false });
 
 export const ExtractFormBody = Type.Object({
-  purpose: Type.Union([Type.Literal('JOB_BRIEF'), Type.Literal('FREELANCER_PROPOSAL'), Type.Literal('AGREEMENT_TERMS')]),
+  purpose: Type.Union([Type.Literal('COMPANY_POLICY'), Type.Literal('JOB_BRIEF'), Type.Literal('FREELANCER_PROPOSAL'), Type.Literal('AGREEMENT_TERMS')]),
   fileName: Type.String({ minLength: 1, maxLength: 200 }),
   contentType: Type.String({ minLength: 3, maxLength: 128 }),
   contentBase64: Type.String({ minLength: 4, maxLength: 11_200_000 }),
+}, { additionalProperties: false });
+
+const PolicyList = Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
+  minItems: 1,
+  maxItems: 32,
+  uniqueItems: true,
+});
+
+export const SaveCompanyPolicyProfileBody = Type.Object({
+  companyCountry: CountryCodeSchema,
+  fundingCurrency: CurrencySchema,
+  fileName: Type.String({ minLength: 1, maxLength: 200 }),
+  contentType: Type.String({ minLength: 3, maxLength: 128 }),
+  contentBase64: Type.String({ minLength: 4, maxLength: 11_200_000 }),
+  policies: PolicyList,
+  legalClauses: PolicyList,
+  commercialStandards: PolicyList,
+  authorizedApprovers: PolicyList,
+  extractionSource: Type.Union([Type.Literal('OPENAI'), Type.Literal('FIXTURE')]),
+  extractionModel: Type.String({ minLength: 1, maxLength: 64 }),
 }, { additionalProperties: false });
 
 export const EvaluateApplicationBody = Type.Object({
@@ -85,18 +110,10 @@ const AgreementTermList = Type.Array(Type.String({ minLength: 2, maxLength: 2_00
 });
 
 export const PrepareAgreementBody = Type.Object({
-  policies: AgreementTermList,
-  legalClauses: Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
-    minItems: 1,
-    maxItems: 32,
-    uniqueItems: true,
-  }),
-  acceptanceCriteria: Type.Array(Type.String({ minLength: 2, maxLength: 2_000 }), {
-    minItems: 1,
-    maxItems: 32,
-    uniqueItems: true,
-  }),
-  commercialTerms: AgreementTermList,
+  policies: Type.Optional(AgreementTermList),
+  legalClauses: Type.Optional(AgreementTermList),
+  acceptanceCriteria: Type.Optional(AgreementTermList),
+  commercialTerms: Type.Optional(AgreementTermList),
 }, { additionalProperties: false });
 
 export const VerifyCredentialBody = Type.Object({
@@ -111,6 +128,22 @@ export const VerifyCredentialBody = Type.Object({
 export const ResolveCorridorBody = Type.Object({
   originCountry: CountryCodeSchema,
   destinationCountry: CountryCodeSchema,
+}, { additionalProperties: false });
+
+export const PreviewComplianceBody = Type.Object({
+  originCountry: CountryCodeSchema,
+  destinationCountry: CountryCodeSchema,
+  inrEquivalentMinor: UnsignedIntegerStringSchema,
+  providedDocuments: Type.Array(IdentifierSchema, { maxItems: 32, uniqueItems: true }),
+  purposeCode: Type.Optional(IdentifierSchema),
+  originAssuranceLevel: Type.Optional(Type.Union([Type.Literal('BASIC'), Type.Literal('ENHANCED')])),
+  destinationAssuranceLevel: Type.Optional(Type.Union([Type.Literal('BASIC'), Type.Literal('ENHANCED')])),
+  riskSignals: Type.Optional(Type.Array(Type.Union([
+    Type.Literal('SANCTIONS_PARTY_MATCH'),
+    Type.Literal('RESTRICTED_BANK_MATCH'),
+    Type.Literal('PROHIBITED_GOODS_OR_SERVICES'),
+  ]), { maxItems: 3, uniqueItems: true })),
+  fundingAmountMinor: Type.Optional(UnsignedIntegerStringSchema),
 }, { additionalProperties: false });
 
 export const CreateQuoteBody = Type.Object({
@@ -148,16 +181,10 @@ export const SupplierPaymentBody = Type.Object({
   fundingAmount: MoneyInput,
   invoiceReference: Type.String({ minLength: 3, maxLength: 128 }),
   documents: Type.Array(Type.Object({
-    code: Type.Union([
-      Type.Literal('INVOICE'),
-      Type.Literal('FORM_A2_DEMO'),
-      Type.Literal('TAX_REVIEW_DEMO'),
-      Type.Literal('IMPORT_EVIDENCE'),
-      Type.Literal('BUYER_DUE_DILIGENCE'),
-    ]),
+    code: IdentifierSchema,
     contentType: Type.String({ minLength: 3, maxLength: 128 }),
     contentBase64: Type.String({ minLength: 4, maxLength: 8_000_000 }),
-  }, { additionalProperties: false }), { minItems: 1, maxItems: 8 }),
+  }, { additionalProperties: false }), { minItems: 1, maxItems: 32 }),
 }, { additionalProperties: false });
 
 export const RecordDocumentBody = Type.Object({

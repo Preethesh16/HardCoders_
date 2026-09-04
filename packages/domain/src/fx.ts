@@ -19,6 +19,11 @@ export const demoFxRates: Readonly<Record<string, FxQuoteRates>> = {
     usdToPayout: { units: 790_000n, scale: 6 },
     provider: 'FRANKFURTER_REFERENCE_FIXTURE',
   },
+  'PL-GB-OUTWARD-v1': {
+    fundingToUsd: { units: 250_000n, scale: 6 },
+    usdToPayout: { units: 790_000n, scale: 6 },
+    provider: 'FRANKFURTER_REFERENCE_FIXTURE',
+  },
 };
 
 function subtractBasisPoints(money: MoneyDto, bps: number): { net: MoneyDto; fee: MoneyDto } {

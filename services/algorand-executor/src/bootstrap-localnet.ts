@@ -139,10 +139,29 @@ const manifest = {
       originAddress: accounts.inwardOrigin.addr.toString(),
       destinationAddress: accounts.inwardDestination.addr.toString(),
     },
+    "GB-IN-INWARD": {
+      originAddress: accounts.inwardOrigin.addr.toString(),
+      destinationAddress: accounts.inwardDestination.addr.toString(),
+    },
+    "DE-IN-INWARD": {
+      originAddress: accounts.inwardOrigin.addr.toString(),
+      destinationAddress: accounts.inwardDestination.addr.toString(),
+    },
     "IN-GB-OUTWARD": {
       originAddress: accounts.outwardOrigin.addr.toString(),
       destinationAddress: accounts.outwardDestination.addr.toString(),
     },
+    "PL-GB-OUTWARD": {
+      originAddress: accounts.outwardOrigin.addr.toString(),
+      destinationAddress: accounts.outwardDestination.addr.toString(),
+    },
+    "PL-DE-OUTWARD": { originAddress: accounts.outwardOrigin.addr.toString(), destinationAddress: accounts.outwardDestination.addr.toString() },
+    "IN-PL-OUTWARD": { originAddress: accounts.outwardOrigin.addr.toString(), destinationAddress: accounts.outwardDestination.addr.toString() },
+    "IN-DE-OUTWARD": { originAddress: accounts.outwardOrigin.addr.toString(), destinationAddress: accounts.outwardDestination.addr.toString() },
+    "GB-PL-OUTWARD": { originAddress: accounts.outwardOrigin.addr.toString(), destinationAddress: accounts.outwardDestination.addr.toString() },
+    "GB-DE-OUTWARD": { originAddress: accounts.outwardOrigin.addr.toString(), destinationAddress: accounts.outwardDestination.addr.toString() },
+    "DE-PL-OUTWARD": { originAddress: accounts.outwardOrigin.addr.toString(), destinationAddress: accounts.outwardDestination.addr.toString() },
+    "DE-GB-OUTWARD": { originAddress: accounts.outwardOrigin.addr.toString(), destinationAddress: accounts.outwardDestination.addr.toString() },
   },
   valueStatement: "Zero-value LocalNet demonstration asset. Not redeemable and has no monetary value.",
 };

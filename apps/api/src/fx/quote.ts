@@ -137,7 +137,9 @@ export function buildQuote(input: BuildQuoteInput): FxQuoteRecord {
     payoutAmount,
     legs,
     fees,
-    provider: input.provider ?? 'OPTIWORK_SIMULATED_PROVIDER',
+    provider: input.provider ?? (rates.source.startsWith('FRANKFURTER_ECB_')
+      ? 'FRANKFURTER_ECB_REFERENCE'
+      : 'OPTIWORK_FIXTURE_PROVIDER'),
     rateSource: rates.source,
     rateObservedAt: rates.observedAt,
     feeScheduleVersion: FEE_SCHEDULE_VERSION,
@@ -156,6 +158,76 @@ export function quoteIsCurrent(quote: { expiresAt: string }, at: Date): boolean 
 export function assertQuoteCurrent(quote: { id: string; expiresAt: string }, at: Date): void {
   if (!quoteIsCurrent(quote, at)) {
     throw unprocessable(`FX quote ${quote.id} expired at ${quote.expiresAt}.`, { expiresAt: quote.expiresAt });
+  }
+}
+
+function sameMoney(left: Money, right: Money): boolean {
+  return left.amountMinor === right.amountMinor
+    && left.currency === right.currency
+    && left.scale === right.scale;
+}
+
+/**
+ * Refuses a persisted quote whose hash or internal money chain no longer
+ * matches the object originally produced by the quote builder.
+ */
+export function assertQuoteIntegrity(quote: FxQuoteRecord): void {
+  const { canonicalHash: expectedHash, ...unsigned } = quote;
+  if (canonicalHash(unsigned) !== expectedHash) {
+    throw unprocessable(`FX quote ${quote.id} does not match its canonical commitment.`);
+  }
+  const quotedAt = Date.parse(quote.quotedAt);
+  const observedAt = Date.parse(quote.rateObservedAt);
+  const expiresAt = Date.parse(quote.expiresAt);
+  if (![quotedAt, observedAt, expiresAt].every(Number.isFinite)
+    || expiresAt <= quotedAt
+    || observedAt > quotedAt) {
+    throw unprocessable(`FX quote ${quote.id} has invalid provenance timestamps.`);
+  }
+  const [originLeg, payoutLeg] = quote.legs;
+  if (quote.legs.length !== 2
+    || originLeg?.ordinal !== 1
+    || payoutLeg?.ordinal !== 2
+    || !sameMoney(originLeg.from, quote.fundingAmount)
+    || !sameMoney(originLeg.to, quote.grossSettlementAmount)
+    || !sameMoney(payoutLeg.from, quote.settlementAmount)
+    || !sameMoney(payoutLeg.to, quote.grossPayoutAmount)
+    || quote.settlementAmount.currency !== 'USD'
+    || quote.settlementAmount.scale !== SETTLEMENT_SCALE
+    || quote.executable !== false
+    || quote.provider.trim() === ''
+    || quote.rateSource.trim() === '') {
+    throw unprocessable(`FX quote ${quote.id} has inconsistent legs or settlement denomination.`);
+  }
+  let expectedGrossSettlement: Money;
+  let expectedGrossPayout: Money;
+  try {
+    expectedGrossSettlement = convertMoney(quote.fundingAmount, 'USD', SETTLEMENT_SCALE, {
+      units: BigInt(originLeg.rateUnits), scale: originLeg.rateScale,
+    });
+    expectedGrossPayout = convertMoney(quote.settlementAmount, quote.payoutAmount.currency, quote.payoutAmount.scale, {
+      units: BigInt(payoutLeg.rateUnits), scale: payoutLeg.rateScale,
+    });
+  } catch {
+    throw unprocessable(`FX quote ${quote.id} contains an invalid scaled rate.`);
+  }
+  const [originFee, destinationFee] = quote.fees;
+  if (originLeg.pair !== `${quote.fundingAmount.currency}/USD`
+    || payoutLeg.pair !== `USD/${quote.payoutAmount.currency}`
+    || !sameMoney(expectedGrossSettlement, quote.grossSettlementAmount)
+    || !sameMoney(expectedGrossPayout, quote.grossPayoutAmount)
+    || quote.fees.length !== 2
+    || originFee?.code !== 'ORIGIN_AND_PLATFORM'
+    || originFee.basisPoints !== ORIGIN_FEE_BASIS_POINTS
+    || !sameMoney(originFee.amount, basisPointFee(quote.grossSettlementAmount, ORIGIN_FEE_BASIS_POINTS))
+    || BigInt(quote.settlementAmount.amountMinor) + BigInt(originFee.amount.amountMinor)
+      !== BigInt(quote.grossSettlementAmount.amountMinor)
+    || destinationFee?.code !== 'DESTINATION_OFFRAMP'
+    || destinationFee.basisPoints !== DESTINATION_FEE_BASIS_POINTS
+    || !sameMoney(destinationFee.amount, basisPointFee(quote.grossPayoutAmount, DESTINATION_FEE_BASIS_POINTS))
+    || BigInt(quote.payoutAmount.amountMinor) + BigInt(destinationFee.amount.amountMinor)
+      !== BigInt(quote.grossPayoutAmount.amountMinor)) {
+    throw unprocessable(`FX quote ${quote.id} does not conserve money across rates and fees.`);
   }
 }
 

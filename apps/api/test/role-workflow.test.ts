@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, createHarness, type Harness } from './harness.js';
-import { uploadedObjects, workContracts } from '../src/db/schema.js';
+import { companyPolicyProfiles, credentials, organizations, uploadedObjects, workContracts } from '../src/db/schema.js';
 import { sha256Bytes } from '../src/runtime.js';
 
 let harness: Harness | undefined;
@@ -20,6 +20,8 @@ async function hiringScenario(current: Harness) {
       skills: ['typescript', 'algorand', 'fabric'],
       acceptanceCriteria: ['All API and LocalNet acceptance tests pass.', 'A reviewer can trace both ledger proofs.'],
       targetDeliveryDate: '2026-10-31',
+      payerCountry: 'PL',
+      fundingCurrency: 'PLN',
       destinationCountry: 'IN',
       budget: { amountMinor: '1500000', currency: 'PLN', scale: 2 },
     },
@@ -50,6 +52,9 @@ async function hiringScenario(current: Harness) {
       token: freelancer.token,
       idempotencyKey: `roles-apply-${index + 1}`,
       body: {
+        residenceCountry: 'IN',
+        payoutCountry: 'IN',
+        payoutCurrency: 'INR',
         coverLetter: `Proposal ${index + 1} demonstrates relevant TypeScript, Fabric, and Algorand delivery experience.`,
         approach: proposal.approach,
         proposedSkills: proposal.skills,
@@ -83,6 +88,32 @@ describe('role-specific hiring workflow', () => {
       expect(mine.status).toBe(200);
       expect(mine.body.applications).toHaveLength(1);
       expect(mine.body.applications[0].application.applicantUserId).toBe(freelancer.principal.subject);
+    }
+  });
+
+  it('exposes country-matched signed company and freelancer identities for all six matrix countries', async () => {
+    harness = await createHarness();
+    const current = harness;
+    const principals = await call(current, 'GET', '/v1/demo/principals', {
+      token: current.seed.platformAdmin.token,
+    });
+    expect(principals.status).toBe(200);
+    for (const country of ['PL', 'IN', 'GB', 'DE', 'RU', 'KP']) {
+      const countryParties = principals.body.parties.filter((party: { principal: { organizationId: string } }) =>
+        party.principal.organizationId.includes(`-${country}-`));
+      expect(countryParties.some((party: { principal: { roles: string[] } }) =>
+        party.principal.roles.includes('company_member'))).toBe(true);
+      expect(countryParties.some((party: { principal: { roles: string[] } }) =>
+        party.principal.roles.includes('freelancer'))).toBe(true);
+      expect(countryParties.every((party: { credentialId: string }) => party.credentialId.length > 0)).toBe(true);
+      for (const party of countryParties as Array<{
+        credentialId: string; principal: { organizationId: string };
+      }>) {
+        const credential = await current.context.store.findOne(credentials, { id: party.credentialId });
+        const organization = await current.context.store.findOne(organizations, { id: party.principal.organizationId });
+        expect(credential?.country).toBe(country);
+        expect(organization?.country).toBe(country);
+      }
     }
   });
 
@@ -195,6 +226,53 @@ describe('role-specific hiring workflow', () => {
       },
     });
     expect(lateReplacement.status).toBe(409);
+  });
+
+  it('reuses a human-approved company policy profile and attributes every generated agreement clause', async () => {
+    harness = await createHarness();
+    const current = harness;
+    const policyBytes = Buffer.from('Approved Northstar company policy version 1', 'utf8');
+    const onboarded = await call(current, 'POST', '/v1/company/policy-profile', {
+      token: current.seed.polishCompany.token,
+      idempotencyKey: 'roles-company-policy-1',
+      body: {
+        companyCountry: 'PL', fundingCurrency: 'PLN',
+        fileName: 'northstar-company-policy.pdf', contentType: 'application/pdf',
+        contentBase64: policyBytes.toString('base64'),
+        policies: ['Confidential project information remains private to authorized contract participants.'],
+        legalClauses: ['Polish law governs the agreement and disputes follow the documented escalation procedure.'],
+        commercialStandards: ['One evidence-backed revision is included before final acceptance.'],
+        authorizedApprovers: ['Procurement Director', 'Engineering Director'],
+        extractionSource: 'OPENAI', extractionModel: 'gpt-test',
+      },
+    });
+    expect(onboarded.status).toBe(201);
+    expect(onboarded.body.profile).toMatchObject({ country: 'PL', fundingCurrency: 'PLN', version: 1 });
+
+    const { job, applications } = await hiringScenario(current);
+    const selected = await call(current, 'POST', `/v1/applications/${applications[0]!.id}/select`, {
+      token: current.seed.polishCompany.token,
+      idempotencyKey: 'roles-select-sourced-agreement',
+      body: { amount: { amountMinor: '1420000', currency: 'PLN', scale: 2 } },
+    });
+    const prepared = await call(current, 'POST', `/v1/contracts/${selected.body.id}/agreement`, {
+      token: current.seed.polishCompany.token,
+      idempotencyKey: 'roles-generate-sourced-agreement',
+      body: {},
+    });
+    expect(prepared.status).toBe(200);
+    expect(prepared.body.contract.agreementTerms.policies).toContain(
+      'Confidential project information remains private to authorized contract participants.',
+    );
+    expect(prepared.body.contract.agreementTerms.acceptanceCriteria).toEqual(job.acceptanceCriteria);
+    expect(prepared.body.contract.agreementTerms.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceType: 'COMPANY_POLICY', sourceRef: onboarded.body.profile.id }),
+      expect.objectContaining({ sourceType: 'JOB_BRIEF', sourceRef: job.id }),
+      expect.objectContaining({ sourceType: 'FREELANCER_PROPOSAL', sourceRef: applications[0]!.id }),
+    ]));
+    const storedProfile = await current.context.store.findOne(companyPolicyProfiles, { id: onboarded.body.profile.id });
+    const sourceObject = await current.context.store.findOne(uploadedObjects, { id: storedProfile!.sourceObjectId });
+    expect(Buffer.from(await current.context.objects.get(sourceObject!.objectKey))).toEqual(policyBytes);
   });
 
   it('accepts an arbitrary deliverable MIME type but only from the selected provider', async () => {

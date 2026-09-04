@@ -17,11 +17,17 @@ const jobText = [
   'Skills: TypeScript, PostgreSQL, reconciliation',
   'Budget PLN: 12000',
   'Delivery date: 2026-10-15',
+  'Payer country: Poland',
+  'Funding currency: PLN',
+  'Destination country: India',
 ].join('\n');
 
 const proposalText = [
   'Proposed price PLN: 10800',
   'Delivery days: 18',
+  'Tax residence: India',
+  'Payout country: India',
+  'Payout currency: INR',
   'Availability: Available immediately for 30 hours per week',
   'Approach: Model the settlement events, implement the exception queue, then prove recovery with integration tests.',
   'Cover letter: I have delivered TypeScript payment services and PostgreSQL reconciliation systems for regulated teams.',
@@ -32,6 +38,15 @@ const agreementText = [
   'Acceptance criteria: All automated tests pass; Fabric and Algorand references reconcile; operating runbook is delivered',
   'Company policies: Repository access follows least privilege; confidential data remains private; no PII may be written to either ledger',
   'Legal clauses: Pre-existing IP remains with its owner; accepted deliverables transfer to the company; disputes follow the agreement procedure',
+].join('\n');
+
+const companyPolicyText = [
+  'Company country: Poland',
+  'Funding currency: PLN',
+  'Company policies: Confidential data remains private; repository access follows least privilege',
+  'Legal clauses: Polish law governs the agreement; disputes follow escalation then Warsaw arbitration',
+  'Commercial standards: Invoices are issued after acceptance; one evidence-backed revision is included',
+  'Authorized approvers: Procurement Director; Engineering Director',
 ].join('\n');
 
 describe('document-to-form extraction', () => {
@@ -46,14 +61,23 @@ describe('document-to-form extraction', () => {
     const agreement = await extractFormDraft(config, {
       purpose: 'AGREEMENT_TERMS', fileName: 'commercial-terms.txt', contentType: 'text/plain', contentBase64: base64(agreementText),
     });
+    const companyPolicy = await extractFormDraft(config, {
+      purpose: 'COMPANY_POLICY', fileName: 'company-policy.txt', contentType: 'text/plain', contentBase64: base64(companyPolicyText),
+    });
 
     expect(job).toMatchObject({
       source: 'FIXTURE', reviewRequired: true,
-      fields: { title: 'Build an auditable settlement monitor', budgetPln: 12000, destinationCountry: 'IN' },
+      fields: {
+        title: 'Build an auditable settlement monitor', budgetPln: 12000,
+        payerCountry: 'PL', fundingCurrency: 'PLN', destinationCountry: 'IN',
+      },
     });
     expect(proposal).toMatchObject({
       source: 'FIXTURE', reviewRequired: true,
-      fields: { proposedPricePln: 10800, deliveryDays: 18 },
+      fields: {
+        proposedPricePln: 10800, deliveryDays: 18,
+        residenceCountry: 'IN', payoutCountry: 'IN', payoutCurrency: 'INR',
+      },
     });
     expect(agreement).toMatchObject({
       source: 'FIXTURE', reviewRequired: true,
@@ -62,6 +86,29 @@ describe('document-to-form extraction', () => {
         legalClauses: expect.arrayContaining(['Pre-existing IP remains with its owner']),
       },
     });
+    expect(companyPolicy).toMatchObject({
+      source: 'FIXTURE', reviewRequired: true,
+      fields: {
+        companyCountry: 'PL', fundingCurrency: 'PLN',
+        policies: ['Confidential data remains private', 'repository access follows least privilege'],
+        authorizedApprovers: ['Procurement Director', 'Engineering Director'],
+      },
+    });
+  });
+
+  it('extracts amounts labeled in the selected route currencies without assuming PLN', async () => {
+    const config = { mode: 'fixture', baseUrl: 'https://api.openai.com/v1', model: 'fixture' } as const;
+    const job = await extractFormDraft(config, {
+      purpose: 'JOB_BRIEF', fileName: 'brief.txt', contentType: 'text/plain',
+      contentBase64: base64('Title: UK delivery\nDescription: A sufficiently detailed delivery brief for testing.\nBudget INR: 250000'),
+    });
+    const proposal = await extractFormDraft(config, {
+      purpose: 'FREELANCER_PROPOSAL', fileName: 'proposal.txt', contentType: 'text/plain',
+      contentBase64: base64('Proposed price INR: 240000\nDelivery days: 15'),
+    });
+
+    expect(job.fields).toMatchObject({ budgetPln: 250000 });
+    expect(proposal.fields).toMatchObject({ proposedPricePln: 240000 });
   });
 
   it('sends the document as a Responses API file input and requests strict structured output', async () => {
@@ -73,7 +120,7 @@ describe('document-to-form extraction', () => {
         output_text: JSON.stringify({
           title: 'Extracted brief', description: 'A sufficiently detailed extracted work description.',
           acceptanceCriteria: ['Tests pass'], skills: ['TypeScript'], budgetPln: 9000,
-          deliveryDate: '2026-10-20', destinationCountry: 'IN',
+          deliveryDate: '2026-10-20', payerCountry: 'GB', fundingCurrency: 'GBP', destinationCountry: 'IN',
         }),
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }));
@@ -95,6 +142,7 @@ describe('document-to-form extraction', () => {
     const jobBody = { purpose: 'JOB_BRIEF', fileName: 'brief.txt', contentType: 'text/plain', contentBase64: base64(jobText) };
     const proposalBody = { purpose: 'FREELANCER_PROPOSAL', fileName: 'proposal.txt', contentType: 'text/plain', contentBase64: base64(proposalText) };
     const agreementBody = { purpose: 'AGREEMENT_TERMS', fileName: 'commercial-terms.txt', contentType: 'text/plain', contentBase64: base64(agreementText) };
+    const policyBody = { purpose: 'COMPANY_POLICY', fileName: 'company-policy.txt', contentType: 'text/plain', contentBase64: base64(companyPolicyText) };
 
     const companyJob = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.polishCompany.token, body: jobBody });
     const freelancerProposal = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.indianFreelancer.token, body: proposalBody });
@@ -102,6 +150,8 @@ describe('document-to-form extraction', () => {
     const companyProposal = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.polishCompany.token, body: proposalBody });
     const companyAgreement = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.polishCompany.token, body: agreementBody });
     const freelancerAgreement = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.indianFreelancer.token, body: agreementBody });
+    const companyPolicy = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.polishCompany.token, body: policyBody });
+    const freelancerPolicy = await call(harness, 'POST', '/v1/ai/extract-form', { token: harness.seed.indianFreelancer.token, body: policyBody });
 
     expect(companyJob.status).toBe(200);
     expect(freelancerProposal.status).toBe(200);
@@ -109,5 +159,7 @@ describe('document-to-form extraction', () => {
     expect(companyProposal.status).toBe(403);
     expect(companyAgreement.status).toBe(200);
     expect(freelancerAgreement.status).toBe(403);
+    expect(companyPolicy.status).toBe(200);
+    expect(freelancerPolicy.status).toBe(403);
   });
 });

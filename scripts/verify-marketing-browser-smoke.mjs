@@ -99,6 +99,17 @@ try {
   await waitFor('document.querySelector("#portalWorld")?.classList.contains("open")', 'The portal did not open.', 10_000);
   await api('/api/workflow/reset');
   await evaluate('window.OptiWorkWorkflow.init()');
+  const initialState = await state();
+  if (!initialState.run.results.companyPolicyProfile) {
+    await api('/api/workflow/action/onboard', {
+      companyCountry: 'PL', fundingCurrency: 'PLN', fileName: 'northstar-policy.txt', contentType: 'text/plain',
+      contentBase64: Buffer.from('Approved Northstar policy', 'utf8').toString('base64'),
+      policies: ['Confidential information remains private to authorized contract participants.'],
+      legalClauses: ['Polish law governs the agreement and disputes follow written escalation.'],
+      commercialStandards: ['One evidence-backed revision is included before final acceptance.'],
+      authorizedApprovers: ['Procurement Director'], extractionSource: 'FIXTURE', extractionModel: 'browser-smoke',
+    });
+  }
   await waitFor('document.querySelector("[data-workspace-form=job]") !== null', 'The empty company brief did not render.');
   const blankBrief = await evaluate(`Array.from(document.querySelectorAll('[data-workspace-form="job"] input:not([type="hidden"]), [data-workspace-form="job"] textarea')).every(element => element.value === '')`);
   if (!blankBrief) throw new Error('The company brief contains prefilled values.');
@@ -112,7 +123,7 @@ try {
     title: 'Build a cross-border settlement reconciliation service',
     description: 'Deliver an auditable TypeScript service, tests, operating guide, and reconciliation dashboard for the Poland to India corridor.',
     acceptanceCriteria: 'All integration tests pass\nBoth ledger references reconcile\nNo PII appears on public ledgers',
-    skills: ['typescript', 'postgresql', 'fabric', 'algorand'], deliveryDate: '2026-10-31', destinationCountry: 'IN',
+    skills: ['typescript', 'postgresql', 'fabric', 'algorand'], deliveryDate: '2026-10-31', payerCountry: 'PL', fundingCurrency: 'PLN', destinationCountry: 'IN',
     budget: { amountMinor: '1200000', currency: 'PLN', scale: 2 },
   });
   await evaluate('window.OptiWorkWorkflow.setRole("FREELANCER")');
@@ -121,6 +132,7 @@ try {
   const freelancerAfterJob = await evaluate(`document.querySelector('#workspaceAction')?.innerText ?? ''`);
   if (/POST A JOB/iu.test(freelancerAfterJob) || !/SUBMIT PROPOSAL/iu.test(freelancerAfterJob)) throw new Error('The opportunity UI is not role-specific.');
   await api('/api/workflow/action/apply', {
+    residenceCountry: 'IN', payoutCountry: 'IN', payoutCurrency: 'INR',
     coverLetter: 'I have delivered TypeScript settlement services and evidence-led approval systems for regulated workflows.',
     approach: 'Start with acceptance tests, implement reconciliation invariants, then deliver the dashboard and operating evidence.',
     availability: 'Available immediately for 32 hours per week', deliveryDays: 16,
@@ -130,14 +142,10 @@ try {
   const screened = await state();
   if (screened.run.results.applications.length !== 3) throw new Error('Expected three independent freelancer proposals.');
   await api('/api/workflow/action/select', { applicationId: screened.run.results.applications[0].id });
-  await api('/api/workflow/action/terms', {
-    commercialTerms: ['The selected proposal price is the complete milestone consideration.', 'One evidence-backed revision is included.'],
-    acceptanceCriteria: ['All automated tests pass.', 'The reconciliation runbook and dashboard are delivered.'],
-    policies: ['Repository access follows least privilege.', 'Confidential information remains private to both parties.'],
-    legalClauses: ['Pre-existing IP remains with its original owner.', 'Accepted deliverables transfer under the signed statement of work.'],
-  });
+  await api('/api/workflow/action/terms', {});
   const agreementProof = await evaluate(`(async () => { const current = await fetch('/api/workspace/state').then(response => response.json()); const expected = current.run.results.agreement.artifactHash; const checks = []; for (const role of ['company', 'freelancer']) { const response = await fetch('/api/workflow/agreement/download?role=' + role); const bytes = await response.arrayBuffer(); const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map(value => value.toString(16).padStart(2, '0')).join(''); checks.push({ role, status: response.status, matches: expected === 'sha256:' + digest }); } return checks; })()`);
   if (agreementProof.some((item) => item.status !== 200 || !item.matches)) throw new Error(`Private agreement verification failed: ${JSON.stringify(agreementProof)}`);
+  await api('/api/workflow/action/agreement-company-approve');
   await api('/api/workflow/action/agreement-approve');
   await waitFor(`fetch('/api/workspace/state').then(value => value.json()).then(value => value.run?.phase === 'AWAITING_DELIVERY')`, 'Rules, FX, compliance, and escrow automation did not complete.', 120_000);
   const funded = await state();
@@ -155,8 +163,8 @@ try {
 
   await evaluate('window.OptiWorkWorkflow.setRole("COMPANY")');
   await evaluate('window.OptiWorkWorkflow.init()');
-  await waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 5', 'The company journey rail did not complete.');
-  const companyResult = await evaluate(`({ text: document.querySelector('#workspaceAction')?.innerText ?? '', snapshot: document.querySelector('#workspaceSnapshot')?.innerText ?? '' })`);
+  await waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'The company journey rail did not complete.');
+  const companyResult = await evaluate(`({ text: document.querySelector('#workspaceAction')?.innerText ?? '', snapshot: document.querySelector('#workspaceSnapshot')?.textContent ?? '' })`);
   if (!/COMPLETED/iu.test(companyResult.text) || !/ARC-4 APP/u.test(companyResult.snapshot) || !/FABRIC EVIDENCE/u.test(companyResult.snapshot)) throw new Error(`Company proof is incomplete: ${JSON.stringify(companyResult)}`);
   await evaluate('window.OptiWorkWorkflow.setRole("FREELANCER")');
   await waitFor('document.querySelectorAll("#workspaceStages [data-state=done]").length === 6', 'The freelancer journey rail did not complete.');
@@ -167,7 +175,7 @@ try {
     const captured = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
     await writeFile(process.env.OPTIWORK_SCREENSHOT_PATH, Buffer.from(captured.data, 'base64'));
   }
-  process.stdout.write(`${JSON.stringify({ status: 'passed', origin: origin.href, humanActions: 7, proposals: 3, roleViews: ['company', 'freelancer'], privateAgreementHashesVerified: 2, arbitraryDeliverableVerified: true, finalPhase: 'COMPLETED' }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ status: 'passed', origin: origin.href, humanActions: 9, proposals: 3, roleViews: ['company', 'freelancer'], privateAgreementHashesVerified: 2, arbitraryDeliverableVerified: true, finalPhase: 'COMPLETED' }, null, 2)}\n`);
 } finally {
   socket?.close();
   processHandle.kill('SIGTERM');

@@ -83,7 +83,7 @@ afterEach(async () => {
 });
 
 function harnessContext(store: DataStore): AppContext {
-  return createContext(loadConfig({ OPTIWORK_PROFILE: 'demo' }), {
+  return createContext(loadConfig({ OPTIWORK_PROFILE: 'demo', REGULATION_REFRESH_MODE: 'fixture' }), {
     store,
     clock: new FixedClock(new Date('2026-09-03T09:00:00.000Z')),
     ids: new SequentialIds(),

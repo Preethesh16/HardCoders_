@@ -87,48 +87,53 @@ export class FrankfurterRateSource implements FxRateSource {
   constructor(
     private readonly baseUrl: string,
     private readonly timeoutMs = 4_000,
-    private readonly fallback: FxRateSource = new FixtureRateSource(),
-  ) {}
-
-  async rates(policy: CorridorPolicy, at: Date): Promise<CorridorRates> {
-    try {
-      const [fundingToUsd, payoutPerUsd] = await Promise.all([
-        this.pair(policy.fundingCurrency, 'USD'),
-        this.pair('USD', policy.payoutCurrency),
-      ]);
-      return {
-        fundingToUsd: fundingToUsd.rate,
-        usdToPayout: payoutPerUsd.rate,
-        source: `FRANKFURTER_ECB_${fundingToUsd.date}`,
-        observedAt: new Date(`${fundingToUsd.date}T00:00:00.000Z`).toISOString(),
-      };
-    } catch {
-      // A demo must never fail because a public rate service is unreachable.
-      const rates = await this.fallback.rates(policy, at);
-      return { ...rates, source: `${rates.source}_FALLBACK` };
+  ) {
+    const url = new URL(baseUrl);
+    if (url.protocol !== 'https:' || !['api.frankfurter.app', 'api.frankfurter.dev'].includes(url.hostname)) {
+      throw new Error('The live FX base URL must use an approved Frankfurter host.');
     }
   }
 
+  async rates(policy: CorridorPolicy, _at: Date): Promise<CorridorRates> {
+    const [fundingToUsd, payoutPerUsd] = await Promise.all([
+      this.pair(policy.fundingCurrency, 'USD'),
+      this.pair('USD', policy.payoutCurrency),
+    ]);
+    if (fundingToUsd.date !== payoutPerUsd.date) {
+      throw unavailable('The live FX legs were observed on different reference dates.');
+    }
+    return {
+      fundingToUsd: fundingToUsd.rate,
+      usdToPayout: payoutPerUsd.rate,
+      source: `FRANKFURTER_ECB_${fundingToUsd.date}`,
+      observedAt: new Date(`${fundingToUsd.date}T00:00:00.000Z`).toISOString(),
+    };
+  }
+
   private async pair(from: string, to: string): Promise<{ rate: ScaledRate; date: string }> {
-    const url = new URL('/latest', this.baseUrl);
-    url.searchParams.set('from', from);
-    url.searchParams.set('to', to);
-    const response = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      cache: 'no-store',
-      signal: AbortSignal.timeout(this.timeoutMs),
-      headers: { accept: 'application/json' },
-    });
-    if (!['api.frankfurter.app', 'api.frankfurter.dev'].includes(new URL(response.url).hostname)) {
-      throw unavailable('The reference FX service redirected to an unexpected host.');
+    try {
+      const url = new URL('/latest', this.baseUrl);
+      url.searchParams.set('from', from);
+      url.searchParams.set('to', to);
+      const response = await fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(this.timeoutMs),
+        headers: { accept: 'application/json' },
+      });
+      if (!['api.frankfurter.app', 'api.frankfurter.dev'].includes(new URL(response.url).hostname)) {
+        throw new Error('unexpected redirect host');
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body = frankfurterSchema(await response.json());
+      const value = body.rates[to];
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        throw new Error(`missing ${from}/${to} rate`);
+      }
+      return { rate: parseRate(value.toFixed(10)), date: body.date };
+    } catch {
+      throw unavailable(`The live reference FX service could not provide ${from}/${to}.`);
     }
-    if (!response.ok) throw unavailable('The reference FX service rejected the request.');
-    const body = frankfurterSchema(await response.json());
-    const value = body.rates[to];
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-      throw unavailable(`The reference FX service returned no ${from}/${to} rate.`);
-    }
-    return { rate: parseRate(value.toFixed(10)), date: body.date };
   }
 }

@@ -19,7 +19,11 @@ export interface Harness {
  * adapters. Every test exercises the same business code the hosted profiles run.
  */
 export async function createHarness(environment: NodeJS.ProcessEnv = {}): Promise<Harness> {
-  const config = loadConfig({ OPTIWORK_PROFILE: 'demo', ...environment });
+  const config = loadConfig({
+    OPTIWORK_PROFILE: 'demo',
+    REGULATION_REFRESH_MODE: 'fixture',
+    ...environment,
+  });
   const clock = new FixedClock(new Date('2026-09-03T09:00:00.000Z'));
   const context = createContext(config, { clock, ids: new SequentialIds() });
   const app = await buildApp({ config, context, logger: false });

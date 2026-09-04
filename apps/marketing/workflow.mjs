@@ -8,6 +8,34 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 const API_BASE_URL = process.env.OPTIWORK_API_BASE_URL ?? "http://127.0.0.1:4000";
 const STATE_FILE = process.env.ANCHOR_WORKFLOW_STATE_FILE ?? "/tmp/anchor-workflow-state.json";
 const DEFAULT_PLN = { amountMinor: "1200000", currency: "PLN", scale: 2 };
+const DEMO_COMPANY_PROFILES = {
+  PL: { partyKey: "polishCompany", currency: "PLN", preferredTalentCountry: "IN" },
+  IN: { partyKey: "indianCompany", currency: "INR", preferredTalentCountry: "GB" },
+  GB: { partyKey: "ukCompany", currency: "GBP", preferredTalentCountry: "IN" },
+  DE: { partyKey: "germanCompany", currency: "EUR", preferredTalentCountry: "IN" },
+  RU: { partyKey: "russianCompany", currency: "RUB", preferredTalentCountry: "GB" },
+  KP: { partyKey: "northKoreanCompany", currency: "KPW", preferredTalentCountry: "GB" },
+};
+const DEMO_PROVIDER_PROFILES = {
+  PL: { partyKey: "polishFreelancer", currency: "PLN", partyType: "FREELANCER" },
+  IN: { partyKey: "indianFreelancer", currency: "INR", partyType: "FREELANCER" },
+  GB: { partyKey: "ukFreelancer", currency: "GBP", partyType: "FREELANCER" },
+  DE: { partyKey: "germanFreelancer", currency: "EUR", partyType: "FREELANCER" },
+  RU: { partyKey: "russianFreelancer", currency: "RUB", partyType: "FREELANCER" },
+  KP: { partyKey: "northKoreanFreelancer", currency: "KPW", partyType: "FREELANCER" },
+};
+const PURPOSE_BY_ROUTE = {
+  "PL-IN": "P0802",
+  "IN-GB": "S0102",
+  "PL-GB": "B2B_DIGITAL_SERVICES",
+  "DE-PL": "B2B_DIGITAL_SERVICES",
+  "PL-RU": "B2B_SERVICES",
+};
+const FALLBACK_DOCUMENTS_BY_ROUTE = {
+  "PL-IN": ["INVOICE", "SERVICE_EXPORT_DECLARATION"],
+  "IN-GB": ["INVOICE", "FORM_A2_DEMO", "TAX_REVIEW_DEMO", "IMPORT_EVIDENCE", "BUYER_DUE_DILIGENCE"],
+  "PL-GB": ["INVOICE", "B2B_CUSTOMER_STATUS", "SERVICE_PLACE_OF_SUPPLY_ASSESSMENT", "PAYER_PAYEE_TRANSFER_DATA"],
+};
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const OPERATOR = Buffer.from(JSON.stringify({
   subject: "USER-PLATFORM-ADMIN",
@@ -17,10 +45,12 @@ const OPERATOR = Buffer.from(JSON.stringify({
 }), "utf8").toString("base64url");
 
 const ACTIONS = [
-  { id: "job", actor: "COMPANY", label: "CREATE JOB", detail: "Publish requirements, skills, budget and destination." },
+  { id: "onboard", actor: "COMPANY", label: "APPROVE COMPANY PROFILE", detail: "Review the extracted policy profile once; its versioned hash becomes a reusable agreement source." },
+  { id: "job", actor: "COMPANY", label: "CREATE JOB", detail: "Publish requirements, skills, budget, payer country and funding currency." },
   { id: "apply", actor: "FREELANCER", label: "SUBMIT PROPOSAL", detail: "Propose an approach, exact price, availability and delivery time." },
   { id: "select", actor: "COMPANY", label: "SELECT FREELANCER", detail: "Review the agent-ranked proposals and make the final human choice." },
-  { id: "terms", actor: "COMPANY", label: "DEFINE AGREEMENT", detail: "Supply policies, legal clauses and acceptance criteria, then approve the document hash." },
+  { id: "terms", actor: "COMPANY", label: "GENERATE AGREEMENT", detail: "Compose a sourced draft from onboarding policy, job brief and selected proposal." },
+  { id: "agreement-company-approve", actor: "COMPANY", label: "APPROVE AGREEMENT", detail: "The company reviews and accepts the generated private agreement hash." },
   { id: "agreement-approve", actor: "FREELANCER", label: "APPROVE AGREEMENT", detail: "The selected freelancer accepts the exact same private agreement." },
   { id: "submit", actor: "FREELANCER", label: "DELIVER WORK", detail: "Upload any deliverable; MinIO stores bytes and Fabric receives only SHA-256 evidence." },
   { id: "approve-work", actor: "COMPANY", label: "APPROVE DELIVERY", detail: "Review the real file and advisory validation before authorizing release." }
@@ -30,7 +60,6 @@ const COMPETING_PROPOSALS = [
   {
     coverLetter: "I build TypeScript services and operational dashboards, with experience documenting payment workflows.",
     approach: "Model settlement events first, implement reconciliation checks, then add unit and restart-recovery tests.",
-    proposedPrice: { amountMinor: "1160000", currency: "PLN", scale: 2 },
     deliveryDays: 18,
     availability: "Available to begin in five business days",
     proposedSkills: ["typescript", "fabric", "reconciliation"]
@@ -38,7 +67,6 @@ const COMPETING_PROPOSALS = [
   {
     coverLetter: "I specialise in PostgreSQL ledgers, TypeScript APIs and exception queues for cross-border reconciliation.",
     approach: "Deliver schema and invariants, build the comparison worker, then prove exceptions and balancing in integration tests.",
-    proposedPrice: { amountMinor: "1250000", currency: "PLN", scale: 2 },
     deliveryDays: 14,
     availability: "Available immediately for 30 hours per week",
     proposedSkills: ["typescript", "postgresql", "algorand"]
@@ -68,10 +96,12 @@ let automationPromise = null;
 let validationPromise = null;
 let releasePromise = null;
 
-function freshRun() {
+function freshRun(previous = null) {
+  const retainedProfile = previous?.results?.companyPolicyProfile ?? null;
+  const retainedCompanyPartyKey = previous?.results?.companyPartyKey ?? null;
   return {
-    startedAt: new Date().toISOString(), nonce: Date.now().toString(36), phase: "JOB_DRAFT",
-    results: { applications: [] }, actions: {}, screening: { status: "IDLE", stages: {} },
+    startedAt: new Date().toISOString(), nonce: Date.now().toString(36), phase: retainedProfile ? "JOB_DRAFT" : "COMPANY_ONBOARDING",
+    results: { applications: [], ...(retainedProfile ? { companyPolicyProfile: retainedProfile } : {}), ...(retainedCompanyPartyKey ? { companyPartyKey: retainedCompanyPartyKey } : {}) }, actions: {}, screening: { status: "IDLE", stages: {} },
     automation: { status: "IDLE", stages: {} }, deliveryAutomation: { status: "IDLE", stages: {} }
   };
 }
@@ -114,6 +144,30 @@ function selectedApplication() {
   return run?.results?.applications?.find(application => application.id === run.results.selectedApplicationId);
 }
 
+function companyProfile(country = run?.results?.job?.payerCountry) {
+  const profile = DEMO_COMPANY_PROFILES[String(country ?? "").toUpperCase()];
+  if (!profile) throw new Error(`No signed demo company identity is configured for ${country ?? "that country"}.`);
+  return profile;
+}
+
+function providerProfile(country) {
+  const profile = DEMO_PROVIDER_PROFILES[String(country ?? "").toUpperCase()];
+  if (!profile) throw new Error(`No signed demo freelancer/provider identity is configured for ${country ?? "that country"}.`);
+  return profile;
+}
+
+function companyPartyKey() {
+  return run?.results?.companyPartyKey ?? companyProfile().partyKey;
+}
+
+function orderedRoute() {
+  const application = selectedApplication();
+  const originCountry = run?.results?.job?.payerCountry;
+  const destinationCountry = application?.payoutCountry ?? application?.residenceCountry;
+  if (!originCountry || !destinationCountry) throw new Error("The ordered payer-to-payee route is not complete.");
+  return { originCountry, destinationCountry, key: `${originCountry}-${destinationCountry}` };
+}
+
 function selectedPartyKey() {
   const selected = selectedApplication();
   if (!selected) throw new Error("No freelancer has been selected.");
@@ -151,6 +205,9 @@ function normalizeApplications(payload) {
       deliveryDays: row.deliveryDays ?? row.proposal?.deliveryDays ?? previous.deliveryDays,
       availability: row.availability ?? row.proposal?.availability ?? previous.availability,
       approach: row.approach ?? row.proposal?.approach ?? previous.approach,
+      residenceCountry: row.residenceCountry ?? row.proposal?.residenceCountry ?? previous.residenceCountry,
+      payoutCountry: row.payoutCountry ?? row.proposal?.payoutCountry ?? previous.payoutCountry,
+      payoutCurrency: row.payoutCurrency ?? row.proposal?.payoutCurrency ?? previous.payoutCurrency,
       evaluation: row.evaluation ?? (row.score === undefined ? previous.evaluation : {
         score: row.score,
         summary: row.summary,
@@ -167,16 +224,35 @@ function termList(value) {
 }
 
 async function refreshApplications() {
-  run.results.applications = normalizeApplications(await call("polishCompany", "GET", `/v1/jobs/${run.results.jobId}/applications`));
+  run.results.applications = normalizeApplications(await call(companyPartyKey(), "GET", `/v1/jobs/${run.results.jobId}/applications`));
   return run.results.applications;
 }
 
 async function seedCompetingApplications() {
   const all = await loadParties({ refresh: true });
-  const freelancers = Object.entries(all).filter(([, party]) => party?.principal?.roles?.includes("freelancer"));
-  const competitors = freelancers.filter(([key]) => key !== "indianFreelancer").slice(0, 2);
-  for (const [index, [key]] of competitors.entries()) {
-    if (COMPETING_PROPOSALS[index]) await call(key, "POST", `/v1/jobs/${run.results.jobId}/applications`, COMPETING_PROPOSALS[index], `seed-${key}`);
+  const targetCountry = run.results.job.destinationCountry;
+  const profile = providerProfile(targetCountry);
+  const candidates = Object.entries(all).filter(([key, party]) =>
+    key !== profile.partyKey
+    && key.startsWith(profile.partyKey)
+    && party.principal.roles?.some(role => role === "freelancer" || role === "supplier")
+  ).slice(0, 2);
+  for (const [index, [key]] of candidates.entries()) {
+    const template = COMPETING_PROPOSALS[index];
+    if (!template) continue;
+    const budgetMinor = BigInt(run.results.job.budgetAmountMinor);
+    const factors = [97n, 104n];
+    await call(key, "POST", `/v1/jobs/${run.results.jobId}/applications`, {
+      ...template,
+      residenceCountry: targetCountry,
+      payoutCountry: targetCountry,
+      payoutCurrency: profile.currency,
+      proposedPrice: {
+        amountMinor: ((budgetMinor * factors[index]) / 100n).toString(),
+        currency: run.results.job.fundingCurrency,
+        scale: run.results.job.budgetScale,
+      },
+    }, `seed-${key}`);
   }
   await refreshApplications();
 }
@@ -191,7 +267,7 @@ async function runScreening(nonce) {
     await refreshApplications();
     stageSet("screening", "collect", "COMPLETED", `${run.results.applications.length} proposals collected.`);
     stageSet("screening", "rank", "RUNNING", "Screening agent is comparing price, timing, skills and approach.");
-    const ranked = await call("polishCompany", "POST", `/v1/jobs/${run.results.jobId}/applications/rank`, {}, "rank-all");
+    const ranked = await call(companyPartyKey(), "POST", `/v1/jobs/${run.results.jobId}/applications/rank`, {}, "rank-all");
     if (!run || run.nonce !== nonce) return;
     run.results.applications = normalizeApplications(ranked);
     stageSet("screening", "rank", "COMPLETED", "Advisory ranking persisted; company retains the final choice.");
@@ -214,37 +290,52 @@ async function runFundingAutomation(nonce) {
   run.phase = "AUTOMATING_ESCROW";
   try {
     stageSet("automation", "agreement", "COMPLETED", "Both parties approved the same agreement hash.", [["HASH", run.results.contractHash]]);
-    stageSet("automation", "documents", "RUNNING", "Preparing required commercial evidence.");
-    for (const code of ["INVOICE", "SERVICE_EXPORT_DECLARATION"]) {
-      await call(selectedPartyKey(), "POST", `/v1/contracts/${run.results.contractId}/documents`, {
-        code, contentType: "application/pdf",
-        contentBase64: Buffer.from(`ANCHOR DEMONSTRATION ONLY\n${code}\nAGREEMENT ${run.results.contractHash}`, "utf8").toString("base64")
-      }, `auto-document-${code}`);
-    }
-    stageSet("automation", "documents", "COMPLETED", "Document hashes stored; private bytes remain in MinIO.");
-    await wait(700);
     stageSet("automation", "rules", "RUNNING", "Checking the reviewed corpus against official sources.");
-    const regulation = await call("polishCompany", "POST", `/v1/contracts/${run.results.contractId}/regulations/refresh`, {}, "auto-regulations");
+    const regulation = await call(companyPartyKey(), "POST", `/v1/contracts/${run.results.contractId}/regulations/refresh`, {}, "auto-regulations");
     if (!run || run.nonce !== nonce) return;
     run.results.regulation = regulation;
+    run.results.regulatoryPlan = regulation.plan ?? regulation.regulatoryPlan;
     const observations = regulation.report?.observations ?? [];
-    stageSet("automation", "rules", regulation.report?.requiresHumanReview ? "REVIEW" : "COMPLETED", regulation.explanation?.summary ?? "Reviewed regulation corpus checked.", [
+    stageSet("automation", "rules", regulation.coverage?.outcome === "MANUAL_REVIEW" ? "REVIEW" : "COMPLETED", regulation.explanation?.summary ?? "Reviewed regulation corpus checked.", [
       ["CORPUS", regulation.report?.approvedCorpusHash ?? "—"],
+      ["COVERAGE", regulation.coverage ? `${regulation.coverage.checks?.filter(item => item.status === "COVERED").length ?? 0}/${regulation.coverage.checks?.length ?? 0}` : "—"],
       ["UNCHANGED", String(observations.filter(item => item.status === "UNCHANGED").length)],
       ["REVIEW", String(observations.filter(item => item.status === "REVIEW_REQUIRED").length)],
       ["UNAVAILABLE", String(observations.filter(item => item.status === "UNAVAILABLE").length)],
       ["RULES CHANGED", regulation.report?.rulesChanged ? "YES" : "NO"]
     ]);
+    const plan = run.results.regulatoryPlan;
+    if (plan?.hardGate && !plan.hardGate.canQuoteOrFund) {
+      throw new Error(`${plan.hardGate.code}: ${(plan.hardGate.reasons ?? []).join(" ") || "The reviewed regulatory coverage cannot authorize this route."}`);
+    }
+    const route = orderedRoute();
+    const requiredDocuments = plan?.requiredDocuments?.length
+      ? plan.requiredDocuments
+      : FALLBACK_DOCUMENTS_BY_ROUTE[route.key] ?? [];
+    stageSet("automation", "documents", "RUNNING", `Preparing ${requiredDocuments.length} route-specific evidence records.`);
+    for (const code of requiredDocuments) {
+      await call(selectedPartyKey(), "POST", `/v1/contracts/${run.results.contractId}/documents`, {
+        code, contentType: "application/pdf",
+        contentBase64: Buffer.from(`ANCHOR DEMONSTRATION ONLY\n${route.key}\n${code}\nAGREEMENT ${run.results.contractHash}`, "utf8").toString("base64")
+      }, `auto-document-${code}`);
+    }
+    stageSet("automation", "documents", "COMPLETED", `${requiredDocuments.length} required document hashes stored; private demo bytes remain in MinIO.`, [
+      ["ROUTE", `${route.originCountry} → ${route.destinationCountry}`],
+      ["DOCUMENTS", requiredDocuments.join(" · ") || "NONE REQUIRED"],
+    ]);
+    await wait(700);
     stageSet("automation", "fx", "RUNNING", "Resolving corridor, compliance and a live two-leg FX quote.");
-    const created = await call("polishCompany", "POST", "/v1/payments", {
-      contractId: run.results.contractId, fundingAmount: run.results.contractAmount
+    const created = await call(companyPartyKey(), "POST", "/v1/payments", {
+      contractId: run.results.contractId,
+      fundingAmount: run.results.contractAmount,
+      purposeCode: plan?.facts?.purposeCode ?? PURPOSE_BY_ROUTE[route.key] ?? "B2B_SERVICES",
     }, "auto-payment");
     if (!run || run.nonce !== nonce) return;
     run.results.payment = created.payment ?? created;
     run.results.paymentId = run.results.payment.id;
     run.results.quote = created.quote;
     run.results.compliance = created.compliance;
-    stageSet("automation", "rules", regulation.report?.requiresHumanReview ? "REVIEW" : "COMPLETED", regulation.explanation?.summary ?? "Reviewed regulation corpus checked.", [
+    stageSet("automation", "rules", regulation.coverage?.outcome === "MANUAL_REVIEW" ? "REVIEW" : "COMPLETED", regulation.explanation?.summary ?? "Reviewed regulation corpus checked.", [
       ["RULESET", created.compliance?.rulesVersion ?? "—"], ["CORPUS", regulation.report?.approvedCorpusHash ?? "—"]
     ]);
     stageSet("automation", "fx", "COMPLETED", "Quote stored and bound to this payment.", [
@@ -252,9 +343,9 @@ async function runFundingAutomation(nonce) {
     ]);
     await wait(700);
     stageSet("automation", "escrow", "RUNNING", "Locking the quote-fixed USD amount in ARC-4 escrow.");
-    const funded = await call("polishCompany", "POST", `/v1/payments/${run.results.paymentId}/fund`, {}, "auto-fund");
+    const funded = await call(companyPartyKey(), "POST", `/v1/payments/${run.results.paymentId}/fund`, {}, "auto-fund");
     run.results.payment = funded.payment ?? funded;
-    const timeline = await call("polishCompany", "GET", `/v1/payments/${run.results.paymentId}/timeline`);
+    const timeline = await call(companyPartyKey(), "GET", `/v1/payments/${run.results.paymentId}/timeline`);
     run.results.binding = timeline.binding;
     stageSet("automation", "escrow", "COMPLETED", "Algorand confirmed the funded escrow.", [
       ["DEAL", timeline.binding?.dealId ?? "—"], ["LOCKED", timeline.binding ? usdc(timeline.binding.amountUsdcMinor, timeline.binding.scale) : "—"], ["NETWORK", timeline.binding?.network ?? "—"]
@@ -280,7 +371,7 @@ async function runDeliveryValidation(nonce) {
   stageSet("deliveryAutomation", "validation", "RUNNING", "Advisory agent is checking delivery metadata against the milestone.");
   try {
     await wait(700);
-    const evaluated = await call("polishCompany", "POST", `/v1/submissions/${run.results.submissionId}/evaluate`, {}, "auto-validate");
+    const evaluated = await call(companyPartyKey(), "POST", `/v1/submissions/${run.results.submissionId}/evaluate`, {}, "auto-validate");
     if (!run || run.nonce !== nonce) return;
     run.results.workValidation = evaluated.advisory ?? evaluated;
     stageSet("deliveryAutomation", "validation", "COMPLETED", run.results.workValidation.summary, [
@@ -302,12 +393,12 @@ async function runRelease(nonce) {
   stageSet("deliveryAutomation", "release", "RUNNING", "Verifying Fabric approval and releasing the quote-fixed escrow amount.");
   try {
     await wait(700);
-    const released = await call("polishCompany", "POST", `/v1/payments/${run.results.paymentId}/release`, {}, "auto-release");
+    const released = await call(companyPartyKey(), "POST", `/v1/payments/${run.results.paymentId}/release`, {}, "auto-release");
     if (!run || run.nonce !== nonce) return;
     run.results.payment = released.payment ?? released;
-    const timeline = await call("polishCompany", "GET", `/v1/payments/${run.results.paymentId}/timeline`);
+    const timeline = await call(companyPartyKey(), "GET", `/v1/payments/${run.results.paymentId}/timeline`);
     run.results.binding = timeline.binding;
-    stageSet("deliveryAutomation", "release", "COMPLETED", "Provider settlement and INR credit completed.", [
+    stageSet("deliveryAutomation", "release", "COMPLETED", `Provider settlement and ${run.results.payment.payoutCurrency} credit completed.`, [
       ["PAYMENT", run.results.payment.state], ["ESCROW", timeline.binding?.state ?? "—"], ["EVENTS", String(timeline.events?.length ?? 0)]
     ]);
     run.deliveryAutomation.status = "COMPLETED";
@@ -321,13 +412,39 @@ async function runRelease(nonce) {
 }
 
 const EXECUTORS = {
+  async onboard(input) {
+    if (run.phase !== "COMPANY_ONBOARDING") throw new Error("The company policy profile is already approved for this workspace.");
+    const profile = companyProfile(input.companyCountry);
+    if (profile.currency !== input.fundingCurrency) {
+      throw new Error(`The ${input.companyCountry} demo company is verified to fund in ${profile.currency}.`);
+    }
+    run.results.companyPartyKey = profile.partyKey;
+    const created = await call(profile.partyKey, "POST", "/v1/company/policy-profile", input, "company-policy");
+    const storedProfile = created.profile ?? created;
+    const { sourceObjectId: _sourceObjectId, approvedByUserId: _approvedByUserId, ...publicProfile } = storedProfile;
+    run.results.companyPolicyProfile = publicProfile;
+    run.phase = "JOB_DRAFT";
+    return [["PROFILE", run.results.companyPolicyProfile.id], ["VERSION", String(run.results.companyPolicyProfile.version)], ["POLICY HASH", run.results.companyPolicyProfile.profileHash], ["SOURCE HASH", run.results.companyPolicyProfile.sourceArtifactHash]];
+  },
   async job(input) {
     if (run.phase !== "JOB_DRAFT") throw new Error("A job already exists for this deal.");
-    const created = await call("polishCompany", "POST", "/v1/jobs", {
+    const profile = companyProfile(input.payerCountry);
+    if (!run.results.companyPolicyProfile) throw new Error("Approve the reusable company policy profile before publishing work.");
+    if (run.results.companyPolicyProfile.country !== input.payerCountry) throw new Error("The job payer country must match the approved company onboarding profile.");
+    if (profile.currency !== input.fundingCurrency || input.budget?.currency !== profile.currency) {
+      throw new Error(`The ${input.payerCountry} demo company is verified to fund in ${profile.currency}.`);
+    }
+    run.results.companyPartyKey = profile.partyKey;
+    const created = await call(profile.partyKey, "POST", "/v1/jobs", {
       title: input.title, description: input.description, skills: input.skills,
       acceptanceCriteria: termList(input.acceptanceCriteria),
       targetDeliveryDate: input.deliveryDate,
-      destinationCountry: "IN", budget: input.budget
+      payerCountry: input.payerCountry,
+      fundingCurrency: input.fundingCurrency,
+      // Search preference only. The ordered settlement route is created later
+      // from the selected applicant's verified payout profile.
+      destinationCountry: profile.preferredTalentCountry,
+      budget: input.budget
     }, "job");
     const job = created.job ?? created;
     run.results.job = job;
@@ -339,7 +456,15 @@ const EXECUTORS = {
   },
   async apply(input) {
     if (run.phase !== "APPLICATIONS_OPEN") throw new Error("This opportunity is not accepting proposals.");
-    const created = await call("indianFreelancer", "POST", `/v1/jobs/${run.results.jobId}/applications`, input, "primary-apply");
+    if (input.residenceCountry !== input.payoutCountry) {
+      throw new Error("The current demo rails require tax residence and payout country to match.");
+    }
+    const profile = providerProfile(input.payoutCountry);
+    if (profile.currency !== input.payoutCurrency) {
+      throw new Error(`The ${input.payoutCountry} demo payout profile is verified for ${profile.currency}.`);
+    }
+    run.results.primaryProviderPartyKey = profile.partyKey;
+    const created = await call(profile.partyKey, "POST", `/v1/jobs/${run.results.jobId}/applications`, input, "primary-apply");
     run.results.primaryApplicationId = (created.application ?? created).id;
     await refreshApplications();
     run.phase = "SCREENING";
@@ -351,7 +476,7 @@ const EXECUTORS = {
     const application = run.results.applications.find(item => item.id === input.applicationId);
     if (!application) throw new Error("Choose one of the ranked proposals.");
     const amount = proposalMoney(application);
-    const selected = await call("polishCompany", "POST", `/v1/applications/${application.id}/select`, { amount }, "select");
+    const selected = await call(companyPartyKey(), "POST", `/v1/applications/${application.id}/select`, { amount }, "select");
     const contract = selected.contract ?? selected;
     run.results.selectedApplicationId = application.id;
     run.results.contract = contract;
@@ -363,7 +488,7 @@ const EXECUTORS = {
   },
   async terms(input) {
     if (run.phase !== "AGREEMENT_DRAFT") throw new Error("Select a freelancer before preparing the agreement.");
-    const generated = await call("polishCompany", "POST", `/v1/contracts/${run.results.contractId}/agreement`, {
+    const generated = await call(companyPartyKey(), "POST", `/v1/contracts/${run.results.contractId}/agreement`, {
       policies: termList(input.policies),
       legalClauses: termList(input.legalClauses),
       acceptanceCriteria: termList(input.acceptanceCriteria),
@@ -382,12 +507,17 @@ const EXECUTORS = {
     run.results.contract = generated.contract ?? run.results.contract;
     run.results.contractHash = generated.contract?.contractHash ?? agreement.contractHash ?? agreement.agreementHash;
     if (!run.results.contractHash) throw new Error("The agreement service returned no binding hash.");
-    const approved = await call("polishCompany", "POST", `/v1/contracts/${run.results.contractId}/approve`, {
+    run.phase = "AWAITING_COMPANY_AGREEMENT";
+    return [["DOCUMENT", agreement.fileName ?? "anchor-work-agreement.md"], ["SHA-256", agreement.artifactHash ?? agreement.documentHash ?? agreement.sha256], ["TERMS HASH", run.results.contractHash], ["SOURCES", String(generated.contract?.agreementTerms?.sources?.length ?? 0)]];
+  },
+  async "agreement-company-approve"() {
+    if (run.phase !== "AWAITING_COMPANY_AGREEMENT") throw new Error("Generate and review the sourced agreement before approving it.");
+    const approved = await call(companyPartyKey(), "POST", `/v1/contracts/${run.results.contractId}/approve`, {
       party: "BUYER", acceptedTermsHash: run.results.contractHash
     }, "approve-company-agreement");
     run.results.approvals = approved.approvals;
     run.phase = "AWAITING_FREELANCER_AGREEMENT";
-    return [["DOCUMENT", agreement.fileName ?? "anchor-work-agreement.md"], ["SHA-256", agreement.artifactHash ?? agreement.documentHash ?? agreement.sha256], ["TERMS HASH", run.results.contractHash], ["COMPANY", "APPROVED"]];
+    return [["COMPANY", "APPROVED"], ["TERMS HASH", run.results.contractHash], ["NEXT", "FREELANCER REVIEW"]];
   },
   async "agreement-approve"() {
     if (run.phase !== "AWAITING_FREELANCER_AGREEMENT") throw new Error("The agreement is not ready for freelancer approval.");
@@ -415,7 +545,7 @@ const EXECUTORS = {
   },
   async "approve-work"(input) {
     if (run.phase !== "AWAITING_WORK_APPROVAL") throw new Error("Wait for advisory delivery validation to finish.");
-    const decided = await call("polishCompany", "POST", `/v1/submissions/${run.results.submissionId}/approve`, {
+    const decided = await call(companyPartyKey(), "POST", `/v1/submissions/${run.results.submissionId}/approve`, {
       decision: input.decision ?? "APPROVED", comment: input.comment ?? "Reviewed against the private agreement and accepted."
     }, "approve-work");
     run.results.submission = decided.submission ?? run.results.submission;
@@ -429,7 +559,7 @@ const EXECUTORS = {
 export function stepList() { return ACTIONS.map((action, index) => ({ index, ...action })); }
 
 export function resetRun() {
-  run = freshRun();
+  run = freshRun(run);
   automationPromise = validationPromise = releasePromise = null;
   persistRun();
   return { ok: true, startedAt: run.startedAt };
@@ -465,12 +595,12 @@ export async function runStep(index, input = {}) {
 
 export async function agreementAccess(role) {
   if (!run?.results?.contractId) throw new Error("No agreement is available.");
-  return call(role === "freelancer" ? selectedPartyKey() : "polishCompany", "GET", `/v1/contracts/${run.results.contractId}/agreement/access`);
+  return call(role === "freelancer" ? selectedPartyKey() : companyPartyKey(), "GET", `/v1/contracts/${run.results.contractId}/agreement/access`);
 }
 
 export async function submissionAccess() {
   if (!run?.results?.submissionId) throw new Error("No deliverable is available.");
-  return call("polishCompany", "GET", `/v1/submissions/${run.results.submissionId}/access`);
+  return call(companyPartyKey(), "GET", `/v1/submissions/${run.results.submissionId}/access`);
 }
 
 export async function extractForm(role, input) {
@@ -479,12 +609,12 @@ export async function extractForm(role, input) {
     persistRun();
   }
   const freelancer = role === "freelancer";
-  const allowedPurposes = freelancer ? ["FREELANCER_PROPOSAL"] : ["JOB_BRIEF", "AGREEMENT_TERMS"];
+  const allowedPurposes = freelancer ? ["FREELANCER_PROPOSAL"] : ["COMPANY_POLICY", "JOB_BRIEF", "AGREEMENT_TERMS"];
   if (!allowedPurposes.includes(input?.purpose)) {
     throw new Error(`The ${freelancer ? "Freelancer" : "Company"} portal cannot extract ${String(input?.purpose ?? "this document")}.`);
   }
   return call(
-    freelancer ? "indianFreelancer" : "polishCompany",
+    freelancer ? (run.results.primaryProviderPartyKey ?? "indianFreelancer") : (run.results.companyPartyKey ?? "polishCompany"),
     "POST",
     "/v1/ai/extract-form",
     input,

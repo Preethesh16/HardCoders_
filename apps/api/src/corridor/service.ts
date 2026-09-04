@@ -8,7 +8,7 @@
  */
 
 import type { CorridorPolicy } from '@optiwork/contracts';
-import { CorridorResolutionError, corridorPolicies, resolveCorridor } from '@optiwork/domain';
+import { CorridorResolutionError, corridorPolicies, findCorridorPolicy, resolveCorridor } from '@optiwork/domain';
 import { canonicalHash } from '../canonical.js';
 import { badRequest, unprocessable } from '../errors.js';
 
@@ -33,13 +33,22 @@ export function listCorridors(): readonly CorridorPolicy[] {
   return corridorPolicies.map((policy) => structuredClone(policy));
 }
 
+/** Inspection keeps blocked policies visible so the compliance engine can explain the rejection. */
+export function inspect(originCountry: string, destinationCountry: string): CorridorResolution {
+  validatePair(originCountry, destinationCountry);
+  try {
+    const policy = findCorridorPolicy(originCountry, destinationCountry);
+    return { policy, canonicalHash: canonicalHash(policy), bookId: bookIdFor(policy) };
+  } catch (error) {
+    if (error instanceof CorridorResolutionError) {
+      throw unprocessable(error.message, { code: error.code, originCountry, destinationCountry });
+    }
+    throw error;
+  }
+}
+
 export function resolve(originCountry: string, destinationCountry: string): CorridorResolution {
-  if (!COUNTRY.test(originCountry) || !COUNTRY.test(destinationCountry)) {
-    throw badRequest('Country codes must be ISO 3166-1 alpha-2 uppercase.');
-  }
-  if (originCountry === destinationCountry) {
-    throw badRequest('A cross-border corridor needs two different countries.');
-  }
+  validatePair(originCountry, destinationCountry);
   try {
     const policy = resolveCorridor(originCountry, destinationCountry);
     return { policy, canonicalHash: canonicalHash(policy), bookId: bookIdFor(policy) };
@@ -48,5 +57,14 @@ export function resolve(originCountry: string, destinationCountry: string): Corr
       throw unprocessable(error.message, { code: error.code, originCountry, destinationCountry });
     }
     throw error;
+  }
+}
+
+function validatePair(originCountry: string, destinationCountry: string): void {
+  if (!COUNTRY.test(originCountry) || !COUNTRY.test(destinationCountry)) {
+    throw badRequest('Country codes must be ISO 3166-1 alpha-2 uppercase.');
+  }
+  if (originCountry === destinationCountry) {
+    throw badRequest('A cross-border corridor needs two different countries.');
   }
 }

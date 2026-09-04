@@ -68,27 +68,48 @@ export interface ProviderOverrides {
   readonly destinationAddress?: string;
 }
 
+const SPECIAL_CAPABILITIES: Readonly<Record<string, {
+  readonly origin: readonly string[];
+  readonly destination: readonly string[];
+}>> = {
+  'PL-IN-INWARD': { origin: ['EU_ORIGIN_FX'], destination: ['INDIA_PA_CB_INWARD'] },
+  'IN-GB-OUTWARD': { origin: ['INDIA_PA_CB_OUTWARD'], destination: ['UK_DESTINATION_OFFRAMP'] },
+  'PL-GB-OUTWARD': { origin: ['EU_ORIGIN_FX'], destination: ['UK_DESTINATION_OFFRAMP'] },
+  'GB-IN-INWARD': { origin: ['UK_ORIGIN_FX'], destination: ['INDIA_PA_CB_INWARD'] },
+  'DE-PL-OUTWARD': { origin: ['EU_B2B_SETTLEMENT_PREVIEW'], destination: [] },
+};
+
+/** The only books with a deployed Algorand provider-to-provider rail. */
+export const EXECUTABLE_CORRIDOR_BOOKS = [
+  'PL-IN-INWARD', 'PL-GB-OUTWARD', 'PL-DE-OUTWARD',
+  'IN-PL-OUTWARD', 'IN-GB-OUTWARD', 'IN-DE-OUTWARD',
+  'GB-PL-OUTWARD', 'GB-IN-INWARD', 'GB-DE-OUTWARD',
+  'DE-PL-OUTWARD', 'DE-IN-INWARD', 'DE-GB-OUTWARD',
+] as const;
+
+export type ExecutableCorridorBook = typeof EXECUTABLE_CORRIDOR_BOOKS[number];
+
+export function isExecutableCorridorBook(bookId: string): bookId is ExecutableCorridorBook {
+  return (EXECUTABLE_CORRIDOR_BOOKS as readonly string[]).includes(bookId);
+}
+
 /**
  * The registry is keyed by book, not by country pair, because direction changes
  * which licensed capability a provider must hold.
  */
 export function providersForBook(bookId: string, overrides: ProviderOverrides = {}): CorridorProviders {
-  switch (bookId) {
-    case 'PL-IN-INWARD':
-      return {
-        bookId,
-        origin: treasury('PROVIDER-EU-ORIGIN', 'EU origin provider (simulated)', 'PL', ['EU_ORIGIN_FX'], overrides.originAddress),
-        destination: treasury('PROVIDER-IN-INWARD', 'India inward collection provider (simulated)', 'IN', ['INDIA_PA_CB_INWARD'], overrides.destinationAddress),
-      };
-    case 'IN-GB-OUTWARD':
-      return {
-        bookId,
-        origin: treasury('PROVIDER-IN-OUTWARD', 'India outward remittance provider (simulated)', 'IN', ['INDIA_PA_CB_OUTWARD'], overrides.originAddress),
-        destination: treasury('PROVIDER-GB-OFFRAMP', 'United Kingdom destination off-ramp (simulated)', 'GB', ['UK_DESTINATION_OFFRAMP'], overrides.destinationAddress),
-      };
-    default:
-      throw new Error(`No provider treasuries are configured for book ${bookId}.`);
-  }
+  if (!isExecutableCorridorBook(bookId)) throw new Error(`No provider treasuries are configured for book ${bookId}.`);
+  const [originCountry, destinationCountry] = bookId.split('-');
+  if (!originCountry || !destinationCountry) throw new Error(`Invalid corridor book ${bookId}.`);
+  const special = SPECIAL_CAPABILITIES[bookId] ?? {
+    origin: [`${originCountry}_ORIGIN_SETTLEMENT`],
+    destination: [`${destinationCountry}_DESTINATION_SETTLEMENT`],
+  };
+  return {
+    bookId,
+    origin: treasury(`PROVIDER-${originCountry}-ORIGIN`, `${originCountry} origin provider (simulated)`, originCountry, special.origin, overrides.originAddress),
+    destination: treasury(`PROVIDER-${destinationCountry}-DESTINATION`, `${destinationCountry} destination provider (simulated)`, destinationCountry, special.destination, overrides.destinationAddress),
+  };
 }
 
 export function providerCapabilitiesSatisfied(

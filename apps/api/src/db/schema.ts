@@ -63,6 +63,35 @@ export const memberships = pgTable('memberships', {
 ]);
 
 /**
+ * Human-approved company policy snapshots. The source bytes remain private in
+ * object storage; this table contains the structured, reviewable projection
+ * used when a later deal agreement is drafted.
+ */
+export const companyPolicyProfiles = pgTable('company_policy_profiles', {
+  id: id(),
+  organizationId: ref('organization_id').notNull(),
+  version: integer('version').notNull(),
+  country: varchar('country', { length: 2 }).notNull(),
+  fundingCurrency: currency('funding_currency').notNull(),
+  sourceObjectId: ref('source_object_id').notNull(),
+  sourceFileName: text('source_file_name').notNull(),
+  sourceArtifactHash: hash('source_artifact_hash').notNull(),
+  policies: jsonb('policies').$type<string[]>().notNull(),
+  legalClauses: jsonb('legal_clauses').$type<string[]>().notNull(),
+  commercialStandards: jsonb('commercial_standards').$type<string[]>().notNull(),
+  authorizedApprovers: jsonb('authorized_approvers').$type<string[]>().notNull(),
+  extractionSource: varchar('extraction_source', { length: 16 }).notNull(),
+  extractionModel: varchar('extraction_model', { length: 64 }).notNull(),
+  profileHash: hash('profile_hash').notNull(),
+  approvedByUserId: ref('approved_by_user_id').notNull(),
+  approvedAt: instant('approved_at').notNull(),
+  createdAt: instant('created_at').notNull(),
+}, (table) => [
+  uniqueIndex('company_policy_profiles_org_version_idx').on(table.organizationId, table.version),
+  index('company_policy_profiles_org_idx').on(table.organizationId, table.approvedAt),
+]);
+
+/**
  * A credential is a signed document, so every field the signature covers is
  * stored verbatim as text. `issuedAt` and `expiresAt` are deliberately *not*
  * `timestamptz`: a database that reformats them - PostgreSQL renders
@@ -103,6 +132,8 @@ export const jobs = pgTable('jobs', {
   skills: jsonb('skills').$type<string[]>().notNull(),
   acceptanceCriteria: jsonb('acceptance_criteria').$type<string[]>(),
   targetDeliveryDate: varchar('target_delivery_date', { length: 10 }),
+  payerCountry: varchar('payer_country', { length: 2 }).notNull(),
+  fundingCurrency: currency('funding_currency').notNull(),
   destinationCountry: varchar('destination_country', { length: 2 }).notNull(),
   budgetAmountMinor: minor('budget_amount_minor').notNull(),
   budgetCurrency: currency('budget_currency').notNull(),
@@ -116,6 +147,9 @@ export const applications = pgTable('applications', {
   jobId: ref('job_id').notNull(),
   applicantUserId: ref('applicant_user_id').notNull(),
   applicantOrganizationId: ref('applicant_organization_id').notNull(),
+  residenceCountry: varchar('residence_country', { length: 2 }).notNull(),
+  payoutCountry: varchar('payout_country', { length: 2 }).notNull(),
+  payoutCurrency: currency('payout_currency').notNull(),
   coverLetter: text('cover_letter').notNull(),
   approach: text('approach').notNull(),
   proposedSkills: jsonb('proposed_skills').$type<string[]>().notNull(),
@@ -163,6 +197,14 @@ export const workContracts = pgTable('work_contracts', {
   buyerOrganizationId: ref('buyer_organization_id').notNull(),
   providerOrganizationId: ref('provider_organization_id').notNull(),
   providerUserId: ref('provider_user_id').notNull(),
+  payerCountry: varchar('payer_country', { length: 2 }).notNull(),
+  fundingCurrency: currency('funding_currency').notNull(),
+  providerResidenceCountry: varchar('provider_residence_country', { length: 2 }).notNull(),
+  payoutCountry: varchar('payout_country', { length: 2 }).notNull(),
+  payoutCurrency: currency('payout_currency').notNull(),
+  corridorId: ref('corridor_id').notNull(),
+  corridorDirection: varchar('corridor_direction', { length: 8 }).notNull(),
+  corridorBookId: varchar('corridor_book_id', { length: 64 }).notNull(),
   state: varchar('state', { length: 32 }).notNull(),
   terms: text('terms').notNull(),
   contractHash: hash('contract_hash').notNull(),
@@ -174,6 +216,13 @@ export const workContracts = pgTable('work_contracts', {
     legalClauses: string[];
     acceptanceCriteria: string[];
     commercialTerms: string[];
+    sources?: Array<{
+      section: string;
+      text: string;
+      sourceType: string;
+      sourceRef: string;
+      sourceHash: string;
+    }>;
   }>(),
   milestoneId: ref('milestone_id').notNull(),
   milestoneHash: hash('milestone_hash').notNull(),
@@ -471,6 +520,7 @@ export const schema = {
   organizations,
   users,
   memberships,
+  companyPolicyProfiles,
   credentials,
   credentialStatus,
   jobs,

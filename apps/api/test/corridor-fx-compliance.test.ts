@@ -2,15 +2,18 @@
  * Corridor ordering, quote expiry and the versioned compliance rules.
  */
 
-import { describe, expect, it } from 'vitest';
-import { bookIdFor, listCorridors, resolve } from '../src/corridor/service.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { bookIdFor, inspect, listCorridors, resolve } from '../src/corridor/service.js';
 import { assertQuoteCurrent, buildQuote, quoteIsCurrent } from '../src/fx/quote.js';
 import { FixtureRateSource, FrankfurterRateSource } from '../src/fx/rates.js';
 import { assertComplianceDecision, evaluate, type CredentialSnapshot } from '../src/compliance/engine.js';
 import { RULES_VERSION, thresholdRulesFor } from '../src/compliance/rules.js';
 import { money, parseMajor } from '../src/money.js';
+import { EXECUTABLE_CORRIDOR_BOOKS } from '../src/payments/providers.js';
 
 const NOW = new Date('2026-09-03T09:00:00.000Z');
+
+afterEach(() => vi.unstubAllGlobals());
 
 function credential(overrides: Partial<CredentialSnapshot> = {}): CredentialSnapshot {
   return {
@@ -38,22 +41,61 @@ describe('corridor resolution', () => {
     expect(outward.policy.fundingCurrency).toBe('INR');
     expect(outward.policy.payoutCurrency).toBe('GBP');
 
-    // The reversed pair is a different corridor, not the same one.
-    expect(() => resolve('IN', 'PL')).toThrow(/not configured/u);
-    expect(() => resolve('GB', 'IN')).toThrow(/not configured/u);
+    // The reversed pair is a different executable corridor with its own book.
+    expect(resolve('IN', 'PL')).toMatchObject({
+      bookId: 'IN-PL-OUTWARD', policy: { status: 'ACTIVE', fundingCurrency: 'INR', payoutCurrency: 'PLN' },
+    });
+    const ukToIndia = resolve('GB', 'IN');
+    expect(ukToIndia.bookId).toBe('GB-IN-INWARD');
+    expect(ukToIndia.policy).toMatchObject({
+      direction: 'INWARD', status: 'ACTIVE', fundingCurrency: 'GBP', payoutCurrency: 'INR',
+    });
   });
 
   it('refuses a blocked corridor, an identical pair and a malformed code', () => {
-    expect(() => resolve('PL', 'RU')).toThrow(/blocked by policy/u);
+    expect(resolve('PL', 'RU').policy.status).toBe('MANUAL_REVIEW');
+    expect(() => resolve('PL', 'KP')).toThrow(/blocked by policy/u);
     expect(() => resolve('PL', 'PL')).toThrow(/two different countries/u);
     expect(() => resolve('pl', 'IN')).toThrow(/alpha-2 uppercase/u);
   });
 
   it('derives a distinct book for every configured corridor', () => {
     const books = listCorridors().map(bookIdFor);
+    expect(books).toHaveLength(30);
     expect(new Set(books).size).toBe(books.length);
     expect(books).toContain('PL-IN-INWARD');
+    expect(books).toContain('GB-IN-INWARD');
     expect(books).toContain('IN-GB-OUTWARD');
+  });
+
+  it('marks ACTIVE exactly when the Algorand provider rail is executable', () => {
+    const activeBooks = listCorridors()
+      .filter((policy) => policy.status === 'ACTIVE')
+      .map(bookIdFor)
+      .sort();
+    expect(activeBooks).toEqual([...EXECUTABLE_CORRIDOR_BOOKS].sort());
+  });
+
+  it('inspects all 30 explicit policies while refusing unknown countries', () => {
+    const countries = ['PL', 'IN', 'GB', 'DE', 'RU', 'KP'];
+    const currencies: Record<string, string> = {
+      PL: 'PLN', IN: 'INR', GB: 'GBP', DE: 'EUR', RU: 'RUB', KP: 'KPW',
+    };
+    for (const origin of countries) {
+      for (const destination of countries) {
+        if (origin === destination) continue;
+        const corridor = inspect(origin, destination);
+        expect(corridor.policy).toMatchObject({
+          originCountry: origin,
+          destinationCountry: destination,
+          fundingCurrency: currencies[origin],
+          payoutCurrency: currencies[destination],
+        });
+        if (origin === 'KP' || destination === 'KP') expect(corridor.policy.status).toBe('BLOCKED');
+        else if (origin === 'RU' || destination === 'RU') expect(corridor.policy.status).toBe('MANUAL_REVIEW');
+      }
+    }
+    expect(() => inspect('US', 'IN')).toThrow(/not configured/u);
   });
 });
 
@@ -117,12 +159,39 @@ describe('FX quotes', () => {
     })).toThrow(/positive funding amount/u);
   });
 
-  it('falls back to the deterministic fixture when the live source is unreachable', async () => {
+  it('fails closed instead of disguising a fixture as live when Frankfurter is unreachable', async () => {
     const policy = resolve('PL', 'IN').policy;
-    const source = new FrankfurterRateSource('http://127.0.0.1:1/unreachable', 50);
-    const rates = await source.rates(policy, NOW);
-    expect(rates.source).toMatch(/_FALLBACK$/u);
-    expect(rates.fundingToUsd.units).toBeGreaterThan(0n);
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    const source = new FrankfurterRateSource('https://api.frankfurter.app', 50);
+    await expect(source.rates(policy, NOW)).rejects.toMatchObject({
+      code: 'DEPENDENCY_UNAVAILABLE', statusCode: 503,
+    });
+  });
+
+  it('records both live Frankfurter legs with their shared observation date', async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      const to = url.searchParams.get('to');
+      const response = new Response(JSON.stringify({
+        date: '2026-09-03',
+        rates: { [String(to)]: to === 'USD' ? 0.25 : 83.4 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      Object.defineProperty(response, 'url', { value: url.toString() });
+      return response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const policy = resolve('PL', 'IN').policy;
+    const rates = await new FrankfurterRateSource('https://api.frankfurter.app').rates(policy, NOW);
+    const quote = buildQuote({
+      id: 'FXQ-LIVE', policy, fundingAmount: money('1200000', 'PLN', 2), rates, quotedAt: NOW, ttlSeconds: 900,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(quote).toMatchObject({
+      provider: 'FRANKFURTER_ECB_REFERENCE',
+      rateSource: 'FRANKFURTER_ECB_2026-09-03',
+      rateObservedAt: '2026-09-03T00:00:00.000Z',
+      expiresAt: '2026-09-03T09:15:00.000Z',
+    });
   });
 });
 
@@ -133,7 +202,7 @@ describe('versioned compliance rules', () => {
   it('applies the per-unit cap to both Indian directions', () => {
     expect(thresholdRulesFor('PL-IN-INWARD').map((rule) => rule.code)).toEqual(['RBI_PER_UNIT_CAP']);
     expect(thresholdRulesFor('IN-GB-OUTWARD').map((rule) => rule.code))
-      .toEqual(['RBI_PER_UNIT_CAP', 'RBI_IMPORT_BUYER_DD']);
+      .toEqual(['RBI_PER_UNIT_CAP', 'RBI_IMPORT_BUYER_DD', 'INDIA_FORM_15CA_PART_REVIEW']);
   });
 
   it('never applies the import buyer due-diligence threshold to an inward freelancer payment', () => {
@@ -234,6 +303,59 @@ describe('versioned compliance rules', () => {
     expect(evaluate(input).canonicalHash).toBe(evaluate(input).canonicalHash);
     expect(evaluate({ ...input, inrEquivalent: money('1000001', 'INR', 2) }).canonicalHash)
       .not.toBe(evaluate(input).canonicalHash);
+  });
+
+  it('requires EU B2B evidence and passes the deployed route when it is complete', () => {
+    const policy = resolve('DE', 'PL').policy;
+    const base = {
+      id: 'CMP-EU-VAT', policy,
+      inrEquivalent: money('50000000', 'INR', 2),
+      originCredential: credential({ country: 'DE' }),
+      destinationCredential: credential({ country: 'PL' }),
+      purposeCode: 'B2B_DIGITAL_SERVICES',
+      evaluatedAt: NOW,
+    };
+    const held = evaluate({ ...base, providedDocuments: ['EU_VAT_IDS', 'B2B_SERVICE_CLASSIFICATION'] });
+    expect(held.outcome).toBe('MANUAL_REVIEW');
+    expect(held.requiredDocuments.find((item) => item.code === 'REVERSE_CHARGE_INVOICE')?.satisfied).toBe(false);
+
+    const complete = evaluate({
+      ...base,
+      providedDocuments: ['EU_VAT_IDS', 'B2B_SERVICE_CLASSIFICATION', 'REVERSE_CHARGE_INVOICE'],
+    });
+    expect(complete.outcome).toBe('PASSED');
+  });
+
+  it('distinguishes a Russia review from a confirmed listed-party block', () => {
+    const policy = resolve('PL', 'RU').policy;
+    const base = {
+      id: 'CMP-EU-SANCTIONS', policy,
+      inrEquivalent: money('30000000', 'INR', 2),
+      originCredential: credential({ country: 'PL' }),
+      destinationCredential: credential({ country: 'RU' }),
+      purposeCode: 'B2B_SERVICES',
+      providedDocuments: ['EU_SANCTIONS_SCREENING', 'BENEFICIARY_BANK_SCREENING', 'PAYMENT_PURPOSE_EVIDENCE'],
+      evaluatedAt: NOW,
+    };
+    expect(evaluate(base).outcome).toBe('MANUAL_REVIEW');
+    const blocked = evaluate({ ...base, riskSignals: ['SANCTIONS_PARTY_MATCH'] });
+    expect(blocked.outcome).toBe('BLOCKED');
+    expect(blocked.appliedRules).toContain('SANCTIONS_PARTY_MATCH');
+  });
+
+  it('evaluates a configured DPRK block instead of hiding the policy explanation', () => {
+    const policy = inspect('PL', 'KP').policy;
+    const decision = evaluate({
+      id: 'CMP-DPRK', policy,
+      inrEquivalent: money('1000000', 'INR', 2),
+      originCredential: credential({ country: 'PL' }),
+      destinationCredential: credential({ country: 'KP' }),
+      providedDocuments: [],
+      evaluatedAt: NOW,
+    });
+    expect(decision.outcome).toBe('BLOCKED');
+    expect(decision.appliedRules).toContain('EU_DPRK_TRANSFER_RESTRICTION');
+    expect(decision.requiredDocuments.map((item) => item.code)).toContain('PRIOR_AUTHORIZATION');
   });
 
   it('enforces the shared rich decision schema at runtime', () => {

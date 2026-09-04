@@ -28,6 +28,8 @@ async function walkToFundedContract(current: Harness) {
       title: 'Payments reconciliation service',
       description: 'Build a reconciliation service for a cross-border settlement pipeline, with tests.',
       skills: ['typescript', 'postgres', 'reconciliation'],
+      payerCountry: 'PL',
+      fundingCurrency: 'PLN',
       destinationCountry: 'IN',
       budget: { amountMinor: '1200000', currency: 'PLN', scale: 2 },
     },
@@ -38,6 +40,9 @@ async function walkToFundedContract(current: Harness) {
     token: indianFreelancer.token,
     idempotencyKey: 'demo-application-0001',
     body: {
+      residenceCountry: 'IN',
+      payoutCountry: 'IN',
+      payoutCurrency: 'INR',
       coverLetter: 'I have shipped typescript and postgres reconciliation services for two payment providers.',
     },
   });
@@ -77,7 +82,11 @@ async function walkToFundedContract(current: Harness) {
   expect(providerApproval.status).toBe(200);
   expect(providerApproval.body.contract.state).toBe('RULES_VERIFIED');
 
-  const documents = ['INVOICE', 'SERVICE_EXPORT_DECLARATION'];
+  const documents = [
+    'CESOP_REPORTING_ASSESSMENT', 'EU_PARTY_SCREENING', 'INDIA_MERCHANT_CDD', 'INVOICE',
+    'PAYER_PAYEE_TRANSFER_DATA', 'PAYMENT_RECIPIENT_RECORD', 'PURPOSE_CODE_P0802',
+    'RESTRICTED_TRADE_SCREENING', 'SERVICE_EXPORT_DECLARATION',
+  ];
   for (const [index, code] of documents.entries()) {
     const recorded = await call(current, 'POST', `/v1/contracts/${contract.id}/documents`, {
       token: polishCompany.token,
@@ -107,6 +116,13 @@ describe('Poland to India inward journey', () => {
     expect(payment.payment.bookId).toBe('PL-IN-INWARD');
     expect(payment.payment.state).toBe('QUOTED');
     expect(payment.compliance.outcome).toBe('PASSED');
+    expect(payment.compliance.appliedRules).toEqual(expect.arrayContaining([
+      'REGULATION_SANCTIONS_AML_COVERED',
+      'REGULATION_PAYMENT_CONTROLS_COVERED',
+      'REGULATION_TAX_COVERED',
+      'REGULATION_INVOICING_REPORTING_COVERED',
+      'REGULATION_PURPOSE_COVERED',
+    ]));
     expect(payment.quote.payoutAmount.currency).toBe('INR');
     expect(payment.quote.settlementAmount.currency).toBe('USD');
     expect(payment.quote.settlementAmount.scale).toBe(6);
