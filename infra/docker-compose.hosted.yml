@@ -1,0 +1,214 @@
+# Hardened single-Droplet hackathon deployment. Only Caddy publishes host
+# ports. The API, object store, Fabric Gateway and Algorand executor remain on
+# Docker networks and cannot be reached directly from the internet.
+name: anchor-hosted
+
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      ANCHOR_DOMAIN: "${ANCHOR_DOMAIN:?ANCHOR_DOMAIN is required}"
+      ACME_EMAIL: "${ACME_EMAIL:?ACME_EMAIL is required}"
+      ANCHOR_BASIC_AUTH_USER: "${ANCHOR_BASIC_AUTH_USER:?ANCHOR_BASIC_AUTH_USER is required}"
+      ANCHOR_BASIC_AUTH_HASH: "${ANCHOR_BASIC_AUTH_HASH:?ANCHOR_BASIC_AUTH_HASH is required}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      marketing:
+        condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    networks: [edge]
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
+      S3_BUCKET: "${S3_BUCKET:-anchor-documents}"
+    entrypoint: >-
+      /bin/sh -ec 'mc alias set anchor http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
+      mc mb --ignore-existing "anchor/$${S3_BUCKET}";
+      mc anonymous set none "anchor/$${S3_BUCKET}"'
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
+
+  fabric-gateway:
+    build:
+      context: ..
+      dockerfile: infra/fabric-gateway.Dockerfile
+    restart: unless-stopped
+    env_file: [../.optiwork/testnet/fabric-gateway.env]
+    environment:
+      APP_MODE: demo
+      FABRIC_MODE: real
+      HOST: 0.0.0.0
+      PORT: 4200
+      FABRIC_CHANNEL_NAME: optiwork-channel
+      FABRIC_CHAINCODE_NAME: optiwork-evidence
+      IDEMPOTENCY_STORE: postgres
+      IDEMPOTENCY_DATABASE_URL: "${SUPABASE_DATABASE_URL:?SUPABASE_DATABASE_URL is required}?sslmode=verify-full"
+      IDEMPOTENCY_AUTO_MIGRATE: "true"
+      NODE_EXTRA_CA_CERTS: /run/anchor/supabase-ca.crt
+    volumes:
+      - ../.optiwork/testnet/supabase-ca.crt:/run/anchor/supabase-ca.crt:ro
+      - ../blockchain/fabric/network/generated/organizations:/fabric:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4200/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend, optiwork-fabric]
+
+  algorand-executor:
+    build:
+      context: ..
+      dockerfile: services/algorand-executor/Dockerfile
+    restart: unless-stopped
+    env_file: [../.optiwork/testnet/algorand-executor.env]
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4301
+      DATABASE_URL: "${SUPABASE_DATABASE_URL:?SUPABASE_DATABASE_URL is required}"
+      DATABASE_SSL_MODE: verify-full
+      DATABASE_AUTO_MIGRATE: "true"
+      NODE_EXTRA_CA_CERTS: /run/anchor/supabase-ca.crt
+      FABRIC_GATEWAY_URL: http://fabric-gateway:4200
+      FABRIC_GATEWAY_DEMO_AUTH: "true"
+      FABRIC_EVIDENCE_MODE: gateway
+      ALGORAND_NETWORK: testnet
+      PUBLIC_TESTNET_DEMO: "true"
+      ALGORAND_ALGOD_URL: https://testnet-api.algonode.cloud
+      ALGORAND_ALGOD_TOKEN: ""
+      ALGORAND_INDEXER_URL: https://testnet-idx.algonode.cloud
+      ALGORAND_REQUEST_TIMEOUT_MS: "120000"
+      ALGORAND_CONFIRMATION_ROUNDS: "3"
+    volumes:
+      - ../.optiwork/testnet/supabase-ca.crt:/run/anchor/supabase-ca.crt:ro
+    depends_on:
+      fabric-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4301/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/api.Dockerfile
+    restart: unless-stopped
+    env_file: [../.optiwork/testnet/api.env]
+    environment:
+      OPTIWORK_PROFILE: demo
+      API_HOST: 0.0.0.0
+      API_PORT: 4000
+      DATABASE_URL: "${SUPABASE_DATABASE_URL:?SUPABASE_DATABASE_URL is required}?sslmode=verify-full"
+      NODE_EXTRA_CA_CERTS: /run/anchor/supabase-ca.crt
+      AUTH_MODE: demo
+      STORAGE_MODE: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: "${S3_BUCKET:-anchor-documents}"
+      S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}"
+      S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
+      FX_MODE: "${FX_MODE:-frankfurter}"
+      AI_MODE: "${AI_MODE:-openai}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      REGULATION_REFRESH_MODE: "${REGULATION_REFRESH_MODE:-live}"
+      ALGORAND_MODE: executor
+      ALGORAND_NETWORK: testnet
+      ALGORAND_EXECUTOR_URL: http://algorand-executor:4301
+      ALGORAND_EXPLORER_BASE_URL: https://lora.algokit.io/testnet
+      ALGORAND_DEPLOYMENT_MANIFEST_PATH: /run/anchor/algorand-deployment.json
+      FABRIC_MODE: gateway
+      FABRIC_GATEWAY_URL: http://fabric-gateway:4200
+      FABRIC_GATEWAY_AUTH_MODE: demo
+    volumes:
+      - ../.optiwork/testnet/algorand-deployment.json:/run/anchor/algorand-deployment.json:ro
+      - ../.optiwork/testnet/supabase-ca.crt:/run/anchor/supabase-ca.crt:ro
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      fabric-gateway:
+        condition: service_healthy
+      algorand-executor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
+
+  marketing:
+    build:
+      context: ..
+      dockerfile: infra/marketing.Dockerfile
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4175
+      OPTIWORK_API_BASE_URL: http://api:4000
+      ANCHOR_WORKFLOW_STATE_FILE: /var/lib/anchor/workflow-state.json
+    volumes:
+      - ../.optiwork/hosted/workflow:/var/lib/anchor
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4175/api/workflow/steps').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend, edge]
+
+volumes:
+  minio-data:
+    name: anchor-hosted-minio-data
+  caddy-data:
+    name: anchor-hosted-caddy-data
+  caddy-config:
+    name: anchor-hosted-caddy-config
+
+networks:
+  edge:
+    name: anchor-hosted-edge
+  backend:
+    name: anchor-hosted-backend
+  optiwork-fabric:
+    external: true
+    name: optiwork-fabric-local

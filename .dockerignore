@@ -1,6 +1,8 @@
 .git
 .github
 .optiwork
+.env
+.env.*
 **/node_modules
 **/.next
 **/dist

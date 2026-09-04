@@ -12,9 +12,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.base.js
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/domain/package.json packages/domain/
 COPY apps/api/package.json apps/api/
-COPY apps/web/package.json apps/web/
-COPY services/algorand-executor/package.json services/algorand-executor/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter @optiwork/api...
 
 COPY packages packages
 COPY apps/api apps/api

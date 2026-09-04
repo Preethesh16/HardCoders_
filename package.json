@@ -24,6 +24,12 @@
     "testnet:down": "bash scripts/testnet.sh down",
     "testnet:status": "bash scripts/testnet.sh status",
     "testnet:e2e": "bash scripts/testnet.sh e2e",
+    "hosted:preflight": "bash scripts/hosted.sh preflight",
+    "hosted:up": "bash scripts/hosted.sh up",
+    "hosted:status": "bash scripts/hosted.sh status",
+    "hosted:logs": "bash scripts/hosted.sh logs",
+    "hosted:down": "bash scripts/hosted.sh down",
+    "hosted:backup": "bash scripts/hosted.sh backup",
     "test:browser:roles": "node scripts/verify-role-workflow-browser.mjs"
   },
   "devDependencies": {

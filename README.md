@@ -278,6 +278,25 @@ their transaction context instead of presented as additional people:
 Provider settlement, compliance, evidence recording and audit are automated
 Anchor services. They do not log in, choose work or appear as user roles.
 
+### Protected AMD/DigitalOcean hosted demo
+
+The hosted profile packages the same public-TestNet workflow into immutable
+application images, places Caddy HTTPS and a judge password in front of the
+demo, keeps every backend port private, preserves MinIO/Fabric state and
+provides preflight, status, log and backup commands. Start with the
+[AMD DigitalOcean deployment runbook](docs/AMD_DIGITALOCEAN_DEPLOYMENT.md).
+
+```bash
+cp infra/hosted.env.example .env.hosted
+chmod 600 .env.hosted
+corepack pnpm hosted:preflight
+corepack pnpm hosted:up
+```
+
+The hosted profile is intentionally labelled a protected hackathon demo. It
+does not turn guarded demo principals or the single-orderer Fabric network into
+a production payment service.
+
 ### 90-second evaluator walkthrough
 
 1. Open `:4175` in two tabs: enter one as **Company** and the other as **Freelancer**. Both poll the same shared deal cursor; its business records remain in PostgreSQL/MinIO and the cursor survives UI-service restarts.

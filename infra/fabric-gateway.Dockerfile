@@ -5,7 +5,7 @@ WORKDIR /workspace
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.base.json ./
 COPY packages/contracts/package.json packages/contracts/
 COPY services/fabric-gateway/package.json services/fabric-gateway/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter @optiwork/fabric-gateway...
 COPY packages/contracts packages/contracts
 COPY services/fabric-gateway services/fabric-gateway
 RUN pnpm --filter @optiwork/contracts --filter @optiwork/fabric-gateway build \
