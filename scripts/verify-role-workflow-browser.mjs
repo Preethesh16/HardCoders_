@@ -324,7 +324,19 @@ try {
   await company.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.phase === 'AWAITING_WORK_APPROVAL')`, 'Fabric submission and validation did not reach Company approval.', 90_000);
   await company.waitFor('document.querySelector("[data-approve-work]") !== null', 'Company approval control did not render.', 15_000);
   await company.click('[data-approve-work]');
-  await company.waitFor('document.querySelector("[data-transfer-screen]") !== null', 'Post-approval money transfer screen did not render.', 15_000);
+  await company.waitFor('document.querySelector("[data-route-optimizer]") !== null', 'Live settlement router screen did not render after Fabric approval.', 15_000);
+  await company.waitFor('document.querySelector("[data-route-optimizer][data-ready=true]") !== null', 'Persisted provider decision did not reach the live route screen.', 45_000);
+  const routeScene = await company.evaluate(`({
+    stages: document.querySelectorAll('[data-route-optimizer] .route-optimizer-path li').length,
+    candidates: document.querySelectorAll('[data-route-optimizer] .settlement-router-panel article').length,
+    selected: document.querySelectorAll('[data-route-optimizer] .settlement-router-panel article[data-selected="true"]').length,
+    rejected: document.querySelectorAll('[data-route-optimizer] .settlement-router-panel article[data-eligible="false"]').length,
+    text: document.querySelector('[data-route-optimizer]')?.innerText ?? ''
+  })`);
+  if (routeScene.stages !== 6 || routeScene.candidates !== 3 || routeScene.selected !== 1 || routeScene.rejected < 1 || !/AUTHORIZED ROUTE HASH/iu.test(routeScene.text)) {
+    throw new Error(`Live route optimizer scene is incomplete: ${JSON.stringify(routeScene)}`);
+  }
+  await company.waitFor('document.querySelector("[data-transfer-screen]") !== null', 'Post-routing money transfer screen did not render.', 30_000);
   const transferScene = await company.evaluate(`({
     company: document.querySelector('[data-transfer-screen] img[alt="Company representative"]') !== null,
     freelancer: document.querySelector('[data-transfer-screen] img[alt="Freelancer"]') !== null,
@@ -356,6 +368,8 @@ try {
     conservationChecks: Array.from(document.querySelectorAll('.conservation-proof article b')).map(element => element.textContent),
     analyticsCards: document.querySelectorAll('.settlement-kpis article').length,
     proofStages: document.querySelectorAll('.settlement-journey article[data-complete="true"]').length,
+    routerCandidates: document.querySelectorAll('.settlement-router-panel article').length,
+    selectedRoutes: document.querySelectorAll('.settlement-router-panel article[data-selected="true"]').length,
     feeImpactRows: document.querySelectorAll('.fee-impact article').length,
     commands: document.querySelectorAll('.provider-command-list > div').length,
     events: document.querySelectorAll('.settlement-audit li').length,
@@ -364,7 +378,9 @@ try {
   if (settlementReceipt.conservationChecks.length !== 4
     || settlementReceipt.conservationChecks.some(value => !/^0(?:[.,]0+)?\s/u.test(value ?? ''))
     || settlementReceipt.analyticsCards !== 4
-    || settlementReceipt.proofStages !== 7
+    || settlementReceipt.proofStages !== 8
+    || settlementReceipt.routerCandidates !== 3
+    || settlementReceipt.selectedRoutes !== 1
     || settlementReceipt.feeImpactRows !== 2
     || settlementReceipt.commands < 4
     || settlementReceipt.events < 10

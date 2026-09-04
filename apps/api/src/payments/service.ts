@@ -31,6 +31,9 @@ import {
   providerCommands,
   reconciliationRecords,
   requiredDocuments,
+  settlementExecutions,
+  settlementProviderQuotes,
+  settlementRouteDecisions,
   organizations,
   workContracts,
 } from '../db/schema.js';
@@ -39,7 +42,7 @@ import { requireOwnership, requireReadAccess, requireRole, type Principal } from
 import { bookIdFor, resolve } from '../corridor/service.js';
 import { assertComplianceDecision, evaluate, type ComplianceDecision } from '../compliance/engine.js';
 import { assertQuoteIntegrity, buildQuote, assertQuoteCurrent, SETTLEMENT_SCALE, totalFeesMinor, type FxQuoteRecord } from '../fx/quote.js';
-import { convertMoney, money, parseRate, sameDenomination, type Money } from '../money.js';
+import { addMoney, convertMoney, money, parseRate, sameDenomination, type Money } from '../money.js';
 import { providersForBook, providerCapabilitiesSatisfied, type CorridorProviders } from './providers.js';
 import { escrowBindingCommitment, releaseBindingCommitment, type EscrowBindingInput, type ReleaseBinding } from '../algorand/executor-client.js';
 import { fabricTransactionHash, workEvidenceHash } from '../fabric/evidence-reader.js';
@@ -54,6 +57,13 @@ import {
   type RegulatoryPartyType,
   type RegulatoryPurposeType,
 } from '../regulations/index.js';
+import {
+  defaultSettlementProviders,
+  providerForDecision,
+  selectSettlementRoute,
+  type SettlementProviderAdapter,
+  type SettlementTransaction,
+} from '../settlement/router.js';
 
 export type Payment = Select<typeof paymentInstructions>;
 
@@ -75,10 +85,12 @@ export interface SupplierPaymentInput {
 export class PaymentService {
   private readonly identity: IdentityService;
   private readonly submissions: SubmissionService;
+  private readonly settlementProviders: readonly SettlementProviderAdapter[];
 
   constructor(private readonly context: AppContext) {
     this.identity = new IdentityService(context);
     this.submissions = new SubmissionService(context);
+    this.settlementProviders = defaultSettlementProviders();
   }
 
   private actor(principal: Principal) {
@@ -422,11 +434,128 @@ export class PaymentService {
       throw conflict('The Fabric work evidence changed after the buyer approval was recorded.');
     }
 
-    const { quote, compliance } = await this.hydrate(payment);
+    const { quote, compliance, corridor } = await this.hydrate(payment);
     const bindingRow = await this.requireBinding(payment.id);
     const escrowInput = this.toEscrowInput(bindingRow);
     const generation = (await this.context.store.findMany(providerCommands, { paymentId: payment.id, action: 'release' })).length + 1;
-    const expiresAt = new Date(this.context.clock.now().getTime() + RELEASE_AUTHORIZATION_TTL_SECONDS * 1_000).toISOString();
+    const routeNow = this.context.clock.now();
+    const freshRates = await this.context.rates.rates(corridor, routeNow);
+    const fxOracleUnsigned = {
+      schemaVersion: '1.0',
+      paymentId: payment.id,
+      pair: `USD/${corridor.payoutCurrency}`,
+      rateUnits: freshRates.usdToPayout.units.toString(),
+      rateScale: freshRates.usdToPayout.scale,
+      source: freshRates.source,
+      observedAt: freshRates.observedAt,
+      fetchedAt: routeNow.toISOString(),
+    };
+    const settlementTransaction: SettlementTransaction = {
+      transactionId: payment.id,
+      corridorId: payment.corridorId,
+      bookId: payment.bookId,
+      sourceAsset: 'USDC',
+      sourceAmount: quote.settlementAmount,
+      destinationCurrency: payment.payoutCurrency,
+      destinationScale: payment.payoutScale,
+      destinationProviderAddress: bindingRow.destinationProviderAddress,
+      complianceOutcome: compliance.outcome,
+      complianceResultHash: compliance.canonicalHash,
+      rulesVersion: compliance.rulesVersion,
+      fxRate: freshRates.usdToPayout,
+      fxSource: freshRates.source,
+      fxObservedAt: freshRates.observedAt,
+      fxFetchedAt: routeNow.toISOString(),
+      fxOracleHash: canonicalHash(fxOracleUnsigned),
+      // Ordinary freelancer income tax remains the beneficiary's reporting
+      // obligation. Only a deterministic rules-engine result explicitly
+      // marked settlement-affecting may be supplied here.
+      settlementObligations: [],
+    };
+    const routeDecision = await selectSettlementRoute({
+      transaction: settlementTransaction,
+      providers: this.settlementProviders,
+      generation,
+      now: routeNow,
+    });
+    const routeDecisionId = this.context.ids.next('ROUTE');
+    await this.context.store.insert(settlementRouteDecisions, {
+      id: routeDecisionId,
+      paymentId: payment.id,
+      generation,
+      status: routeDecision.status,
+      selectedProviderId: routeDecision.selectedProviderId,
+      selectedQuoteId: routeDecision.selectedQuoteId,
+      selectedRecipientAmountMinor: routeDecision.selectedRecipientAmount?.amountMinor ?? null,
+      payoutCurrency: payment.payoutCurrency,
+      payoutScale: payment.payoutScale,
+      fxOracleHash: routeDecision.fxOracleHash,
+      routeHash: routeDecision.routeHash,
+      decision: routeDecision as unknown as Record<string, unknown>,
+      decidedAt: routeDecision.decidedAt,
+      expiresAt: routeDecision.expiresAt,
+    });
+    for (const candidate of routeDecision.candidates) {
+      await this.context.store.insert(settlementProviderQuotes, {
+        id: this.context.ids.next('PQUOTE'),
+        paymentId: payment.id,
+        decisionId: routeDecisionId,
+        providerId: candidate.quote.providerId,
+        quoteId: candidate.quote.quoteId,
+        eligible: candidate.eligible,
+        reasonCodes: [...candidate.reasonCodes],
+        recipientAmountMinor: candidate.quote.recipientAmount.amountMinor,
+        payoutCurrency: candidate.quote.recipientAmount.currency,
+        payoutScale: candidate.quote.recipientAmount.scale,
+        quotedAt: candidate.quote.quotedAt,
+        expiresAt: candidate.quote.expiresAt,
+        authenticityHash: candidate.quote.authenticityHash,
+        quote: candidate.quote as unknown as Record<string, unknown>,
+        createdAt: routeNow.toISOString(),
+      });
+    }
+    await this.context.timeline.append({
+      kind: 'SETTLEMENT_ROUTE_SELECTED',
+      actor: { subject: 'anchor-settlement-router', role: 'payments_service' },
+      contractId: contract.id,
+      paymentId: payment.id,
+      detail: {
+        decisionId: routeDecisionId,
+        status: routeDecision.status,
+        selectedProviderId: routeDecision.selectedProviderId,
+        selectedQuoteId: routeDecision.selectedQuoteId,
+        selectedRecipientAmount: routeDecision.selectedRecipientAmount,
+        candidates: routeDecision.candidates.map((candidate) => ({
+          providerId: candidate.quote.providerId,
+          eligible: candidate.eligible,
+          reasonCodes: candidate.reasonCodes,
+          recipientAmount: candidate.quote.recipientAmount,
+          etaSeconds: candidate.quote.estimatedSettlementSeconds,
+          expiresAt: candidate.quote.expiresAt,
+        })),
+        rankingRule: routeDecision.rankingRule,
+        fxSource: settlementTransaction.fxSource,
+        fxObservedAt: settlementTransaction.fxObservedAt,
+        fxFetchedAt: settlementTransaction.fxFetchedAt,
+        fxOracleHash: settlementTransaction.fxOracleHash,
+        routeHash: routeDecision.routeHash,
+        demoProviders: true,
+      },
+    });
+    if (routeDecision.status !== 'SELECTED' || !routeDecision.expiresAt) {
+      throw unprocessable('No eligible settlement provider route is available; escrow remains locked.', {
+        reasonCodes: routeDecision.reasonCodes,
+        routeHash: routeDecision.routeHash,
+      });
+    }
+    const selectedCandidate = routeDecision.candidates.find((candidate) =>
+      candidate.quote.quoteId === routeDecision.selectedQuoteId && candidate.eligible);
+    if (!selectedCandidate) throw unprocessable('The selected settlement quote is missing from the persisted decision.');
+    const permitExpiry = Math.min(
+      routeNow.getTime() + RELEASE_AUTHORIZATION_TTL_SECONDS * 1_000,
+      Date.parse(routeDecision.expiresAt),
+    );
+    const expiresAt = new Date(permitExpiry).toISOString();
     const releaseIdempotencyKey = `${idempotencyKey}:RELEASE`;
 
     const releaseBinding: ReleaseBinding = {
@@ -435,6 +564,7 @@ export class PaymentService {
       fabricTxHash: fabricTransactionHash(evidence.fabricTxId),
       complianceResultHash: compliance.canonicalHash,
       fxQuoteHash: quote.canonicalHash,
+      settlementRouteHash: routeDecision.routeHash,
       generation,
       idempotencyKey: releaseIdempotencyKey,
       expiresAt,
@@ -472,6 +602,9 @@ export class PaymentService {
         fabricTxHash: releaseBinding.fabricTxHash,
         complianceResultHash: releaseBinding.complianceResultHash,
         fxQuoteHash: releaseBinding.fxQuoteHash,
+        settlementRouteHash: releaseBinding.settlementRouteHash,
+        selectedProviderId: routeDecision.selectedProviderId,
+        selectedQuoteId: routeDecision.selectedQuoteId,
       },
     });
 
@@ -500,6 +633,20 @@ export class PaymentService {
       },
     });
 
+    const selectedProvider = providerForDecision(this.settlementProviders, routeDecision);
+    const settlement = await selectedProvider.executeSettlement(settlementTransaction, selectedCandidate.quote, this.context.clock.now());
+    await this.context.store.insert(settlementExecutions, {
+      id: this.context.ids.next('SETTLE'),
+      paymentId: payment.id,
+      decisionId: routeDecisionId,
+      providerId: settlement.providerId,
+      quoteId: settlement.quoteId,
+      status: settlement.status,
+      settlementReference: settlement.settlementReference,
+      response: settlement as unknown as Record<string, unknown>,
+      settledAt: settlement.settledAt,
+    });
+
     // The destination provider converts USD to the payout currency and credits
     // the beneficiary's simulated wallet.
     const providers = this.providers(payment.bookId);
@@ -515,19 +662,20 @@ export class PaymentService {
         { accountId: accounts.destinationSettlementUsd, side: 'CREDIT', amount: quote.settlementAmount },
       ],
     });
-    const destinationFee = quote.fees.find((fee) => fee.code === 'DESTINATION_OFFRAMP')!.amount;
+    const routedFee = [selectedCandidate.quote.spread, selectedCandidate.quote.providerFee, selectedCandidate.quote.networkFee]
+      .reduce((total, item) => addMoney(total, item), money(0n, payment.payoutCurrency, payment.payoutScale));
     const payoutLines = [
-      { accountId: accounts.destinationPayout, side: 'DEBIT' as const, amount: quote.grossPayoutAmount },
-      ...(BigInt(destinationFee.amountMinor) > 0n
-        ? [{ accountId: accounts.feeIncomePayout, side: 'CREDIT' as const, amount: destinationFee }]
+      { accountId: accounts.destinationPayout, side: 'DEBIT' as const, amount: selectedCandidate.quote.grossDestinationAmount },
+      ...(BigInt(routedFee.amountMinor) > 0n
+        ? [{ accountId: accounts.feeIncomePayout, side: 'CREDIT' as const, amount: routedFee }]
         : []),
-      { accountId: accounts.beneficiaryWallet, side: 'CREDIT' as const, amount: quote.payoutAmount },
+      { accountId: accounts.beneficiaryWallet, side: 'CREDIT' as const, amount: selectedCandidate.quote.recipientAmount },
     ];
     await this.context.ledger.post({
       bookId: payment.bookId,
       direction: payment.direction as 'INWARD' | 'OUTWARD',
       reference: `${payment.id}:PAYOUT`,
-      memo: `Simulated USD to ${quote.payoutAmount.currency} payout for ${payment.id}`,
+      memo: `${settlement.providerId} simulated USD to ${payment.payoutCurrency} payout for ${payment.id}`,
       paymentId: payment.id,
       lines: payoutLines,
     });
@@ -539,9 +687,13 @@ export class PaymentService {
       paymentId: payment.id,
       detail: {
         paymentId: payment.id,
-        payoutMinor: quote.payoutAmount.amountMinor,
-        payoutCurrency: quote.payoutAmount.currency,
+        payoutMinor: selectedCandidate.quote.recipientAmount.amountMinor,
+        payoutCurrency: selectedCandidate.quote.recipientAmount.currency,
         beneficiaryAccountId: accounts.beneficiaryWallet,
+        providerId: settlement.providerId,
+        quoteId: settlement.quoteId,
+        settlementReference: settlement.settlementReference,
+        providerDemoOnly: true,
       },
     });
 
@@ -684,6 +836,13 @@ export class PaymentService {
     const commands = await this.context.store.findMany(providerCommands, { paymentId }, { orderBy: 'createdAt' });
     const binding = await this.context.store.findOne(escrowBindings, { paymentId });
     const submissions = await this.submissions.list(contract.id);
+    const routeDecisions = await this.context.store.findMany(
+      settlementRouteDecisions,
+      { paymentId },
+      { orderBy: 'generation', direction: 'desc' },
+    );
+    const routeQuotes = await this.context.store.findMany(settlementProviderQuotes, { paymentId }, { orderBy: 'createdAt' });
+    const settlementRuns = await this.context.store.findMany(settlementExecutions, { paymentId }, { orderBy: 'settledAt' });
     return {
       payment,
       contract,
@@ -694,6 +853,10 @@ export class PaymentService {
       commands,
       binding,
       submissions,
+      settlementRoute: routeDecisions[0]?.decision ?? null,
+      settlementRouteHistory: routeDecisions.map((row) => row.decision),
+      settlementProviderQuotes: routeQuotes.map((row) => row.quote),
+      settlementExecutions: settlementRuns.map((row) => row.response),
       reconciliation: reconciliation ?? null,
       explorerBaseUrl: this.context.config.algorand.explorerBaseUrl,
     };

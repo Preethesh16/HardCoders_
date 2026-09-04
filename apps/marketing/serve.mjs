@@ -16,6 +16,7 @@ import {
   runStep,
   runAction,
   currentRun,
+  currentRunWithLiveSettlement,
   agreementAccess,
   submissionAccess,
   extractForm,
@@ -142,7 +143,7 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (requestPath === "/api/workspace/state" && req.method === "GET") {
-    sendJson(res, 200, { steps: stepList(), run: currentRun(), runtime: await runtimeMetadata() });
+    sendJson(res, 200, { steps: stepList(), run: await currentRunWithLiveSettlement(), runtime: await runtimeMetadata() });
     return;
   }
   if (requestPath === "/api/authorization/evaluate" && req.method === "POST") {

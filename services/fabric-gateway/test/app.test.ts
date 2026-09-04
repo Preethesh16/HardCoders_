@@ -85,6 +85,7 @@ function permitPayload(evidence: LedgerWorkEvidence, idempotencyKey: string) {
     fabricTxHash: sha256(evidence.fabricTxId),
     complianceResultHash: hash('e'),
     fxQuoteHash: hash('f'),
+    settlementRouteHash: hash('1'),
     generation: 1,
     idempotencyKey,
     expiresAt,
@@ -188,6 +189,7 @@ describe('OptiWork evidence Gateway', () => {
       releaseBinding: {
         complianceResultHash: hash('e'),
         fxQuoteHash: hash('f'),
+        settlementRouteHash: hash('1'),
         generation: 1,
       },
     });

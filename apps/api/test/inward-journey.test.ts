@@ -191,13 +191,19 @@ describe('Poland to India inward journey', () => {
     expect(kinds).toEqual(expect.arrayContaining([
       'CORRIDOR_RESOLVED', 'FX_QUOTED', 'COMPLIANCE_EVALUATED', 'PAYMENT_CREATED',
       'FIAT_FUNDED', 'ESCROW_CREATED', 'USDC_LOCKED', 'WORK_SUBMITTED', 'WORK_EVALUATED', 'WORK_APPROVED',
-      'RELEASE_AUTHORIZED', 'USDC_RELEASED', 'PAYOUT_CREDITED', 'PAYMENT_COMPLETED',
+      'SETTLEMENT_ROUTE_SELECTED', 'RELEASE_AUTHORIZED', 'USDC_RELEASED', 'PAYOUT_CREDITED', 'PAYMENT_COMPLETED',
     ]));
     expect(timeline.body.reconciliation.status).toBe('MATCHED');
     expect(timeline.body.binding.network).toBe('localnet');
     expect(timeline.body.quote.canonicalHash).toBe(payment.quote.canonicalHash);
     expect(timeline.body.compliance.canonicalHash).toBe(payment.compliance.canonicalHash);
     expect(timeline.body.corridor.id).toBe('PL-IN-INWARD-v1');
+    expect(timeline.body.settlementRoute).toMatchObject({
+      status: 'SELECTED', selectedProviderId: 'RAPIDRAMP_DEMO', bookId: 'PL-IN-INWARD',
+    });
+    expect(timeline.body.settlementRoute.candidates).toHaveLength(3);
+    expect(timeline.body.settlementRoute.routeHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
+    expect(timeline.body.settlementExecutions[0]).toMatchObject({ status: 'COMPLETED', demoOnly: true });
 
     // The freelancer's simulated INR wallet holds exactly the quoted payout.
     const wallet = await current.context.store.findOne(fiatAccounts, {

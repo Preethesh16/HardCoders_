@@ -64,6 +64,13 @@
       "when": 1788438812995,
       "tag": "0008_company_representative_mandates",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788528300000,
+      "tag": "0009_dynamic_settlement_router",
+      "breakpoints": true
     }
   ]
 }

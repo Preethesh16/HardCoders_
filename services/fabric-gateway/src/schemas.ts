@@ -85,6 +85,7 @@ export const ReleasePermitBodySchema = Type.Object({
         fabricTxHash: Hash,
         complianceResultHash: Hash,
         fxQuoteHash: Hash,
+        settlementRouteHash: Hash,
         generation: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
         idempotencyKey: IdempotencyKey,
         expiresAt: Type.String({ format: 'date-time' }),

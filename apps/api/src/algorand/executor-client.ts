@@ -30,7 +30,7 @@ export interface EscrowBindingInput {
 }
 
 /**
- * The eight-field authorization a release is bound to. It is identical to the
+ * The nine-field authorization a release is bound to. It is identical to the
  * executor's `releaseBinding` and to `ReleaseAuthorizationSchema` in
  * `packages/contracts`.
  */
@@ -40,6 +40,7 @@ export interface ReleaseBinding {
   readonly fabricTxHash: string;
   readonly complianceResultHash: string;
   readonly fxQuoteHash: string;
+  readonly settlementRouteHash: string;
   readonly generation: number;
   readonly idempotencyKey: string;
   readonly expiresAt: string;

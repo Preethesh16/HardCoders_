@@ -112,6 +112,7 @@ describe('Fabric Gateway to Algorand executor release boundary', () => {
       workEvidenceHash: body.releaseBinding.workEvidenceHash,
       complianceResultHash: body.releaseBinding.complianceResultHash,
       fxQuoteHash: body.releaseBinding.fxQuoteHash,
+      settlementRouteHash: body.releaseBinding.settlementRouteHash,
     });
     const command: CommandContext = {
       action: 'release', method: 'POST', path: '/escrows/DEAL-PL-IN-001/releases',

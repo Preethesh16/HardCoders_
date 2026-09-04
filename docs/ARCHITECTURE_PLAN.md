@@ -61,6 +61,14 @@ committed.
 | Runtime | Docker Compose, AlgoKit LocalNet, isolated Fabric network | One-command, offline, real-ledger acceptance profile; TestNet is a deferred public proof mode. |
 
 Algorand TestNet uses Circle's zero-value USDC ASA `10458941`, scale six.
+
+At release time, a deterministic settlement router obtains fresh FX evidence
+and quotes three zero-value provider adapters. Hard legal, corridor, currency,
+liquidity, operational and freshness constraints run before optimization. The
+complete candidate set and selected route are stored in PostgreSQL, and the
+selected route hash is included in the Fabric-signed release authorization
+whose commitment is recorded by Algorand. See
+[`DYNAMIC_SETTLEMENT_ROUTER.md`](DYNAMIC_SETTLEMENT_ROUTER.md).
 LocalNet creates a zero-value `OptiUSD-DEMO` ASA. Mainnet is rejected by
 configuration.
 

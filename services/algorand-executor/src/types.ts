@@ -94,6 +94,7 @@ export const releaseBindingSchema = z.object({
   fabricTxHash: hashSchema,
   complianceResultHash: hashSchema,
   fxQuoteHash: hashSchema,
+  settlementRouteHash: hashSchema,
   generation: z.number().int().positive().safe(),
   idempotencyKey: idempotencyKeySchema,
   expiresAt: z.string().datetime({ offset: true }),

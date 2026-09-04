@@ -157,6 +157,7 @@ describe("release authorization binding", () => {
         fabricTxHash: `sha256:${"2".repeat(64)}`,
         complianceResultHash: `sha256:${"3".repeat(64)}`,
         fxQuoteHash: `sha256:${"4".repeat(64)}`,
+        settlementRouteHash: `sha256:${"5".repeat(64)}`,
         generation: 1,
         idempotencyKey: "KEY-1",
         expiresAt: "2030-01-01T00:00:00.000Z",

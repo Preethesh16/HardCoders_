@@ -90,16 +90,18 @@ export type ReleaseDraft = Omit<ReleaseInput, "authorizationCommitment" | "relea
   readonly workEvidenceHash?: string;
   readonly complianceResultHash?: string;
   readonly fxQuoteHash?: string;
+  readonly settlementRouteHash?: string;
 };
 
 export function releaseInput(draft: ReleaseDraft): ReleaseInput {
-  const { idempotencyKey, evidenceId, workEvidenceHash, complianceResultHash, fxQuoteHash, ...rest } = draft;
+  const { idempotencyKey, evidenceId, workEvidenceHash, complianceResultHash, fxQuoteHash, settlementRouteHash, ...rest } = draft;
   const releaseBinding = {
     escrowBindingHash: escrowBindingCommitment(rest.escrowBinding),
     workEvidenceHash: workEvidenceHash ?? `sha256:${"1".repeat(64)}`,
     fabricTxHash: sha256Text(rest.fabricClaimTransactionId),
     complianceResultHash: complianceResultHash ?? `sha256:${"2".repeat(64)}`,
     fxQuoteHash: fxQuoteHash ?? `sha256:${"3".repeat(64)}`,
+    settlementRouteHash: settlementRouteHash ?? `sha256:${"4".repeat(64)}`,
     generation: rest.fenceGeneration,
     idempotencyKey,
     expiresAt: rest.leaseExpiresAt,

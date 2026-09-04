@@ -1279,7 +1279,7 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
 #portalWorkflow .settlement-journey>header,#portalWorkflow .fee-impact>header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 20px;background:#f3f7f3;border-bottom:1px solid #dce5de}
 #portalWorkflow .settlement-journey h4,#portalWorkflow .fee-impact h4{margin:6px 0 0;font:700 17px/1.45 var(--mono)}
 #portalWorkflow .settlement-journey>header>b,#portalWorkflow .fee-impact>header>span{padding:7px 9px;background:#e3f2e7;color:#17603d;border-radius:6px;font:7px/1.45 "Press Start 2P",monospace}
-#portalWorkflow .settlement-journey>div{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));background:#dce5de;gap:1px}
+#portalWorkflow .settlement-journey>div{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));background:#dce5de;gap:1px}
 #portalWorkflow .settlement-journey article{position:relative;min-width:0;min-height:150px;padding:18px 14px;background:#fff}
 #portalWorkflow .settlement-journey article>i{display:grid;place-items:center;width:30px;height:30px;margin-bottom:17px;background:#edf2ee;color:#6e8176;border-radius:50%;font:700 10px var(--mono);font-style:normal}
 #portalWorkflow .settlement-journey article[data-complete="true"]>i{background:#17372d;color:#d9ff45}
@@ -1329,6 +1329,70 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
 #portalWorkflow .network-fee-note{margin:0;padding:12px 17px;background:#fff8e5;border-top:1px solid #ead8a8;color:#6d5720;font:11px/1.55 var(--mono);text-wrap:pretty}
 #portalWorkflow .settlement-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:0 24px 24px}
 #portalWorkflow .settlement-panel{min-width:0;border:1px solid #dce5de;border-radius:10px;overflow:hidden}
+#portalWorkflow .settlement-router-panel{margin:0 24px 24px;overflow:hidden;border:1px solid #cbd8cf;border-radius:10px;background:#f7faf7}
+#portalWorkflow .settlement-router-panel>header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:20px;background:#153b30;color:#fff}
+#portalWorkflow .settlement-router-panel>header small{color:#9af0b9;font:6px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .settlement-router-panel>header h4{margin:8px 0 6px;font:14px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .settlement-router-panel>header p{margin:0;color:#bdd0c6;font:11px/1.55 var(--mono)}
+#portalWorkflow .settlement-router-panel>header>span{padding:8px 10px;border-radius:6px;background:#d9ff45;color:#17372d;font:6px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .settlement-router-panel>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:#dce5de}
+#portalWorkflow .settlement-router-panel article{min-width:0;padding:17px;background:#fff}
+#portalWorkflow .settlement-router-panel article[data-selected="true"]{background:#edffd2;box-shadow:inset 0 4px #7bb81f}
+#portalWorkflow .settlement-router-panel article[data-eligible="false"]{background:#fff4ed}
+#portalWorkflow .settlement-router-panel article header{display:flex;justify-content:space-between;gap:12px}
+#portalWorkflow .settlement-router-panel article small{font:5px/1.5 "Press Start 2P",monospace;color:#73847b}
+#portalWorkflow .settlement-router-panel article b{display:block;margin-top:6px;font:700 12px/1.45 var(--mono)}
+#portalWorkflow .settlement-router-panel article em{font:6px/1.5 "Press Start 2P",monospace;color:#267b50;font-style:normal}
+#portalWorkflow .settlement-router-panel article[data-eligible="false"] em{color:#a7422f}
+#portalWorkflow .settlement-router-panel article dl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}
+#portalWorkflow .settlement-router-panel article dt{color:#73847b;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .settlement-router-panel article dd{margin:4px 0 0;font:700 10px/1.45 var(--mono)}
+#portalWorkflow .settlement-router-panel article p{margin:0;color:#5c6d64;font:10px/1.55 var(--mono)}
+#portalWorkflow .settlement-router-panel>footer{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:1px;background:#dce5de}
+#portalWorkflow .settlement-router-panel>footer span{padding:14px;background:#f3f7f3}
+#portalWorkflow .settlement-router-panel>footer small,#portalWorkflow .settlement-router-panel>footer b{display:block}
+#portalWorkflow .settlement-router-panel>footer small{color:#73847b;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .settlement-router-panel>footer b{margin-top:6px;font:700 9px/1.45 var(--mono)}
+#portalWorkflow .settlement-router-panel.compact{margin:18px}
+
+/* Judge-facing live route selection. Data comes from the persisted payment
+   timeline; motion only explains the order in which those facts were applied. */
+#portalWorkflow .route-optimizer-live{overflow:hidden;border:1px solid #cbd8cf;border-radius:12px;background:#fff;box-shadow:0 16px 42px rgba(23,55,45,.1)}
+#portalWorkflow .route-optimizer-live>header{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;padding:26px 28px;background:linear-gradient(120deg,#102b22 0%,#174a3b 72%,#1d614c 100%);color:#fff}
+#portalWorkflow .route-optimizer-live>header small{color:#9af0b9;font:6px/1.6 "Press Start 2P",monospace}
+#portalWorkflow .route-optimizer-live>header h3{max-width:760px;margin:11px 0 9px;color:#fff;font:18px/1.45 "Press Start 2P",monospace;text-wrap:balance}
+#portalWorkflow .route-optimizer-live>header p{max-width:780px;margin:0;color:#c4d8cf;font:12px/1.65 var(--mono);text-wrap:pretty}
+#portalWorkflow .route-optimizer-live>header>span{flex:none;padding:11px 13px;border:1px solid #d9ff45;border-radius:7px;color:#d9ff45;font:6px/1.5 "Press Start 2P",monospace;box-shadow:0 0 20px rgba(217,255,69,.14)}
+#portalWorkflow .route-optimizer-live[data-ready="false"]>header>span{animation:routeStatusPulse 1.1s ease-in-out infinite alternate}
+#portalWorkflow .route-optimizer-path{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));margin:0;padding:0;border-bottom:1px solid #dce5de;background:#f5f8f5;list-style:none}
+#portalWorkflow .route-optimizer-path li{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;min-width:0;padding:18px 14px;border-right:1px solid #dce5de}
+#portalWorkflow .route-optimizer-path li:last-child{border-right:0}
+#portalWorkflow .route-optimizer-path li:not(:last-child):after{content:"";position:absolute;z-index:2;right:-6px;top:31px;width:10px;height:10px;background:#dce5de;clip-path:polygon(0 0,100% 50%,0 100%)}
+#portalWorkflow .route-optimizer-path li>i{display:grid;place-items:center;width:31px;height:31px;border:1px solid #cbd8cf;border-radius:50%;background:#fff;color:#718079;font:700 8px/1 var(--mono);font-style:normal}
+#portalWorkflow .route-optimizer-path li b,#portalWorkflow .route-optimizer-path li span{display:block;overflow-wrap:anywhere}
+#portalWorkflow .route-optimizer-path li b{font:6px/1.55 "Press Start 2P",monospace}
+#portalWorkflow .route-optimizer-path li span{margin-top:7px;color:#718079;font:9px/1.5 var(--mono)}
+#portalWorkflow .route-optimizer-path li[data-state="done"]{background:#effbe5}
+#portalWorkflow .route-optimizer-path li[data-state="done"]>i{border-color:#2b8b56;background:#2b8b56;color:#fff}
+#portalWorkflow .route-optimizer-path li[data-state="live"]{background:#edfbff;box-shadow:inset 0 -4px #58ddec}
+#portalWorkflow .route-optimizer-path li[data-state="live"]>i{border-color:#17372d;background:#d9ff45;color:#17372d;animation:routeNodePulse .85s steps(2,end) infinite}
+#portalWorkflow .route-provider-wait{display:flex;align-items:center;gap:18px;margin:24px;padding:24px;border:1px dashed #9daf9f;border-radius:9px;background:#f7faf7}
+#portalWorkflow .route-provider-wait>i{width:18px;height:18px;border:3px solid #b5c4b8;border-top-color:#267b50;border-radius:50%;animation:routeSpinner .8s linear infinite}
+#portalWorkflow .route-provider-wait b{font:7px/1.6 "Press Start 2P",monospace}
+#portalWorkflow .route-provider-wait p{margin:7px 0 0;color:#617269;font:11px/1.6 var(--mono)}
+#portalWorkflow .route-optimizer-live>.settlement-router-panel{margin:24px}
+#portalWorkflow .route-optimizer-live>footer{display:grid;grid-template-columns:1fr 1fr 1fr;height:auto;border-top:1px solid #dce5de;background:#f5f8f5}
+#portalWorkflow .route-optimizer-live>footer span{min-width:0;padding:15px 18px;border-right:1px solid #dce5de}
+#portalWorkflow .route-optimizer-live>footer span:last-child{border-right:0}
+#portalWorkflow .route-optimizer-live>footer small,#portalWorkflow .route-optimizer-live>footer b{display:block}
+#portalWorkflow .route-optimizer-live>footer small{color:#718079;font:5px/1.5 "Press Start 2P",monospace}
+#portalWorkflow .route-optimizer-live>footer b{margin-top:7px;overflow:hidden;color:#17372d;font:700 10px/1.5 var(--mono);text-overflow:ellipsis;white-space:nowrap}
+@keyframes routeSpinner{to{transform:rotate(360deg)}}
+@keyframes routeNodePulse{to{box-shadow:0 0 0 7px rgba(88,221,236,.24)}}
+@keyframes routeStatusPulse{to{background:rgba(217,255,69,.12)}}
+@media(prefers-reduced-motion:reduce){#portalWorkflow .route-optimizer-live[data-ready="false"]>header>span,#portalWorkflow .route-optimizer-path li[data-state="live"]>i,#portalWorkflow .route-provider-wait>i{animation:none}}
+@media(max-width:1050px){#portalWorkflow .route-optimizer-path{grid-template-columns:repeat(3,1fr)}#portalWorkflow .route-optimizer-path li:nth-child(3){border-right:0}#portalWorkflow .route-optimizer-path li:nth-child(-n+3){border-bottom:1px solid #dce5de}}
+@media(max-width:700px){#portalWorkflow .route-optimizer-live>header{display:block;padding:22px}#portalWorkflow .route-optimizer-live>header>span{display:inline-block;margin-top:16px}#portalWorkflow .route-optimizer-path{grid-template-columns:1fr}#portalWorkflow .route-optimizer-path li{border-right:0;border-bottom:1px solid #dce5de}#portalWorkflow .route-optimizer-live>footer{grid-template-columns:1fr}#portalWorkflow .route-optimizer-live>footer span{border-right:0;border-bottom:1px solid #dce5de}}
 #portalWorkflow .receipt-time-grid{display:grid;grid-template-columns:1fr 1fr}
 #portalWorkflow .receipt-time-grid>span{min-width:0;padding:14px 16px;border-right:1px solid #e1e8e2;border-bottom:1px solid #e1e8e2}
 #portalWorkflow .receipt-time-grid>span:nth-child(2n){border-right:0}
@@ -1377,6 +1441,7 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
 @media(max-width:1050px){
   #portalWorkflow .settlement-command-center{grid-template-columns:1fr}
   #portalWorkflow .settlement-journey>div{grid-template-columns:repeat(4,1fr)}
+  #portalWorkflow .settlement-router-panel>div{grid-template-columns:1fr}
   #portalWorkflow .settlement-money-flow{grid-template-columns:1fr 1fr}
   #portalWorkflow .settlement-money-flow .flow-value.payout-value{grid-column:1/-1}
   #portalWorkflow .settlement-identifiers{grid-template-columns:1fr 1fr}
@@ -1390,6 +1455,7 @@ body{background:#0c211b;color:#f4f3eb;background-image:linear-gradient(rgba(155,
   #portalWorkflow .settlement-receipt>header{display:block;padding:22px}
   #portalWorkflow .settlement-receipt>header>span{display:inline-block;margin-top:14px}
   #portalWorkflow .settlement-identifiers,#portalWorkflow .conservation-proof>div,#portalWorkflow .settlement-detail-grid,#portalWorkflow .trust-proof-grid,#portalWorkflow .settlement-kpis,#portalWorkflow .settlement-journey>div,#portalWorkflow .settlement-money-flow,#portalWorkflow .fee-impact>div{grid-template-columns:1fr}
+  #portalWorkflow .settlement-router-panel>footer{grid-template-columns:1fr}
   #portalWorkflow .settlement-value-story{padding:22px}
   #portalWorkflow .settlement-value-story>div{grid-template-columns:1fr;margin:18px 0;gap:10px}
   #portalWorkflow .settlement-value-story>div>i{transform:rotate(90deg)}

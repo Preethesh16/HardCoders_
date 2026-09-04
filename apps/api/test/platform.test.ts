@@ -316,6 +316,7 @@ describe('simulated escrow lifecycle', () => {
       fabricTxHash: `sha256:${'c'.repeat(64)}`,
       complianceResultHash: `sha256:${'d'.repeat(64)}`,
       fxQuoteHash: `sha256:${'e'.repeat(64)}`,
+      settlementRouteHash: `sha256:${'1'.repeat(64)}`,
       generation: 1,
       idempotencyKey: key,
       expiresAt: new Date(NOW.getTime() + 600_000).toISOString(),

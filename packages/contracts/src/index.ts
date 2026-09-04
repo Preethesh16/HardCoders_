@@ -166,6 +166,7 @@ export const ReleaseAuthorizationSchema = Type.Object({
   fabricTxHash: Sha256Schema,
   complianceResultHash: Sha256Schema,
   fxQuoteHash: Sha256Schema,
+  settlementRouteHash: Sha256Schema,
   generation: Type.Integer({ minimum: 1 }),
   idempotencyKey: IdentifierSchema,
   expiresAt: IsoTimestampSchema,

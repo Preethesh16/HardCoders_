@@ -111,6 +111,7 @@ let parties = null;
 let automationPromise = null;
 let validationPromise = null;
 let releasePromise = null;
+let timelineRefreshPromise = null;
 
 function freshRun(previous = null) {
   const retainedProfile = previous?.results?.companyPolicyProfile ?? null;
@@ -739,4 +740,34 @@ export function currentRun() {
     startedAt: run.startedAt, phase: run.phase, results: run.results, actions: run.actions,
     screening: run.screening, automation: run.automation, deliveryAutomation: run.deliveryAutomation
   };
+}
+
+/**
+ * During a release the payment service persists its provider comparison and
+ * authorization before broadcasting to Algorand. Project that intermediate
+ * state into the browser so the judge can watch the real router decision,
+ * instead of seeing it only in the completed receipt.
+ */
+export async function currentRunWithLiveSettlement() {
+  if (!run || run.phase !== "RELEASING" || !run.results.paymentId) return currentRun();
+  if (!timelineRefreshPromise) {
+    const nonce = run.nonce;
+    const paymentId = run.results.paymentId;
+    timelineRefreshPromise = call(companyPartyKey(), "GET", `/v1/payments/${paymentId}/timeline`)
+      .then((timeline) => {
+        if (!run || run.nonce !== nonce || run.results.paymentId !== paymentId) return;
+        run.results.binding = timeline.binding ?? run.results.binding;
+        run.results.settlementTimeline = timeline;
+        run.results.quote = timeline.quote ?? run.results.quote;
+        run.results.compliance = timeline.compliance ?? run.results.compliance;
+        persistRun();
+      })
+      .catch(() => {
+        // The route may not have been persisted yet. The next browser poll
+        // retries; release automation remains the source of truth.
+      })
+      .finally(() => { timelineRefreshPromise = null; });
+  }
+  await timelineRefreshPromise;
+  return currentRun();
 }

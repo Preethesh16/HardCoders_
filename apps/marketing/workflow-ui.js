@@ -14,7 +14,11 @@
   let completedPaymentId = null;
   let completedView = "workflow";
   let analyticsRevealTimer = null;
+  let routeOptimizerPaymentId = null;
+  let routeOptimizerUntil = 0;
+  let routeOptimizerTimer = null;
   const completionHoldMilliseconds = 4_500;
+  const routeOptimizerHoldMilliseconds = 6_000;
 
   const $ = selector => document.querySelector(selector);
   const escape = value => String(value ?? "—").replace(/[&<>"']/g, character => ({
@@ -547,12 +551,52 @@
       case "WORK_SUBMITTED": return `Version ${detail.version ?? "—"} · Fabric ${shortRef(detail.fabricTxId, 8)}`;
       case "WORK_EVALUATED": return `${detail.source ?? "Agent"} advisory score ${detail.score ?? "—"}/100`;
       case "WORK_APPROVED": return `${detail.decision ?? "Decision"} · Fabric ${shortRef(detail.fabricTxId, 8)}`;
+      case "SETTLEMENT_ROUTE_SELECTED": return `${detail.selectedProviderId ?? "No route"} · ${detail.candidates?.length ?? 0} provider quotes · ${shortRef(detail.routeHash, 8)}`;
       case "RELEASE_AUTHORIZED": return `Generation ${detail.generation ?? "—"} · permit expires ${formatInstant(detail.expiresAt)}`;
       case "USDC_RELEASED": return `${money(detail.releasedMinor, 6, "USDC")} released · tx ${shortRef(detail.transactionId, 7)}`;
       case "PAYOUT_CREDITED": return `${money(detail.payoutMinor, 2, detail.payoutCurrency)} credited to the beneficiary book`;
       case "PAYMENT_COMPLETED": return `Payment ${shortRef(detail.paymentId, 8)} closed after reconciliation`;
       default: return String(event?.kind ?? "AUDIT EVENT").replaceAll("_", " ");
     }
+  }
+
+  function settlementRouterPanel(timeline, compact = false) {
+    const decision = timeline?.settlementRoute;
+    if (!decision) return "";
+    const candidates = Array.isArray(decision.candidates) ? decision.candidates : [];
+    const rows = candidates.map(candidate => {
+      const quote = candidate.quote ?? {};
+      return `<article data-selected="${quote.quoteId === decision.selectedQuoteId}" data-eligible="${candidate.eligible}"><header><div><small>${escape(quote.demoOnly ? "DEMO PROVIDER ADAPTER" : "PROVIDER")}</small><b>${escape(quote.providerLabel ?? quote.providerId ?? "Unknown provider")}</b></div><em>${candidate.eligible ? quote.quoteId === decision.selectedQuoteId ? "SELECTED" : "ELIGIBLE" : "REJECTED"}</em></header><dl><div><dt>NET PAYOUT</dt><dd>${escape(money(quote.recipientAmount?.amountMinor, quote.recipientAmount?.scale, quote.recipientAmount?.currency))}</dd></div><div><dt>ETA</dt><dd>${escape(quote.estimatedSettlementSeconds !== undefined ? `${quote.estimatedSettlementSeconds}s` : "—")}</dd></div><div><dt>RELIABILITY</dt><dd>${escape(quote.reliabilityBasisPoints !== undefined ? `${(quote.reliabilityBasisPoints / 100).toFixed(2)}%` : "—")}</dd></div><div><dt>VALID UNTIL</dt><dd>${escape(formatInstant(quote.expiresAt))}</dd></div></dl><p>${escape(candidate.eligible ? quote.quoteId === decision.selectedQuoteId ? decision.reasonCodes?.[0] ?? "Best eligible exact net payout." : "Passed every hard constraint; ranked below the selected route." : (candidate.reasonCodes ?? []).join(" · "))}</p></article>`;
+    }).join("");
+    return `<section class="settlement-router-panel ${compact ? "compact" : ""}" aria-label="Dynamic settlement provider routing"><header><div><small>LIVE SETTLEMENT ROUTER</small><h4>${escape(decision.selectedProviderId ?? "NO ELIGIBLE ROUTE")}</h4><p>Hard constraints ran before deterministic economics. Rejected routes never received fund authority.</p></div><span data-state="${decision.status === "SELECTED" ? "selected" : "rejected"}">${escape(decision.status)}</span></header><div>${rows || '<p class="settlement-empty">No provider candidates were persisted.</p>'}</div><footer><span><small>FRESH FX ORACLE</small><b>${escape(shortRef(decision.fxOracleHash, 10))}</b></span><span><small>AUTHORIZED ROUTE HASH</small><b>${escape(shortRef(decision.routeHash, 10))}</b></span><span><small>RANKING</small><b>${escape(String(decision.rankingRule ?? "DETERMINISTIC").replaceAll("_", " "))}</b></span></footer></section>`;
+  }
+
+  function settlementRouteOptimizerScreen() {
+    const r = results();
+    const timeline = r.settlementTimeline ?? {};
+    const decision = timeline.settlementRoute;
+    const events = Array.isArray(timeline.events) ? timeline.events : [];
+    const routeEvent = events.findLast?.(event => event.kind === "SETTLEMENT_ROUTE_SELECTED") ?? events.find(event => event.kind === "SETTLEMENT_ROUTE_SELECTED");
+    const authorizationEvent = events.findLast?.(event => event.kind === "RELEASE_AUTHORIZED") ?? events.find(event => event.kind === "RELEASE_AUTHORIZED");
+    const releaseEvent = events.findLast?.(event => event.kind === "USDC_RELEASED") ?? events.find(event => event.kind === "USDC_RELEASED");
+    const candidates = Array.isArray(decision?.candidates) ? decision.candidates : [];
+    const rejected = candidates.filter(candidate => !candidate.eligible).length;
+    const eligible = candidates.filter(candidate => candidate.eligible).length;
+    const stages = [
+      { label: "FABRIC GATE", detail: shortRef(r.fabricDecisionTxId, 8), done: Boolean(r.fabricDecisionTxId) },
+      { label: "QUOTE PROVIDERS", detail: decision ? `${candidates.length} returned` : "Requesting signed quotes", done: Boolean(decision) },
+      { label: "HARD CONSTRAINTS", detail: decision ? `${eligible} passed · ${rejected} rejected` : "Compliance · asset · liquidity · expiry", done: Boolean(decision) },
+      { label: "ECONOMIC RANKING", detail: decision?.selectedProviderId ?? "Highest exact net payout wins", done: Boolean(decision?.selectedProviderId) },
+      { label: "ROUTE COMMITMENT", detail: decision ? shortRef(decision.routeHash, 8) : "Awaiting canonical hash", done: Boolean(routeEvent) },
+      { label: "ALGORAND RELEASE", detail: releaseEvent ? `Confirmed ${shortRef(releaseEvent.detail?.transactionId, 8)}` : authorizationEvent ? "Signed permit · broadcasting" : "Waiting for route authorization", done: Boolean(releaseEvent), live: Boolean(authorizationEvent) && !releaseEvent },
+    ];
+    const stageRows = stages.map((stage, index) => `<li data-state="${stage.done ? "done" : stage.live ? "live" : index === stages.findIndex(item => !item.done && !item.live) ? "live" : "pending"}"><i>${stage.done ? "✓" : String(index + 1).padStart(2, "0")}</i><div><b>${escape(stage.label)}</b><span>${escape(stage.detail)}</span></div></li>`).join("");
+    return `<section class="route-optimizer-live" data-route-optimizer aria-live="polite" data-ready="${Boolean(decision)}">
+      <header><div><small>ACTUAL PERSISTED BACKEND DECISION</small><h3>${decision ? "ROUTE SELECTED. RELEASE AUTHORIZED." : "ROUTE OPTIMIZER IS RUNNING."}</h3><p>${decision ? `${candidates.length} provider paths were checked. Hard gates rejected unsafe routes before deterministic payout ranking.` : "The payment service is fetching fresh FX, requesting provider quotes and applying non-negotiable settlement constraints now."}</p></div><span>${decision ? "DECISION SEALED" : "DISCOVERING"}</span></header>
+      <ol class="route-optimizer-path">${stageRows}</ol>
+      ${decision ? settlementRouterPanel(timeline) : `<section class="route-provider-wait"><i></i><div><b>WAITING FOR PERSISTED PROVIDER QUOTES</b><p>No provider result is invented in the browser. This view advances only when the API stores the real comparison.</p></div></section>`}
+      <footer><span><small>CORRIDOR</small><b>${escape(`${dealRoute().originCountry ?? "—"} → ${dealRoute().destinationCountry ?? "—"}`)}</b></span><span><small>DECIDED AT</small><b>${escape(formatInstant(decision?.decidedAt ?? routeEvent?.occurredAt))}</b></span><span><small>AUTHORIZATION</small><b>${escape(authorizationEvent ? `GENERATION ${authorizationEvent.detail?.generation ?? "—"}` : "PENDING")}</b></span></footer>
+    </section>`;
   }
 
   function settlementReceipt() {
@@ -635,6 +679,7 @@
       { label: "FX LOCK", kinds: ["FX_QUOTED"], copy: "Reference rates committed" },
       { label: "ESCROW", kinds: ["USDC_LOCKED"], copy: "Stable value secured on Algorand" },
       { label: "EVIDENCE", kinds: ["WORK_SUBMITTED", "WORK_APPROVED"], copy: "Fabric proof accepted" },
+      { label: "ROUTE", kinds: ["SETTLEMENT_ROUTE_SELECTED"], copy: "Provider hard-gated and selected" },
       { label: "RELEASE", kinds: ["USDC_RELEASED"], copy: "Provider treasury received USDC" },
       { label: "PAYOUT", kinds: ["PAYOUT_CREDITED", "PAYMENT_COMPLETED"], copy: "Local fiat credit reconciled" },
     ];
@@ -656,7 +701,8 @@
           <article><small>ON-CHAIN PROOF</small><b>${escape(`${confirmedCommands}/${commands.length} confirmed`)}</b><span>${escape(binding.network ?? "network pending")}</span></article>
         </div>
       </section>
-      <section class="settlement-journey" aria-label="Settlement proof map"><header><div><small>WHY THE PAYMENT MOVED</small><h4>Seven gates. One authorized release.</h4></div><b>${escape(`${proofChecksPassed}/${proofChecks.length} RECONCILIATION CHECKS`)}</b></header><div>${journeyRows}</div></section>
+      <section class="settlement-journey" aria-label="Settlement proof map"><header><div><small>WHY THE PAYMENT MOVED</small><h4>Eight gates. One authorized release.</h4></div><b>${escape(`${proofChecksPassed}/${proofChecks.length} RECONCILIATION CHECKS`)}</b></header><div>${journeyRows}</div></section>
+      ${settlementRouterPanel(timeline)}
       <div class="settlement-section-title"><span>MONEY FLOW + DEDUCTIONS</span><p>Every displayed amount comes from the persisted quote and settlement record.</p></div>
       <section class="settlement-money-flow" aria-label="Money and fee flow">
         <article class="flow-value source-value"><small>01 · LOCAL FUNDING</small><b>${escape(money(quote.fundingAmount?.amountMinor, quote.fundingAmount?.scale, quote.fundingAmount?.currency))}</b><p>Company fiat book debited</p></article>
@@ -699,6 +745,7 @@
     const payoutAmount = quote?.payoutAmount ?? (payment ? { amountMinor: payment.payoutAmountMinor, scale: payment.payoutScale, currency: payment.payoutCurrency } : null);
     const route = dealRoute();
     const payoutCurrency = payoutAmount?.currency ?? route.payoutCurrency ?? "LOCAL FIAT";
+    const timeline = results().settlementTimeline ?? {};
     return `<section class="money-transfer-screen" data-transfer-screen data-state="${completed ? "completed" : "releasing"}" aria-live="polite">
       <header><div><small>REAL SETTLEMENT EVENT</small><h3>${completed ? "PAYMENT LANDED." : "PAYMENT IS MOVING."}</h3><p>${completed ? `Algorand confirmed the provider release and the destination ledger recorded the local ${escape(payoutCurrency)} credit.` : "The approved Fabric evidence is authorizing the Algorand escrow release now."}</p></div><span>${completed ? "CONFIRMED" : "RELEASING"}</span></header>
       <div class="money-transfer-stage">
@@ -707,13 +754,18 @@
         <figure><div><img src="assets/optiwork-freelancer-pixel.png" alt="Freelancer"></div><figcaption><small>FREELANCER · ${escape(countryLabel(route.destinationCountry).toUpperCase())}</small><b>${completed ? "MONEY RECEIVED" : "AWAITING CREDIT"}</b><em>${escape(payoutAmount ? money(payoutAmount.amountMinor, payoutAmount.scale, payoutAmount.currency) : payoutCurrency)}</em></figcaption></figure>
       </div>
       <dl class="transfer-proof"><div><dt>FABRIC DECISION</dt><dd>${escape(shortRef(results().fabricDecisionTxId, 10))}</dd></div><div><dt>ESCROW DEAL</dt><dd>${escape(shortRef(binding?.dealId, 10))}</dd></div><div><dt>NETWORK</dt><dd>${escape(binding?.network ?? "LOCALNET")}</dd></div></dl>
+      ${settlementRouterPanel(timeline, true)}
       ${completed ? `<section class="deal-complete-confirmation"><i>✓</i><div><small>PAYMENT CONFIRMATION</small><h4>DEAL COMPLETE.</h4><p>${escape(`${money(payoutAmount?.amountMinor, payoutAmount?.scale, payoutCurrency)} credited after Fabric-approved evidence released escrow ${shortRef(binding?.dealId, 8)}.`)}</p></div><span>COMPANY + FREELANCER OBLIGATIONS CLOSED</span></section><section class="analytics-transition-cue" role="status"><small>SETTLEMENT RECORD SEALED</small><b>OPENING TRANSACTION ANALYTICS…</b></section>` : ""}
       <p class="transfer-explainer">The characters visualize the real provider-mediated flow. The company and freelancer remain fiat-only; neither user receives cryptocurrency or signs a blockchain transaction.</p>
     </section>`;
   }
 
+  function showRouteOptimizer(phase) {
+    return phase === "RELEASING" || Date.now() < routeOptimizerUntil;
+  }
+
   function showTransferScreen(phase) {
-    return phase === "RELEASING" || phase === "COMPLETED" || Date.now() < transferAnimationUntil;
+    return phase === "COMPLETED" || Date.now() < transferAnimationUntil;
   }
 
   function waiting(title, copy) {
@@ -747,6 +799,7 @@
     if (phase === "AWAITING_FREELANCER_AGREEMENT") return stageScreen("04", "COUNTERPARTY REVIEW", "Agreement sent for acceptance", "The freelancer receives the same private document and must accept its exact SHA-256 hash.", agreementCard(), "WAITING FOR FREELANCER");
     if (!r.binding && phase !== "AWAITING_DELIVERY") return stageScreen("05", "ANCHOR AUTOPILOT", "Secure the cross-border escrow", "Official-source policy checks, live FX, compliance evidence and Algorand funding advance only when the backend hard gate authorizes them.", automationCard(), automationStatusLabel());
     if (!r.submission) return stageScreen("06", "DELIVERY DESK", "Escrow is secured", "The agreed settlement value is locked. The selected freelancer can now upload the private deliverable.", payoutCard(), "WAITING FOR DELIVERY");
+    if (showRouteOptimizer(phase)) return stageScreen("06", "DYNAMIC SETTLEMENT ROUTER", "Watch Anchor choose the payout path", "Every provider quote, rejection and ranking result below comes from the persisted payment decision that is being bound into the release permit.", settlementRouteOptimizerScreen(), "LIVE OPTIMIZATION");
     if (showTransferScreen(phase)) return stageScreen("06", "SETTLEMENT RAIL", phase === "COMPLETED" ? "The payout has arrived" : "Approved value is moving", "This screen follows the actual release state after the company approval was recorded on Fabric.", moneyTransferScreen(), phase === "COMPLETED" ? "TRANSFER COMPLETE" : "LIVE TRANSFER");
     return stageScreen("06", "EVIDENCE + RELEASE", phase === "COMPLETED" ? "Work approved. Payout complete." : "Review the private delivery", "Download the file, inspect the validation evidence, and authorize release only when the agreed criteria are met.", pairedStage(submissionReview(), payoutCard()), phase === "COMPLETED" ? "COMPLETED" : "HUMAN DECISION");
   }
@@ -763,6 +816,7 @@
     if (phase === "AWAITING_FREELANCER_AGREEMENT" && !hasDone("agreement-approve")) return stageScreen("04", "BILATERAL APPROVAL", "Review the private agreement", "Download the document, verify every term and its source, then accept the exact hash only when you agree.", agreementCard("FREELANCER"));
     if (!r.binding && phase !== "AWAITING_DELIVERY") return stageScreen("05", "ANCHOR AUTOPILOT", "Watch escrow become secured", "Anchor checks the selected corridor and advances to FX and provider escrow only when the backend hard gate authorizes it.", automationCard(), automationStatusLabel());
     if (!r.submission) return stageScreen("06", "PRIVATE DELIVERY", "Submit the finished work", "Your bytes go to private object storage. Only the evidence hash and buyer decision go to Hyperledger Fabric.", pairedStage(submissionForm(), payoutCard()));
+    if (showRouteOptimizer(phase)) return stageScreen("06", "DYNAMIC SETTLEMENT ROUTER", "Watch Anchor choose your payout path", "The provider comparison is read from the live payment record. Unsafe or inferior routes cannot authorize the escrow release.", settlementRouteOptimizerScreen(), "LIVE OPTIMIZATION");
     if (showTransferScreen(phase)) return stageScreen("06", "SETTLEMENT RAIL", phase === "COMPLETED" ? "Your local payout has arrived" : "Your payout is moving", "The release follows the approved Fabric evidence and confirmed Algorand escrow state.", moneyTransferScreen(), phase === "COMPLETED" ? "MONEY RECEIVED" : "LIVE TRANSFER");
     return stageScreen("06", "DELIVERY + PAYOUT", phase === "COMPLETED" ? "Local payout complete" : "Delivery submitted", phase === "COMPLETED" ? `The company approved the Fabric evidence and the destination provider credited your local ${dealRoute().payoutCurrency ?? "fiat"} balance.` : "The company is reviewing your private file. The advisory agent cannot release funds.", pairedStage(submissionReceipt(), payoutCard()), phase === "COMPLETED" ? "COMPLETED" : "WAITING FOR COMPANY");
   }
@@ -1071,9 +1125,12 @@
     try {
       await request(`/api/workflow/action/${step.id}`, { method: "POST", body: JSON.stringify(payload) });
       if (step.id === "approve-work") {
-        transferAnimationUntil = Date.now() + 6_000;
+        routeOptimizerUntil = Date.now() + routeOptimizerHoldMilliseconds;
+        transferAnimationUntil = Date.now() + routeOptimizerHoldMilliseconds + 6_000;
+        clearTimeout(routeOptimizerTimer);
+        routeOptimizerTimer = setTimeout(() => { if (!busy) render(); }, routeOptimizerHoldMilliseconds + 100);
         clearTimeout(transferAnimationTimer);
-        transferAnimationTimer = setTimeout(() => { if (!busy) render(); }, 6_100);
+        transferAnimationTimer = setTimeout(() => { if (!busy) render(); }, routeOptimizerHoldMilliseconds + 6_100);
       }
       await refresh({ follow: true });
       setStatus(`${step.label} COMPLETE · RESULT PERSISTED_`, "success");
@@ -1094,6 +1151,13 @@
     model = nextModel;
     const nextPhase = model.run?.phase;
     const paymentId = String(results().settlementTimeline?.payment?.id ?? results().payment?.id ?? model.run?.id ?? "completed-deal");
+    const routeDecision = results().settlementTimeline?.settlementRoute;
+    if (routeDecision?.routeHash && routeOptimizerPaymentId !== paymentId) {
+      routeOptimizerPaymentId = paymentId;
+      routeOptimizerUntil = Math.max(routeOptimizerUntil, Date.now() + routeOptimizerHoldMilliseconds);
+      clearTimeout(routeOptimizerTimer);
+      routeOptimizerTimer = setTimeout(() => { if (!busy) render(); }, routeOptimizerHoldMilliseconds + 100);
+    }
     if (nextPhase !== "COMPLETED") {
       completedPaymentId = null;
       completedView = "workflow";
@@ -1103,11 +1167,12 @@
       if (previousPhase && previousPhase !== "COMPLETED") {
         completedView = "completion";
         clearTimeout(analyticsRevealTimer);
+        const routeDelay = Math.max(0, routeOptimizerUntil - Date.now());
         analyticsRevealTimer = setTimeout(() => {
           completedView = "analytics";
           render();
           document.querySelector(".portal-main")?.scrollTo({ top: 0, behavior: "smooth" });
-        }, completionHoldMilliseconds);
+        }, routeDelay + completionHoldMilliseconds);
       } else {
         completedView = "analytics";
       }
@@ -1120,6 +1185,9 @@
     inspectedStage = null;
     completedPaymentId = null;
     completedView = "workflow";
+    routeOptimizerPaymentId = null;
+    routeOptimizerUntil = 0;
+    clearTimeout(routeOptimizerTimer);
     clearTimeout(analyticsRevealTimer);
     await request("/api/workflow/reset", { method: "POST" });
     await refresh({ follow: true });

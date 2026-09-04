@@ -478,6 +478,62 @@ export const providerCommands = pgTable('provider_commands', {
   updatedAt: instant('updated_at').notNull(),
 }, (table) => [index('provider_commands_payment_idx').on(table.paymentId)]);
 
+/** Immutable candidate quotes considered by the dynamic settlement router. */
+export const settlementProviderQuotes = pgTable('settlement_provider_quotes', {
+  id: id(),
+  paymentId: ref('payment_id').notNull(),
+  decisionId: ref('decision_id').notNull(),
+  providerId: varchar('provider_id', { length: 64 }).notNull(),
+  quoteId: varchar('quote_id', { length: 256 }).notNull(),
+  eligible: boolean('eligible').notNull(),
+  reasonCodes: jsonb('reason_codes').$type<string[]>().notNull(),
+  recipientAmountMinor: minor('recipient_amount_minor').notNull(),
+  payoutCurrency: currency('payout_currency').notNull(),
+  payoutScale: smallint('payout_scale').notNull(),
+  quotedAt: instant('quoted_at').notNull(),
+  expiresAt: instant('expires_at').notNull(),
+  authenticityHash: hash('authenticity_hash').notNull(),
+  quote: jsonb('quote').notNull(),
+  createdAt: instant('created_at').notNull(),
+}, (table) => [
+  uniqueIndex('settlement_provider_quotes_quote_idx').on(table.quoteId),
+  index('settlement_provider_quotes_payment_idx').on(table.paymentId, table.createdAt),
+]);
+
+/** The deterministic winner and complete explainability record for one run. */
+export const settlementRouteDecisions = pgTable('settlement_route_decisions', {
+  id: id(),
+  paymentId: ref('payment_id').notNull(),
+  generation: integer('generation').notNull(),
+  status: varchar('status', { length: 32 }).notNull(),
+  selectedProviderId: varchar('selected_provider_id', { length: 64 }),
+  selectedQuoteId: varchar('selected_quote_id', { length: 256 }),
+  selectedRecipientAmountMinor: minor('selected_recipient_amount_minor'),
+  payoutCurrency: currency('payout_currency').notNull(),
+  payoutScale: smallint('payout_scale').notNull(),
+  fxOracleHash: hash('fx_oracle_hash').notNull(),
+  routeHash: hash('route_hash').notNull(),
+  decision: jsonb('decision').notNull(),
+  decidedAt: instant('decided_at').notNull(),
+  expiresAt: instant('expires_at'),
+}, (table) => [
+  uniqueIndex('settlement_route_decisions_generation_idx').on(table.paymentId, table.generation),
+  index('settlement_route_decisions_payment_idx').on(table.paymentId, table.decidedAt),
+]);
+
+/** Result returned by the selected zero-value provider adapter. */
+export const settlementExecutions = pgTable('settlement_executions', {
+  id: id(),
+  paymentId: ref('payment_id').notNull(),
+  decisionId: ref('decision_id').notNull(),
+  providerId: varchar('provider_id', { length: 64 }).notNull(),
+  quoteId: varchar('quote_id', { length: 256 }).notNull(),
+  status: varchar('status', { length: 24 }).notNull(),
+  settlementReference: varchar('settlement_reference', { length: 128 }).notNull().unique(),
+  response: jsonb('response').notNull(),
+  settledAt: instant('settled_at').notNull(),
+}, (table) => [index('settlement_executions_payment_idx').on(table.paymentId, table.settledAt)]);
+
 export const reconciliationRecords = pgTable('reconciliation_records', {
   id: id(),
   paymentId: ref('payment_id').notNull(),
@@ -630,6 +686,9 @@ export const schema = {
   paymentInstructions,
   escrowBindings,
   providerCommands,
+  settlementProviderQuotes,
+  settlementRouteDecisions,
+  settlementExecutions,
   reconciliationRecords,
   idempotencyRecords,
   fiatAccounts,

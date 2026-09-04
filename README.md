@@ -174,6 +174,14 @@ not substituted into the local demo.
 7. Signed bytes are persisted **before** broadcast, so an ambiguous network response can be reconciled without creating or signing a second transfer.
 8. Only after settlement confirmation does the destination provider post the beneficiary's simulated local-currency credit.
 
+Immediately before step 8, Anchor's dynamic settlement router compares three
+explicitly simulated provider adapters. It hard-rejects illegal, stale,
+unsupported, unavailable or under-funded routes before deterministically
+selecting the highest exact net payout. Every candidate and rejection reason is
+persisted, and the selected route hash is bound into the signed Algorand release
+authorization. The completed-deal analytics reconstruct this decision from the
+backend record rather than from hard-coded UI content.
+
 This makes a database flag such as `APPROVED=true` insufficient to move money. The release must still match the cryptographic evidence and every bound decision that produced it.
 
 ## Run the judge demo
@@ -456,6 +464,7 @@ docs                        Architecture plan, ADRs and third-party provenance
 - [Consolidated architecture plan](docs/ARCHITECTURE_PLAN.md)
 - [ADR 001 — Three-ledger boundaries](docs/architecture/adr-001-three-ledger-boundaries.md)
 - [ADR 002 — Algorand settlement](docs/architecture/adr-002-algorand-settlement.md)
+- [Dynamic settlement router — constraints, quote binding and audit model](docs/DYNAMIC_SETTLEMENT_ROUTER.md)
 - [ADR 003 — Fabric for work evidence only](docs/architecture/adr-003-fabric-work-evidence-only.md)
 - [Third-party provenance](docs/THIRD_PARTY_PROVENANCE.md)
 - [Real LocalNet runbook](docs/LOCALNET_RUNBOOK.md)

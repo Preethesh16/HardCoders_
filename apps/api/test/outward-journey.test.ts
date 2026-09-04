@@ -132,6 +132,12 @@ describe('India to United Kingdom outward supplier journey', () => {
     });
     expect(released.status).toBe(200);
     expect(released.body.payment.state).toBe('COMPLETED');
+    const timeline = await call(current, 'GET', `/v1/payments/${created.body.payment.id}/timeline`, {
+      token: indianCompany.token,
+    });
+    expect(timeline.body.settlementRoute).toMatchObject({ status: 'SELECTED', bookId: 'IN-GB-OUTWARD' });
+    expect(timeline.body.settlementRoute.candidates.find((item: { quote: { providerId: string } }) =>
+      item.quote.providerId === 'ECONOFLOW_DEMO')).toMatchObject({ eligible: false });
 
     const wallet = await current.context.store.findOne(fiatAccounts, {
       bookId: 'IN-GB-OUTWARD',
