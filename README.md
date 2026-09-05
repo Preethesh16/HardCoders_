@@ -13,7 +13,7 @@
 [![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Verify](https://github.com/Preethesh16/HardCoders_/actions/workflows/verify.yml/badge.svg)](https://github.com/Preethesh16/HardCoders_/actions/workflows/verify.yml)
 
-### [▶ Watch the 2:30 live demo](https://raw.githubusercontent.com/Preethesh16/HardCoders_/main/docs/assets/readme/demo/anchor-demo.mp4?v=3) · [🌐 Open the deployed product](https://anchor.143-244-128-166.sslip.io) · [🧭 Jump to architecture](#three-ledgers-one-workflow)
+### [▶ Watch the 3:56 live demo](https://raw.githubusercontent.com/Preethesh16/HardCoders_/main/docs/assets/readme/demo/anchor-demo.mp4?v=4) · [🌐 Open the deployed product](https://anchor.143-244-128-166.sslip.io) · [🧭 Jump to architecture](#three-ledgers-one-workflow)
 
 | Hosted demo login | Value |
 |---|---|
@@ -28,17 +28,17 @@
 
 ## See the whole product, not a pitch deck
 
-[![Watch the 2 minute 30 second Anchor end-to-end demo](docs/assets/readme/demo/anchor-demo-poster.png)](https://raw.githubusercontent.com/Preethesh16/HardCoders_/main/docs/assets/readme/demo/anchor-demo.mp4?v=3)
+[![Watch the 3 minute 56 second Anchor end-to-end demo](docs/assets/readme/demo/anchor-demo-poster.png)](https://raw.githubusercontent.com/Preethesh16/HardCoders_/main/docs/assets/readme/demo/anchor-demo.mp4?v=4)
 
 <div align="center">
 
 **Company onboarding → AI-assisted document intake → human selection → bilateral agreement → compliance + live FX → two private deliveries → Fabric approval → Algorand TestNet release → reconciled INR credit**
 
-[Play the MP4 directly](https://raw.githubusercontent.com/Preethesh16/HardCoders_/main/docs/assets/readme/demo/anchor-demo.mp4?v=3) · [Download from the repository](https://github.com/Preethesh16/HardCoders_/raw/refs/heads/main/docs/assets/readme/demo/anchor-demo.mp4?v=3) · [Read the narration transcript](docs/demo/narration.txt)
+[Play the MP4 directly](https://raw.githubusercontent.com/Preethesh16/HardCoders_/main/docs/assets/readme/demo/anchor-demo.mp4?v=4) · [Download from the repository](https://github.com/Preethesh16/HardCoders_/raw/refs/heads/main/docs/assets/readme/demo/anchor-demo.mp4?v=4) · [Read the narration transcript](docs/demo/narration.txt)
 
 </div>
 
-The continuous-motion walkthrough starts on the deployed landing page, follows
+The long-form walkthrough follows
 both the **Company** and **Freelancer** experiences, and uses screens from a
 browser acceptance run against the **live protected DigitalOcean deployment**,
 not a design mock. The run completed
