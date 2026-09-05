@@ -162,7 +162,7 @@ describe('FX quotes', () => {
   it('fails closed instead of disguising a fixture as live when Frankfurter is unreachable', async () => {
     const policy = resolve('PL', 'IN').policy;
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
-    const source = new FrankfurterRateSource('https://api.frankfurter.app', 50);
+    const source = new FrankfurterRateSource('https://api.frankfurter.app', 50, globalThis.fetch);
     await expect(source.rates(policy, NOW)).rejects.toMatchObject({
       code: 'DEPENDENCY_UNAVAILABLE', statusCode: 503,
     });
@@ -181,7 +181,7 @@ describe('FX quotes', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     const policy = resolve('PL', 'IN').policy;
-    const rates = await new FrankfurterRateSource('https://api.frankfurter.app').rates(policy, NOW);
+    const rates = await new FrankfurterRateSource('https://api.frankfurter.app', undefined, globalThis.fetch).rates(policy, NOW);
     const quote = buildQuote({
       id: 'FXQ-LIVE', policy, fundingAmount: money('1200000', 'PLN', 2), rates, quotedAt: NOW, ttlSeconds: 900,
     });

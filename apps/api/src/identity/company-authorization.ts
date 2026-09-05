@@ -18,6 +18,7 @@ import {
 import { forbidden, notFound, unprocessable } from '../errors.js';
 import { requireOwnership, requireRole, type Principal } from '../auth/authorization.js';
 import type { Select } from '../db/store.js';
+import { resilientFetch } from '../http/resilient-fetch.js';
 
 export type CompanyVerificationProfile = Select<typeof companyVerificationProfiles>;
 export type CompanyAuthorizationDecision = Select<typeof companyAuthorizationDecisions>;
@@ -108,7 +109,7 @@ function capture(html: string, pattern: RegExp): string | undefined {
 }
 
 async function getText(url: string, timeoutMs: number, headers: Record<string, string> = {}): Promise<string> {
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  const response = await resilientFetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) throw new Error(`Official source returned HTTP ${response.status}.`);
   return response.text();
 }

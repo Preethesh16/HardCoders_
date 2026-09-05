@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+
+import { resilientFetch } from '../http/resilient-fetch.js';
 import { APPROVED_REGULATION_SOURCES, approvedCorpusHash } from './catalog.js';
 import type {
   ApprovedRegulationSource,
@@ -12,6 +14,7 @@ export interface RefreshOptions {
   readonly checkedAt?: Date;
   readonly timeoutMs?: number;
   readonly maximumBytes?: number;
+  readonly concurrency?: number;
 }
 
 const hash = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex');
@@ -141,13 +144,23 @@ async function inspectSource(
 export async function refreshOfficialRegulations(options: RefreshOptions = {}): Promise<RegulationRefreshReport> {
   const sources = options.sources ?? APPROVED_REGULATION_SOURCES;
   const checkedAt = (options.checkedAt ?? new Date()).toISOString();
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = options.fetchImpl ?? resilientFetch;
   const timeoutMs = options.timeoutMs ?? 10_000;
   const maximumBytes = options.maximumBytes ?? 5_000_000;
-  const observations: RegulationRefreshObservation[] = [];
-  for (const source of sources) {
-    observations.push(await inspectSource(source, fetchImpl, checkedAt, timeoutMs, maximumBytes));
-  }
+  // The sources are independent official pages, so they are inspected
+  // concurrently. Checking twenty of them one at a time took over two minutes
+  // and the caller timed out before the corridor rules were ever resolved. The
+  // limit keeps the burst polite to each publisher. Order is preserved so the
+  // report and its corpus hash stay deterministic.
+  const concurrency = options.concurrency ?? 6;
+  const observations: RegulationRefreshObservation[] = new Array<RegulationRefreshObservation>(sources.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, sources.length) }, async () => {
+    for (let index = next++; index < sources.length; index = next++) {
+      observations[index] = await inspectSource(sources[index]!, fetchImpl, checkedAt, timeoutMs, maximumBytes);
+    }
+  });
+  await Promise.all(workers);
   return {
     schemaVersion: '1.0',
     checkedAt,

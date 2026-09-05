@@ -87,6 +87,12 @@ export class FrankfurterRateSource implements FxRateSource {
   constructor(
     private readonly baseUrl: string,
     private readonly timeoutMs = 4_000,
+    // Injectable so a test can drive the parsing and fail-closed paths without
+    // a network. Frankfurter is reached through the global fetch because the
+    // published rate is re-quoted on a short TTL and a failure here is already
+    // fail-closed; the official-source and provider calls, which are neither,
+    // use the resilient implementation instead.
+    private readonly fetchImpl: typeof fetch = fetch,
   ) {
     const url = new URL(baseUrl);
     if (url.protocol !== 'https:' || !['api.frankfurter.app', 'api.frankfurter.dev'].includes(url.hostname)) {
@@ -115,7 +121,7 @@ export class FrankfurterRateSource implements FxRateSource {
       const url = new URL('/latest', this.baseUrl);
       url.searchParams.set('from', from);
       url.searchParams.set('to', to);
-      const response = await fetch(url, {
+      const response = await this.fetchImpl(url, {
         method: 'GET',
         redirect: 'follow',
         cache: 'no-store',
