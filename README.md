@@ -70,21 +70,6 @@ corridor-specific controls, escrow release and local-currency reconciliation.
 | “Can a retry pay twice?” | Commands are idempotent, signed bytes are persisted before broadcast, and ambiguous responses reconcile without re-signing. |
 | “Can I reproduce it?” | `pnpm demo` gives a zero-secret preview; `pnpm local:e2e` proves the full local stack; `pnpm test:browser:roles` repeats the two-user journey. |
 
-## The 30-second pitch
-
-Global work is easy to start and painfully hard to finish. Hiring, identity, contracts, work acceptance, regulatory checks, FX, settlement and payout usually live in disconnected systems. When something goes wrong, every party has a different version of the truth.
-
-Anchor turns that fragmented process into one explainable pipeline. A company pays in its local currency, a freelancer or supplier receives local currency, and licensed-provider simulation accounts handle the settlement layer. End users never see a wallet, hold a token or manage a blockchain key.
-
-The working demonstration completes two deliberately different journeys:
-
-| Journey | Business case | Book | Demonstration result |
-|---|---|---:|---|
-| 🇵🇱 Poland → 🇮🇳 India | Freelancer payment after approved work | `INWARD` | `12,000 PLN → 2,985 USDC → 247,466.93 INR` |
-| 🇮🇳 India → 🇬🇧 United Kingdom | Supplier payment with import evidence | `OUTWARD` | `800,000 INR → 9,567.92 USDC → 7,537.10 GBP` |
-
-The sample amounts above use deterministic demo FX fixtures. Every token and fiat balance in this repository is a zero-value simulation.
-
 ## Why Anchor is different
 
 Most payment demos put a transfer on-chain and stop. Anchor tackles the harder question: **what evidence should authorize that transfer, who is allowed to approve it, and how can an auditor reconstruct the decision later?**
