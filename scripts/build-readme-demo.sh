@@ -48,13 +48,13 @@ for index in "${!SCENES[@]}"; do
   scene="$MEDIA_DIR/${SCENES[$index]}"
   clip="$WORK_DIR/$(printf '%02d' "$index").mp4"
   if (( index % 2 == 0 )); then
-    x_pan="(iw-iw/zoom)*(on/$FRAME_COUNT)"
+    y_pan="(ih-720)*(n/$FRAME_COUNT)"
   else
-    x_pan="(iw-iw/zoom)*(1-on/$FRAME_COUNT)"
+    y_pan="(ih-720)*(1-n/$FRAME_COUNT)"
   fi
 
   ffmpeg -loglevel error -y -loop 1 -i "$scene" \
-    -vf "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,zoompan=z='min(zoom+0.00038,1.08)':x='$x_pan':y='(ih-ih/zoom)/2':d=$FRAME_COUNT:s=1280x720:fps=$FPS,format=yuv420p" \
+    -vf "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720:x='(iw-1280)/2':y='$y_pan',fps=$FPS,format=yuv420p" \
     -frames:v "$FRAME_COUNT" -an -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p "$clip"
   clips+=("$clip")
 done
