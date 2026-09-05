@@ -18,6 +18,7 @@ FROM node:24.19.0-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=node:node /app ./
+COPY --from=build --chown=node:node /workspace/services/algorand-executor/dist ./dist
 COPY --from=build --chown=node:node /workspace/services/algorand-executor/migrations ./migrations
 USER node
 EXPOSE 4301

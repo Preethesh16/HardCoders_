@@ -23,6 +23,11 @@ FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app ./
+RUN rm node_modules/@optiwork/contracts node_modules/@optiwork/domain
+COPY --from=build /workspace/packages/contracts/package.json ./node_modules/@optiwork/contracts/package.json
+COPY --from=build /workspace/packages/contracts/dist ./node_modules/@optiwork/contracts/dist
+COPY --from=build /workspace/packages/domain/package.json ./node_modules/@optiwork/domain/package.json
+COPY --from=build /workspace/packages/domain/dist ./node_modules/@optiwork/domain/dist
 COPY --from=build /workspace/apps/api/migrations ./migrations
 RUN mkdir -p /var/lib/optiwork && chown -R node:node /app /var/lib/optiwork
 USER node

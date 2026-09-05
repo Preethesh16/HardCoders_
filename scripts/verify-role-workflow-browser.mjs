@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -13,8 +13,8 @@ const companyCountry = process.env.ANCHOR_COMPANY_COUNTRY ?? 'GB';
 const fundingCurrency = process.env.ANCHOR_FUNDING_CURRENCY ?? 'GBP';
 const freelancerCountry = process.env.ANCHOR_FREELANCER_COUNTRY ?? 'IN';
 const payoutCurrency = process.env.ANCHOR_PAYOUT_CURRENCY ?? 'INR';
-const jobBudget = process.env.ANCHOR_JOB_BUDGET ?? '12000';
-const proposalPriceAmount = process.env.ANCHOR_PROPOSAL_PRICE ?? '11800';
+const jobBudget = process.env.ANCHOR_JOB_BUDGET ?? '10';
+const proposalPriceAmount = process.env.ANCHOR_PROPOSAL_PRICE ?? '9.80';
 const milestoneOneAmount = (Math.round(Number(jobBudget) * 40) / 100).toFixed(2);
 const milestoneTwoAmount = (Number(jobBudget) - Number(milestoneOneAmount)).toFixed(2);
 const freelancerUserId = process.env.ANCHOR_FREELANCER_USER_ID ?? 'USER-IN-FREELANCER';
@@ -25,6 +25,8 @@ const renderedRoute = `${countryNames[companyCountry] ?? companyCountry} → ${c
 const artifactSuffix = `${companyCountry.toLowerCase()}-${freelancerCountry.toLowerCase()}`;
 const deliverable = process.env.ANCHOR_DELIVERABLE
   ?? resolve(process.cwd(), 'README.md');
+const captureDirectory = process.env.ANCHOR_CAPTURE_DIR ? resolve(process.env.ANCHOR_CAPTURE_DIR) : undefined;
+if (captureDirectory) await mkdir(captureDirectory, { recursive: true });
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const draftDirectory = await mkdtemp(join(tmpdir(), 'anchor-form-drafts-'));
 const jobDraft = join(draftDirectory, 'company-brief.txt');
@@ -194,6 +196,9 @@ async function launch(role) {
   const navigation = await command('Page.navigate', { url });
   if (navigation.errorText) throw new Error(`${role} navigation failed: ${navigation.errorText}`);
   await waitFor(`location.href === ${JSON.stringify(url)} && document.readyState === 'complete'`, 'role login did not load.');
+  if (captureDirectory && role === 'COMPANY') {
+    await screenshot(join(captureDirectory, '01-landing.png'));
+  }
   if (role === 'COMPANY') {
     await uploadFile('#companyIdentityFile', identityDraft);
     await waitFor('document.querySelector("#companyIdentityFileStatus")?.dataset.tone === "success"', 'company identity document did not autofill.', 45_000);
@@ -206,7 +211,18 @@ async function launch(role) {
   await click('#loginForm .login-submit');
   await waitFor('document.querySelector("#portalWorld")?.classList.contains("open")', 'portal did not open.', 35_000);
   await waitFor('document.querySelector("#workflowStatus")?.textContent.includes("READY")', 'workspace did not initialize.', 12_000);
+  if (captureDirectory) {
+    await evaluate(`(() => { document.querySelector('#portalGuide')?.classList.remove('open'); document.querySelector('.portal-main')?.scrollTo(0, 0); return true; })()`);
+    await screenshot(join(captureDirectory, role === 'COMPANY' ? '02-company-portal.png' : '03-freelancer-portal.png'));
+  }
   return { role, command, evaluate, waitFor, click, submit, uploadFile, state, screenshot, close };
+}
+
+async function capture(browser, name) {
+  if (!captureDirectory) return;
+  await browser.evaluate(`(() => { document.querySelector('.portal-main')?.scrollTo(0, 0); return true; })()`);
+  await sleep(500);
+  await browser.screenshot(join(captureDirectory, `${name}.png`));
 }
 
 const resetResponse = await fetch(new URL('/api/workflow/reset', origin), {
@@ -262,6 +278,7 @@ try {
     });
   }
   await company.waitFor('document.querySelector("[data-workspace-form=job]") !== null', 'Company brief form is missing.');
+  await capture(company, '04-company-policy-authorized');
   const jobRouteControls = await company.evaluate(`({
     countries: document.querySelectorAll('[data-workspace-form="job"] [name="payerCountry"] option').length,
     currencies: document.querySelectorAll('[data-workspace-form="job"] [name="fundingCurrency"] option').length
@@ -306,6 +323,7 @@ try {
   if (!/auditable cross-border reconciliation engine/iu.test(extractedTitle)) throw new Error(`Company brief title was not autofilled: ${extractedTitle}`);
   const retainedCompanyFile = await company.evaluate('document.querySelector("[data-draft-file-name]")?.textContent');
   if (retainedCompanyFile !== 'company-brief.txt') throw new Error(`Company brief selection was not retained: ${retainedCompanyFile}`);
+  await capture(company, '05-ai-document-extraction');
   await company.submit('[data-workspace-form="job"]', {
     title: 'Build an auditable cross-border reconciliation engine',
     description: `Deliver a production-shaped TypeScript reconciliation engine, automated tests, operating guide, and proof dashboard for the ${companyCountry} to ${freelancerCountry} corridor.`,
@@ -325,6 +343,7 @@ try {
     deliveryDate: '2026-10-31', payerCountry: companyCountry, fundingCurrency,
   });
   await freelancer.waitFor('document.querySelector("[data-workspace-form=apply]") !== null', 'Published job did not appear for the Freelancer.', 20_000);
+  await capture(freelancer, '06-freelancer-opportunity');
   await freelancer.waitFor('document.querySelector("#notificationList")?.innerText.includes("NEW OPPORTUNITY") === true && Number(document.querySelector("#notificationBadge")?.textContent) > 0', 'Freelancer did not receive the new-opportunity notification.', 15_000);
   const payoutCountryOptions = await freelancer.evaluate(`Array.from(document.querySelector('[name="payoutCountry"]')?.options ?? []).map(option => option.value).filter(Boolean).sort()`);
   if (JSON.stringify(payoutCountryOptions) !== JSON.stringify(supportedCountryCodes)) throw new Error(`Freelancer country selector is incomplete: ${JSON.stringify(payoutCountryOptions)}`);
@@ -361,6 +380,7 @@ try {
   await company.waitFor('document.querySelector("#notificationList")?.innerText.includes("NEW FREELANCER PROPOSAL") === true && Number(document.querySelector("#notificationBadge")?.textContent) > 0', 'Company did not receive the new-proposal notification.', 15_000);
   await company.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.screening?.status === 'COMPLETED')`, 'Screening did not complete.', 60_000);
   await company.waitFor('document.querySelectorAll("[data-select-application]").length === 3', 'Three selectable freelancer proposals did not render.', 15_000);
+  await capture(company, '07-ai-ranked-proposals');
   const screenedState = await company.state();
   const signedInApplication = screenedState.run.results.applications.find(application => application.applicantUserId === freelancerUserId);
   if (!signedInApplication) throw new Error('The authenticated Freelancer proposal is missing from screening.');
@@ -375,10 +395,13 @@ try {
   await company.waitFor('document.querySelector("[data-workspace-form=terms]") !== null', 'Sourced agreement generation control did not render.', 15_000);
   await company.submit('[data-workspace-form="terms"]', {});
   await company.waitFor('document.querySelector("[data-approve-company-agreement]") !== null', 'Generated agreement did not reach Company review.', 20_000);
+  await capture(company, '08-company-agreement');
   await company.click('[data-approve-company-agreement]');
   await freelancer.waitFor('document.querySelector("[data-approve-agreement]") !== null', 'Private agreement did not reach the selected Freelancer.', 20_000);
+  await capture(freelancer, '09-freelancer-agreement');
   await freelancer.click('[data-approve-agreement]');
   await freelancer.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.phase === 'AWAITING_DELIVERY')`, 'Policy, FX, compliance, and escrow automation did not finish.', 150_000);
+  await capture(freelancer, '10-compliance-fx-escrow');
   const funded = await freelancer.state();
   if (!funded.run?.results?.binding?.dealId || funded.run?.automation?.status !== 'COMPLETED') throw new Error('No confirmed Algorand escrow binding was returned.');
   if (funded.run?.results?.milestonePayments?.length !== 2
@@ -396,6 +419,7 @@ try {
 
   for (let milestoneIndex = 0; milestoneIndex < 2; milestoneIndex += 1) {
     await freelancer.waitFor('document.querySelector("[data-workspace-form=submit]") !== null', `Milestone ${milestoneIndex + 1} deliverable form did not render.`, 35_000);
+    await capture(freelancer, `11-milestone-${milestoneIndex + 1}-delivery`);
     await freelancer.uploadFile('[data-workspace-form="submit"] input[type="file"]', deliverable);
     await freelancer.submit('[data-workspace-form="submit"]', {
       note: `Complete evidence pack for milestone ${milestoneIndex + 1}, including tests and reviewer instructions.`,
@@ -403,9 +427,11 @@ try {
     await company.waitFor(`document.querySelector("#notificationList")?.innerText.includes("WORK SUBMITTED") === true`, `Company did not receive the milestone ${milestoneIndex + 1} delivery notification.`, 15_000);
     await company.waitFor(`fetch('/api/workspace/state').then(response => response.json()).then(value => value.run?.phase === 'AWAITING_WORK_APPROVAL')`, `Milestone ${milestoneIndex + 1} did not reach Company approval.`, 90_000);
     await company.waitFor('document.querySelector("[data-approve-work]") !== null', `Milestone ${milestoneIndex + 1} approval control did not render.`, 20_000);
+    await capture(company, `12-milestone-${milestoneIndex + 1}-fabric-review`);
     await company.click('[data-approve-work]');
     await company.waitFor('document.querySelector("[data-route-optimizer]") !== null', 'Live settlement router screen did not render after Fabric approval.', 15_000);
     await company.waitFor('document.querySelector("[data-route-optimizer][data-ready=true]") !== null', 'Persisted provider decision did not reach the live route screen.', 45_000);
+    await capture(company, `13-milestone-${milestoneIndex + 1}-route-optimizer`);
     if (milestoneIndex === 0) {
       const routeScene = await company.evaluate(`({
         stages: document.querySelectorAll('[data-route-optimizer] .route-optimizer-path li').length,
@@ -440,6 +466,8 @@ try {
   await freelancer.waitFor('document.querySelector("[data-transfer-screen][data-state=completed] .deal-complete-confirmation") !== null', 'Freelancer payment confirmation did not render the completed release.', 15_000);
   await company.waitFor('document.querySelector("[data-settlement-analytics] .settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Company did not advance from payment confirmation to the fresh reconciled analytics page.', 15_000);
   await freelancer.waitFor('document.querySelector("[data-settlement-analytics] .settlement-receipt")?.textContent.includes("100% ACCOUNTED") === true', 'Freelancer did not advance from payment confirmation to the fresh reconciled analytics page.', 15_000);
+  await capture(company, '14-completed-settlement');
+  await capture(freelancer, '15-freelancer-paid');
   await company.waitFor('document.querySelector("#freelancerRatingModal")?.classList.contains("open") === true', 'The completed company deal did not open the freelancer rating prompt.', 15_000);
   const ratingPrompt = await Promise.all([company, freelancer].map(browser => browser.evaluate(`({
     visible: document.querySelector('#freelancerRatingModal')?.hidden === false,

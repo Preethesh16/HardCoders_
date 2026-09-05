@@ -113,7 +113,10 @@ companyIdentityFile.addEventListener('change',async e=>{
     for(const name of ['directors','beneficialOwners']){const input=form.elements.namedItem(name),value=fields[name];if(input&&Array.isArray(value)&&value.length){input.value=value.join('\n');filled++}}
     const required=['legalName','country','registryAuthority','registrationNumber','registeredAddress','directors','beneficialOwners','representativeEmail','representativeRole','authorityBasis','mandateReference'];
     const missing=required.filter(name=>{const value=fields[name];return Array.isArray(value)?value.length===0:!String(value??'').trim()});
-    if(!filled||missing.length)throw new Error(missing.length?`Missing required identity facts: ${missing.join(', ')}`:(result.warnings?.[0]??'No labeled company identity fields were found.'));
+    if(!filled||missing.length){
+      const extractionWarning=result.warnings?.[0];
+      throw new Error(extractionWarning??(missing.length?`The document was read, but these required facts were not found: ${missing.join(', ')}`:'No labeled company identity fields were found.'));
+    }
     onboarding.dataset.ready='true';button.disabled=false;button.querySelector('span').textContent='VERIFY COMPANY + ENTER PORTAL';companyIdentityFileStatus.dataset.tone='success';companyIdentityFileStatus.textContent=`${file.name.toUpperCase()} · ${filled} VERIFIED FIELDS READ BY ${result.source} · READY TO CONTINUE`;
   }catch(error){companyIdentityFile.value='';button.disabled=true;button.querySelector('span').textContent='UPLOAD DOCUMENT TO CONTINUE';companyIdentityFileStatus.dataset.tone='error';companyIdentityFileStatus.textContent=`DOCUMENT NOT READY · ${error.message}`}
 });

@@ -39,6 +39,8 @@ preflight() {
   [[ "$(env_value SUPABASE_DATABASE_URL)" == postgresql://* ]] || die 'SUPABASE_DATABASE_URL must be a PostgreSQL URI'
   [[ "$(env_value SUPABASE_DATABASE_URL)" != *'?'* && "$(env_value SUPABASE_DATABASE_URL)" != *'#'* ]] \
     || die 'SUPABASE_DATABASE_URL must not contain a query or fragment'
+  [[ "$(env_value OPENAI_API_KEY)" =~ ^sk-[A-Za-z0-9_-]{20,500}$ ]] \
+    || die 'OPENAI_API_KEY does not look like one OpenAI API key; run scripts/hosted.sh openai-key'
 
   [[ -f "${STATE}/algorand-deployment.json" ]] || die 'the pinned TestNet deployment manifest is missing'
   [[ -f "${ACCOUNTS}" ]] || die 'the guarded TestNet account file is missing'
@@ -46,6 +48,10 @@ preflight() {
   [[ "$(jq -r '.network' "${STATE}/algorand-deployment.json")" == testnet ]] || die 'the deployment manifest is not TestNet'
   [[ "$(jq -r '.assetId' "${STATE}/algorand-deployment.json")" == 10458941 ]] || die 'the settlement asset is not Circle TestNet USDC'
   [[ "$(jq -r '.applicationId' "${STATE}/algorand-deployment.json")" == 770960502 ]] || die 'the deployment is not the pinned Anchor application'
+  if [[ ! -f "${STATE}/fabric-gateway.env" || ! -f "${STATE}/algorand-executor.env" || ! -f "${STATE}/api.env" ]]; then
+    log 'generating owner-only workload environment files for first startup'
+    render_runtime
+  fi
   "${COMPOSE[@]}" config --quiet
   log 'preflight passed without printing any secret value'
 }
@@ -146,6 +152,36 @@ backup() {
   log "encrypted off-host storage is still required; local backup created at ${backup_dir}"
 }
 
+update_openai_key() {
+  require curl
+  [[ -f "${ENV_FILE}" ]] || die "${ENV_FILE} does not exist"
+  local key status temporary line replaced=false
+  IFS= read -r -s -p 'Paste the new OpenAI API key (input is hidden), then press Enter: ' key
+  printf '\n'
+  [[ "${key}" =~ ^sk-[A-Za-z0-9_-]{20,500}$ ]] \
+    || die 'that input is not one valid-looking OpenAI API key'
+  status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+    -H "Authorization: Bearer ${key}" https://api.openai.com/v1/models)"
+  [[ "${status}" == 200 ]] || die "OpenAI rejected the key (HTTP ${status}); the existing server value was not changed"
+  temporary="$(mktemp "${ENV_FILE}.XXXXXX")"
+  chmod 600 "${temporary}"
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" == OPENAI_API_KEY=* ]]; then
+      printf 'OPENAI_API_KEY=%s\n' "${key}" >>"${temporary}"
+      replaced=true
+    else
+      printf '%s\n' "${line}" >>"${temporary}"
+    fi
+  done <"${ENV_FILE}"
+  [[ "${replaced}" == true ]] || printf 'OPENAI_API_KEY=%s\n' "${key}" >>"${temporary}"
+  mv "${temporary}" "${ENV_FILE}"
+  chmod 600 "${ENV_FILE}"
+  key=''
+  render_runtime
+  "${COMPOSE[@]}" up -d --force-recreate --wait --wait-timeout 180 api
+  log 'OpenAI key verified, saved, and loaded by the API without printing it'
+}
+
 case "${1:-}" in
   preflight) preflight ;;
   up) up ;;
@@ -153,5 +189,6 @@ case "${1:-}" in
   logs) logs "$@" ;;
   down) down ;;
   backup) backup ;;
-  *) die 'usage: scripts/hosted.sh preflight|up|status|logs [service]|down|backup' ;;
+  openai-key) update_openai_key ;;
+  *) die 'usage: scripts/hosted.sh preflight|up|status|logs [service]|down|backup|openai-key' ;;
 esac

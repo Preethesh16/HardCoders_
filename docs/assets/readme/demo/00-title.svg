@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="857" viewBox="0 0 1600 857">
+  <rect width="1600" height="857" fill="#061c15"/>
+  <g opacity=".16" stroke="#caff2c" stroke-width="1"><path d="M0 90H1600M0 180H1600M0 270H1600M0 360H1600M0 450H1600M0 540H1600M0 630H1600M0 720H1600M0 810H1600"/><path d="M100 0V857M200 0V857M300 0V857M400 0V857M500 0V857M600 0V857M700 0V857M800 0V857M900 0V857M1000 0V857M1100 0V857M1200 0V857M1300 0V857M1400 0V857M1500 0V857"/></g>
+  <g transform="translate(126 135)" fill="#caff2c"><path d="M0 20h28v104H0zM39 0h28v104H39zM78 33h28v104H78z" transform="skewX(-12)"/></g>
+  <text x="275" y="229" fill="#f7f7ef" font-family="monospace" font-size="72" font-weight="700">ANCHOR</text>
+  <text x="130" y="360" fill="#f7f7ef" font-family="monospace" font-size="78" font-weight="700">HIRE GLOBALLY.</text>
+  <text x="130" y="455" fill="#caff2c" font-family="monospace" font-size="78" font-weight="700">SETTLE WITH PROOF.</text>
+  <text x="135" y="550" fill="#c4d2cb" font-family="monospace" font-size="30">COMPANY → AGREEMENT → WORK EVIDENCE → ESCROW → LOCAL PAYOUT</text>
+  <rect x="130" y="630" width="1340" height="2" fill="#476f60"/>
+  <text x="130" y="704" fill="#f7f7ef" font-family="monospace" font-size="25">LIVE DIGITALOCEAN DEPLOYMENT · SUPABASE · MINIO · HYPERLEDGER FABRIC · ALGORAND TESTNET</text>
+  <text x="130" y="762" fill="#8ea99e" font-family="monospace" font-size="21">AI-GENERATED NARRATION · REAL TWO-ROLE ACCEPTANCE WORKFLOW · ZERO-VALUE TEST ASSETS</text>
+</svg>

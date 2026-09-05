@@ -1,0 +1,25 @@
+This demo uses an AI-generated narrator.
+
+Meet Anchor: a cross-border work marketplace where companies hire globally, freelancers get paid locally, and every release is backed by verifiable evidence.
+
+The problem is not simply moving money. The difficult part is proving who was authorized, what was agreed, which work was accepted, which regulations applied, and why settlement was allowed. Anchor connects that entire decision chain without asking either user to hold crypto or manage a blockchain key.
+
+We begin in the Company portal. A company identity document is read by an advisory extraction agent, then checked against public registries and sanctions sources. Public company existence and private representative authority remain separate decisions. After authorization, the company uploads its reusable policy pack and a work brief. The document agent extracts scope, skills, budget, delivery dates, acceptance criteria, and milestone allocations, while the human remains responsible for review and publication.
+
+In a separate Freelancer session, the opportunity appears immediately from shared PostgreSQL state. The freelancer uploads a proposal containing price, schedule, payout country, availability, and approach. Anchor ranks three candidates as decision support, but the Company makes the final selection.
+
+Anchor then generates one private agreement from the accepted proposal, company policy, and work brief. Both parties review and approve the same canonical document hash before any funding can begin.
+
+Now the automated trust pipeline runs. The ordered United Kingdom to India corridor is resolved from verified participant data. Current reference rates are fetched through the Frankfurter ECB adapter. Versioned compliance rules and official sources are evaluated. Two independent milestone escrows are created and funded with zero-value Circle TestNet USDC on an Algorand ARC-four application.
+
+The Freelancer submits each milestone as a real file. The bytes remain private in MinIO. Only an opaque object key and authorized short-lived access path are exposed through the product. A SHA-two-fifty-six commitment, version, seller reference, and Company decision are recorded on the private Hyperledger Fabric network. No raw document and no personal information is written to either blockchain.
+
+After the Company approves the exact submitted version, Anchor compares three provider routes. Illegal, stale, unavailable, unsupported, or underfunded candidates are rejected before a deterministic route is selected. A short-lived signed permit binds the approved Fabric evidence, compliance result, FX quote, route hash, escrow, generation, and idempotency key.
+
+The isolated Algorand executor re-reads Fabric before signing. Signed transaction bytes are persisted before broadcast, protecting the workflow from retries and ambiguous network responses. Only after public TestNet confirmation does the destination provider post the simulated local-currency credit.
+
+This is the final reconciled receipt. Both user sessions see the same completed facts: milestone proofs, Fabric transaction identity, Algorand settlement identity, both FX legs, every fee, official-source provenance, provider commands, and a one-hundred-percent-accounted conservation check.
+
+Behind the interface, Supabase Postgres is the authoritative business and accounting record. MinIO stores private agreements, identity evidence, and deliverables. Fabric proves approved work. Algorand proves provider-to-provider settlement. OpenAI assists with extraction, ranking, drafting, and explanation, but it has no authority to select a freelancer, approve work, change compliance, or release funds.
+
+Every screen in this walkthrough was captured from the live protected DigitalOcean deployment, and the automated browser acceptance completed the full two-role workflow successfully. Anchor does not ask evaluators to trust a dashboard. It lets every party verify the evidence, the decision, and the settlement.

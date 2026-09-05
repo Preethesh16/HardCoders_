@@ -203,6 +203,10 @@ up() {
   command -v docker >/dev/null || die 'docker is required'
   generate_secrets
   set -a; source "${SECRETS}"; set +a
+  local image
+  for image in "${FABRIC_TOOLS_IMAGE}" "${FABRIC_CCENV_IMAGE}" "${FABRIC_BASEOS_IMAGE}"; do
+    docker image inspect "${image}" >/dev/null 2>&1 || docker pull "${image}"
+  done
   docker network inspect "${NETWORK}" >/dev/null 2>&1 || docker network create "${NETWORK}" >/dev/null
   compose_ca up -d
   wait_healthy optiwork-ca-orderer; wait_healthy optiwork-ca-buyer; wait_healthy optiwork-ca-seller

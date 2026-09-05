@@ -7,6 +7,7 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 
 const API_BASE_URL = process.env.OPTIWORK_API_BASE_URL ?? "http://127.0.0.1:4000";
 const STATE_FILE = process.env.ANCHOR_WORKFLOW_STATE_FILE ?? "/tmp/anchor-workflow-state.json";
+const TESTNET_MAX_FIAT_MAJOR = Number(process.env.ANCHOR_TESTNET_MAX_FIAT_MAJOR);
 const DEFAULT_PLN = { amountMinor: "1200000", currency: "PLN", scale: 2 };
 const DEMO_COMPANY_PROFILES = {
   PL: { partyKey: "polishCompany", currency: "PLN", preferredTalentCountry: "IN" },
@@ -37,6 +38,15 @@ const FALLBACK_DOCUMENTS_BY_ROUTE = {
   "PL-GB": ["INVOICE", "B2B_CUSTOMER_STATUS", "SERVICE_PLACE_OF_SUPPLY_ASSESSMENT", "PAYER_PAYEE_TRANSFER_DATA"],
 };
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+function enforceTestnetFundingLimit(value, label) {
+  if (!Number.isFinite(TESTNET_MAX_FIAT_MAJOR) || TESTNET_MAX_FIAT_MAJOR <= 0) return;
+  const amountMinor = BigInt(value?.amountMinor ?? 0);
+  const scale = Number(value?.scale ?? 2);
+  const maximumMinor = BigInt(Math.round(TESTNET_MAX_FIAT_MAJOR * (10 ** scale)));
+  if (amountMinor > maximumMinor) {
+    throw new Error(`${label} must be ${TESTNET_MAX_FIAT_MAJOR.toFixed(2)} ${value?.currency ?? "fiat"} or less on the public TestNet demo.`);
+  }
+}
 const OPERATOR = Buffer.from(JSON.stringify({
   subject: "USER-PLATFORM-ADMIN",
   organizationId: "ORG-OPTIWORK-ADMIN",
@@ -605,6 +615,7 @@ const EXECUTORS = {
     if (profile.currency !== input.fundingCurrency || input.budget?.currency !== profile.currency) {
       throw new Error(`The ${input.payerCountry} demo company is verified to fund in ${profile.currency}.`);
     }
+    enforceTestnetFundingLimit(input.budget, "Total project funding");
     await authorizeJobPayerProfile(input.payerCountry);
     const created = await call(profile.partyKey, "POST", "/v1/jobs", {
       title: input.title, description: input.description, skills: input.skills,
@@ -635,6 +646,7 @@ const EXECUTORS = {
     if (profile.currency !== input.payoutCurrency) {
       throw new Error(`The ${input.payoutCountry} demo payout profile is verified for ${profile.currency}.`);
     }
+    enforceTestnetFundingLimit(input.proposedPrice, "Proposed price");
     run.results.primaryProviderPartyKey = profile.partyKey;
     const created = await call(profile.partyKey, "POST", `/v1/jobs/${run.results.jobId}/applications`, input, "primary-apply");
     run.results.primaryApplicationId = (created.application ?? created).id;

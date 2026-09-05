@@ -99,15 +99,20 @@ async function proxyToApi(req, res, path, init = {}) {
 }
 
 async function runtimeMetadata() {
+  const settlementLimitMajor = Number(process.env.ANCHOR_TESTNET_MAX_FIAT_MAJOR);
   try {
     const response = await fetch(new URL("/health/live", API_BASE_URL), {
       headers: { accept: "application/json" },
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const health = await response.json();
-    return { network: health.network ?? "unknown", adapters: health.adapters ?? {} };
+    return {
+      network: health.network ?? "unknown",
+      adapters: health.adapters ?? {},
+      settlementLimitMajor: Number.isFinite(settlementLimitMajor) && settlementLimitMajor > 0 ? settlementLimitMajor : null,
+    };
   } catch {
-    return { network: "unknown", adapters: {} };
+    return { network: "unknown", adapters: {}, settlementLimitMajor: null };
   }
 }
 

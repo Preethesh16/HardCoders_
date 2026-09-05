@@ -516,7 +516,12 @@ export async function extractFormDraft(
         text: { format: { type: 'json_schema', name: 'anchor_form_draft', strict: true, schema: schemaFor(request.purpose) } },
       }),
     });
-    if (!response.ok) throw new Error(`OpenAI returned HTTP ${response.status}.`);
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('OpenAI rejected the configured API key. Update the server key and try again.');
+      }
+      throw new Error(`OpenAI extraction returned HTTP ${response.status}.`);
+    }
     const payload = await response.json() as ResponsesPayload;
     const extracted = normalizeFields(request.purpose, JSON.parse(responseText(payload)));
     const fields = TEXT_EXTENSIONS.includes(extension(request.fileName) as typeof TEXT_EXTENSIONS[number])
@@ -532,7 +537,10 @@ export async function extractFormDraft(
       warnings: [],
       reviewRequired: true,
     };
-  } catch {
-    return fallback('OpenAI extraction was unavailable. Labeled text fields were recovered where possible; review or complete them manually.');
+  } catch (error) {
+    const detail = error instanceof Error && error.message.startsWith('OpenAI ')
+      ? error.message
+      : 'OpenAI extraction was unavailable. Check the server configuration and try again.';
+    return fallback(`${detail} Labeled text fields were recovered where possible.`);
   }
 }

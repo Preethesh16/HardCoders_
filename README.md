@@ -13,11 +13,51 @@
 [![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Verify](https://github.com/Preethesh16/HardCoders_/actions/workflows/verify.yml/badge.svg)](https://github.com/Preethesh16/HardCoders_/actions/workflows/verify.yml)
 
+### [▶ Watch the 3:56 live demo](docs/assets/readme/demo/anchor-demo.mp4) · [🌐 Open the deployed product](https://anchor.143-244-128-166.sslip.io) · [🧭 Jump to architecture](#three-ledgers-one-workflow)
+
+_The hosted demo is password-protected; judges receive the access password separately._
+
 </div>
 
-![Anchor pixel-art landing experience showing global work moving from Poland to India](docs/assets/readme/anchor-landing.png)
+![Anchor Company onboarding on the live DigitalOcean deployment](docs/assets/readme/demo/01-landing.png)
 
 > **The core insight:** one ledger should not be forced to prove everything. Fabric proves **what work was approved**. Algorand proves **that settlement happened**. PostgreSQL proves **who, how much and why**.
+
+## See the whole product, not a pitch deck
+
+[![Watch the narrated Anchor end-to-end demo](docs/assets/readme/demo/anchor-demo-poster.png)](docs/assets/readme/demo/anchor-demo.mp4)
+
+<div align="center">
+
+**Company onboarding → AI-assisted document intake → human selection → bilateral agreement → compliance + live FX → two private deliveries → Fabric approval → Algorand TestNet release → reconciled INR credit**
+
+[Download / play the MP4](docs/assets/readme/demo/anchor-demo.mp4) · [Read the narration transcript](docs/demo/narration.txt)
+
+</div>
+
+The walkthrough above is assembled from a browser acceptance run against the
+**live protected DigitalOcean deployment**, not a design mock. The run completed
+on 5 September 2026 with a `GB → IN` regulatory pass, five official-source
+observations, three ranked proposals, two independent milestone escrows, a real
+Fabric buyer decision and confirmed Algorand TestNet settlement. Narration is
+AI-generated with [OpenAI GPT-4o mini TTS](https://developers.openai.com/api/docs/models/gpt-4o-mini-tts).
+
+## Why judges should care
+
+Most blockchain payment demos begin with money and end with a transaction hash.
+Anchor begins one question earlier: **what evidence gives a payment the right to
+move?** It makes the entire causal chain reviewable—from legal-entity
+authorization and a human-approved contract to private work delivery,
+corridor-specific controls, escrow release and local-currency reconciliation.
+
+| What an evaluator can challenge | Where Anchor answers it |
+|---|---|
+| “Is this only a frontend?” | The automated browser run drives the deployed UI through Supabase PostgreSQL, MinIO, Fabric and Algorand TestNet. |
+| “Did AI make a regulated decision?” | No. AI extracts, ranks, drafts and explains; humans select, accept terms and approve work. Compliance and signing are hard-gated services. |
+| “Is the blockchain decorative?” | Release requires a short-lived permit bound to the exact Fabric evidence decision, FX quote, compliance result, route hash and escrow generation. |
+| “Where are the documents?” | Raw agreements, identity evidence and deliverables stay in private MinIO; only hashes and opaque references cross trust boundaries. |
+| “Can a retry pay twice?” | Commands are idempotent, signed bytes are persisted before broadcast, and ambiguous responses reconcile without re-signing. |
+| “Can I reproduce it?” | `pnpm demo` gives a zero-secret preview; `pnpm local:e2e` proves the full local stack; `pnpm test:browser:roles` repeats the two-user journey. |
 
 ## The 30-second pitch
 
@@ -145,9 +185,9 @@ Only seven human commands exist: publish, apply, select, define terms, accept
 terms, deliver and approve. The progress rail displays the automatic stages but
 does not turn infrastructure operations into decorative buttons.
 
-### Verified live-FX example
+### Reference LocalNet live-FX example
 
-The latest browser-driven acceptance run selected an `11,800 PLN` proposal and
+One browser-driven LocalNet acceptance run selected an `11,800 PLN` proposal and
 used the Frankfurter/ECB reference adapter:
 
 ```text
@@ -316,18 +356,37 @@ Fabric approval and Algorand release both complete.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/assets/readme/anchor-company-workflow.png" alt="Anchor Company deal room after approved work and completed LocalNet payout"></td>
-    <td width="50%"><img src="docs/assets/readme/anchor-freelancer-workflow.png" alt="Anchor Freelancer deal room showing the secured payout and private agreement"></td>
+    <td width="50%"><img src="docs/assets/readme/demo/05-ai-document-extraction.png" alt="Company work brief populated by AI-assisted document extraction"></td>
+    <td width="50%"><img src="docs/assets/readme/demo/07-ai-ranked-proposals.png" alt="Company compares three ranked proposals and keeps the final selection authority"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Company / buyer</strong><br/>Five-stage hiring, agreement, escrow and evidence-approval journey.</td>
-    <td align="center"><strong>Freelancer / seller</strong><br/>Six-stage proposal, agreement, private delivery and local-payout journey.</td>
+    <td align="center"><strong>Documents become reviewable structure</strong><br/>The uploaded brief remains selected while extracted fields are visibly editable.</td>
+    <td align="center"><strong>AI advises; the Company decides</strong><br/>Three proposals are scored and explained before explicit human selection.</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/readme/demo/10-compliance-fx-escrow.png" alt="Freelancer view of funded milestone escrows with compliance and FX provenance"></td>
+    <td width="50%"><img src="docs/assets/readme/demo/13-milestone-1-route-optimizer.png" alt="Company settlement route optimizer showing eligible, rejected and selected routes"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Escrow is secured before delivery</strong><br/>The freelancer sees the corridor, quote and independently funded milestones.</td>
+    <td align="center"><strong>The payout route is explainable</strong><br/>Candidates, hard rejections and the authorized route commitment are visible.</td>
   </tr>
 </table>
 
-These screenshots are captured by the two-browser acceptance test after the
-same deal reaches `COMPLETED`. The side rail is role-specific; hashes, ARC-4
-application/ASA references and the private agreement remain visible in context.
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/readme/demo/14-completed-settlement.png" alt="Anchor Company settlement intelligence receipt after the deployed TestNet workflow completed"></td>
+    <td width="50%"><img src="docs/assets/readme/demo/15-freelancer-paid.png" alt="Anchor Freelancer completed payout and matching settlement evidence"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Company / buyer</strong><br/>The final receipt reconciles both milestones, fees, rules and ledger proofs.</td>
+    <td align="center"><strong>Freelancer / seller</strong><br/>The same persisted facts resolve into a local-currency payout view.</td>
+  </tr>
+</table>
+
+Every screenshot in this section was captured by the two-browser acceptance
+test from the hosted application. The role controls differ; the agreement,
+milestone and settlement facts do not.
 
 ## Architecture and technology
 
@@ -338,12 +397,12 @@ Anchor is intentionally a **modular monolith plus two isolated blockchain gatewa
 | Product experience | Pixel-art HTML/CSS/JavaScript portal served by Node; legacy Next.js routes redirect here | One canonical Company/Freelancer interface; no browser-side blockchain keys |
 | API | Node.js 24, TypeScript 5.9, Fastify 5, TypeBox | Marketplace, identity, corridor, compliance, FX and payment orchestration |
 | Business data | PostgreSQL 17, Drizzle ORM, pgvector | Workflow, versioned decisions, exact-money books and reconciliation |
-| Private files | MinIO locally, S3-compatible storage | Opaque object keys and short-lived authorized access |
+| Private files | MinIO / S3-compatible storage | Opaque object keys and short-lived authorized access; no public admin port in the hosted profile |
 | Authentication | Keycloak OIDC | Buyer/company and seller/freelancer roles; platform services use internal identities |
 | Work trust | Hyperledger Fabric 2.5, Go chaincode, TypeScript Gateway | Evidence commitments, ownership-aware decisions, history and event checkpoints |
 | Settlement | Algorand ARC-4, Algorand TypeScript / Puya, AlgoKit | Create, fund, pause, release, refund and complete provider escrow |
 | FX | Frankfurter adapter + deterministic fixtures | PLN→USD→INR and INR→USD→GBP quotes with explicit fees and expiry |
-| AI | OpenAI Responses API + recorded fallback | Advisory scoring, drafting, explanation and validation recommendations |
+| AI | OpenAI Responses API + recorded fallback | Advisory extraction, scoring, drafting, explanation and validation recommendations |
 
 ## Security and correctness invariants
 

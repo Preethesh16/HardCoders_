@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="857" viewBox="0 0 1600 857">
+  <rect width="1600" height="857" fill="#061c15"/>
+  <text x="110" y="110" fill="#caff2c" font-family="monospace" font-size="27">LIVE ACCEPTANCE / 05 SEP 2026</text>
+  <text x="110" y="195" fill="#f7f7ef" font-family="monospace" font-size="62" font-weight="700">THE DEMO FINISHED.</text>
+  <text x="110" y="260" fill="#9bb4aa" font-family="monospace" font-size="24">Automated against the protected DigitalOcean deployment</text>
+  <g font-family="monospace" font-size="25">
+    <rect x="110" y="330" width="650" height="95" rx="10" fill="#10392d"/><text x="145" y="389" fill="#f7f7ef">✓ GB → IN REGULATORY PLAN PASSED</text>
+    <rect x="840" y="330" width="650" height="95" rx="10" fill="#10392d"/><text x="875" y="389" fill="#f7f7ef">✓ 5 OFFICIAL SOURCES CHECKED</text>
+    <rect x="110" y="460" width="650" height="95" rx="10" fill="#10392d"/><text x="145" y="519" fill="#f7f7ef">✓ 3 PROPOSALS · HUMAN SELECTED</text>
+    <rect x="840" y="460" width="650" height="95" rx="10" fill="#10392d"/><text x="875" y="519" fill="#f7f7ef">✓ TWO MILESTONES RELEASED</text>
+    <rect x="110" y="590" width="650" height="95" rx="10" fill="#10392d"/><text x="145" y="649" fill="#f7f7ef">✓ FABRIC DECISION CONFIRMED</text>
+    <rect x="840" y="590" width="650" height="95" rx="10" fill="#10392d"/><text x="875" y="649" fill="#f7f7ef">✓ ALGORAND ESCROW COMPLETED</text>
+  </g>
+  <text x="110" y="770" fill="#caff2c" font-family="monospace" font-size="28">EVIDENCE → DECISION → SETTLEMENT</text>
+</svg>

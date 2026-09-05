@@ -183,6 +183,9 @@ services:
       PORT: 4175
       OPTIWORK_API_BASE_URL: http://api:4000
       ANCHOR_WORKFLOW_STATE_FILE: /var/lib/anchor/workflow-state.json
+      # Circle's public faucet supplies only small TestNet balances. Keep each
+      # real on-chain demo deal below the funded provider reserve.
+      ANCHOR_TESTNET_MAX_FIAT_MAJOR: "10"
     volumes:
       - ../.optiwork/hosted/workflow:/var/lib/anchor
     depends_on:
