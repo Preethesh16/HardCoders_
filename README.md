@@ -13,9 +13,12 @@
 [![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Verify](https://github.com/Preethesh16/HardCoders_/actions/workflows/verify.yml/badge.svg)](https://github.com/Preethesh16/HardCoders_/actions/workflows/verify.yml)
 
-### [▶ Watch the 3:56 live demo](docs/assets/readme/demo/anchor-demo.mp4) · [🌐 Open the deployed product](https://anchor.143-244-128-166.sslip.io) · [🧭 Jump to architecture](#three-ledgers-one-workflow)
+### [▶ Watch the 2:30 live demo](https://raw.githubusercontent.com/Preethesh16/HardCoders_/main/docs/assets/readme/demo/anchor-demo.mp4) · [🌐 Open the deployed product](https://anchor.143-244-128-166.sslip.io) · [🧭 Jump to architecture](#three-ledgers-one-workflow)
 
-_The hosted demo is password-protected; judges receive the access password separately._
+| Hosted demo login | Value |
+|---|---|
+| Username | `anchor-demo` |
+| Password | `1boiledvegmeat` |
 
 </div>
 
@@ -25,22 +28,30 @@ _The hosted demo is password-protected; judges receive the access password separ
 
 ## See the whole product, not a pitch deck
 
-[![Watch the narrated Anchor end-to-end demo](docs/assets/readme/demo/anchor-demo-poster.png)](docs/assets/readme/demo/anchor-demo.mp4)
+[![Watch the 2 minute 30 second Anchor end-to-end demo](docs/assets/readme/demo/anchor-demo-poster.png)](https://raw.githubusercontent.com/Preethesh16/HardCoders_/main/docs/assets/readme/demo/anchor-demo.mp4)
 
 <div align="center">
 
 **Company onboarding → AI-assisted document intake → human selection → bilateral agreement → compliance + live FX → two private deliveries → Fabric approval → Algorand TestNet release → reconciled INR credit**
 
-[Download / play the MP4](docs/assets/readme/demo/anchor-demo.mp4) · [Read the narration transcript](docs/demo/narration.txt)
+[Play the MP4 directly](https://raw.githubusercontent.com/Preethesh16/HardCoders_/main/docs/assets/readme/demo/anchor-demo.mp4) · [Download from the repository](https://github.com/Preethesh16/HardCoders_/raw/refs/heads/main/docs/assets/readme/demo/anchor-demo.mp4) · [Read the narration transcript](docs/demo/narration.txt)
 
 </div>
 
-The walkthrough above is assembled from a browser acceptance run against the
-**live protected DigitalOcean deployment**, not a design mock. The run completed
+The continuous-motion walkthrough starts on the deployed landing page, follows
+both the **Company** and **Freelancer** experiences, and uses screens from a
+browser acceptance run against the **live protected DigitalOcean deployment**,
+not a design mock. The run completed
 on 5 September 2026 with a `GB → IN` regulatory pass, five official-source
 observations, three ranked proposals, two independent milestone escrows, a real
 Fabric buyer decision and confirmed Algorand TestNet settlement. Narration is
 AI-generated with [OpenAI GPT-4o mini TTS](https://developers.openai.com/api/docs/models/gpt-4o-mini-tts).
+
+### Deployment evidence shown in the walkthrough
+
+| DigitalOcean compute | Supabase PostgreSQL | Private MinIO objects |
+|---|---|---|
+| <img src="docs/assets/readme/demo/18-digitalocean.png" alt="Active Anchor DigitalOcean Droplet" width="340"> | <img src="docs/assets/readme/demo/19-supabase.png" alt="Anchor schema in Supabase PostgreSQL" width="340"> | <img src="docs/assets/readme/demo/20-minio.png" alt="Private Anchor document folders in MinIO" width="340"> |
 
 ## Why judges should care
 

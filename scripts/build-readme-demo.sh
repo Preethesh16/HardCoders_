@@ -8,8 +8,9 @@ OUTPUT="$MEDIA_DIR/anchor-demo.mp4"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
+# Start on the deployed landing page, then show both user roles, the full deal,
+# infrastructure proof, and the acceptance result.
 SCENES=(
-  00-title.png
   01-landing.png
   02-company-portal.png
   04-company-policy-authorized.png
@@ -20,7 +21,6 @@ SCENES=(
   08-company-agreement.png
   09-freelancer-agreement.png
   10-compliance-fx-escrow.png
-  16-data-plane.png
   11-milestone-1-delivery.png
   12-milestone-1-fabric-review.png
   13-milestone-1-route-optimizer.png
@@ -29,25 +29,57 @@ SCENES=(
   13-milestone-2-route-optimizer.png
   14-completed-settlement.png
   15-freelancer-paid.png
+  19-supabase.png
+  20-minio.png
+  16-data-plane.png
+  18-digitalocean.png
   17-proof.png
 )
 
-AUDIO_DURATION="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO")"
-SCENE_DURATION="$(awk -v duration="$AUDIO_DURATION" -v count="${#SCENES[@]}" 'BEGIN { printf "%.4f", duration / count }')"
-FADE_OUT="$(awk -v duration="$SCENE_DURATION" 'BEGIN { printf "%.4f", duration - 0.35 }')"
+TARGET_DURATION=150
+FPS=30
+TRANSITION=0.55
+SCENE_COUNT="${#SCENES[@]}"
+SCENE_DURATION="$(awk -v target="$TARGET_DURATION" -v count="$SCENE_COUNT" -v transition="$TRANSITION" 'BEGIN { printf "%.6f", (target + (count - 1) * transition) / count }')"
+FRAME_COUNT="$(awk -v duration="$SCENE_DURATION" -v fps="$FPS" 'BEGIN { printf "%d", duration * fps + 1 }')"
 
-: > "$WORK_DIR/concat.txt"
+clips=()
 for index in "${!SCENES[@]}"; do
   scene="$MEDIA_DIR/${SCENES[$index]}"
   clip="$WORK_DIR/$(printf '%02d' "$index").mp4"
-  ffmpeg -loglevel error -y -loop 1 -i "$scene" -t "$SCENE_DURATION" \
-    -vf "scale=1280:686:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=#061c15,fade=t=in:st=0:d=0.35,fade=t=out:st=$FADE_OUT:d=0.35,format=yuv420p" \
-    -r 30 -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p "$clip"
-  printf "file '%s'\n" "$clip" >> "$WORK_DIR/concat.txt"
+  if (( index % 2 == 0 )); then
+    x_pan="(iw-iw/zoom)*(on/$FRAME_COUNT)"
+  else
+    x_pan="(iw-iw/zoom)*(1-on/$FRAME_COUNT)"
+  fi
+
+  ffmpeg -loglevel error -y -loop 1 -i "$scene" \
+    -vf "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,zoompan=z='min(zoom+0.00038,1.08)':x='$x_pan':y='(ih-ih/zoom)/2':d=$FRAME_COUNT:s=1280x720:fps=$FPS,format=yuv420p" \
+    -frames:v "$FRAME_COUNT" -an -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p "$clip"
+  clips+=("$clip")
 done
 
-ffmpeg -loglevel error -y -f concat -safe 0 -i "$WORK_DIR/concat.txt" -i "$AUDIO" \
-  -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart "$OUTPUT"
-ffmpeg -loglevel error -y -ss 8 -i "$OUTPUT" -frames:v 1 "$MEDIA_DIR/anchor-demo-poster.png"
+inputs=()
+for clip in "${clips[@]}"; do
+  inputs+=( -i "$clip" )
+done
 
-printf 'Created %s\n' "$OUTPUT"
+filter=""
+previous="0:v"
+for (( index=1; index<SCENE_COUNT; index++ )); do
+  output="v$index"
+  offset="$(awk -v step="$index" -v duration="$SCENE_DURATION" -v transition="$TRANSITION" 'BEGIN { printf "%.6f", step * (duration - transition) }')"
+  filter+="[$previous][$index:v]xfade=transition=fade:duration=$TRANSITION:offset=$offset[$output];"
+  previous="$output"
+done
+filter="${filter%;}"
+
+ffmpeg -loglevel error -y "${inputs[@]}" -i "$AUDIO" \
+  -filter_complex "$filter" -map "[$previous]" -map "$SCENE_COUNT:a:0" \
+  -af "apad" -t "$TARGET_DURATION" -r "$FPS" \
+  -c:v libx264 -preset slow -crf 30 -profile:v high -level 4.0 -pix_fmt yuv420p \
+  -c:a aac -b:a 128k -movflags +faststart "$OUTPUT"
+
+ffmpeg -loglevel error -y -ss 2 -i "$OUTPUT" -frames:v 1 "$MEDIA_DIR/anchor-demo-poster.png"
+
+printf 'Created %s (%ss, continuous motion, native aspect ratio)\n' "$OUTPUT" "$TARGET_DURATION"
