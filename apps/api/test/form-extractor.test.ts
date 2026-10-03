@@ -1,3 +1,6 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { extractFormDraft } from '../src/ai/form-extractor.js';
 import { base64, call, createHarness, type Harness } from './harness.js';
@@ -178,29 +181,67 @@ describe('document-to-form extraction', () => {
   });
 
   it('sends the document as a Responses API file input and requests strict structured output', async () => {
+    // A real loopback server exercises the actual request path — headers, body
+    // and connection handling — instead of a stubbed global fetch.
     let sent: Record<string, any> | undefined;
-    vi.stubGlobal('fetch', vi.fn(async (_url: URL, init: RequestInit) => {
-      sent = JSON.parse(String(init.body));
-      return new Response(JSON.stringify({
-        model: 'gpt-test',
-        output_text: JSON.stringify({
-          title: 'Extracted brief', description: 'A sufficiently detailed extracted work description.',
-          acceptanceCriteria: ['Tests pass'], skills: ['TypeScript'], budgetPln: 9000,
-          deliveryDate: '2026-10-20', payerCountry: 'GB', fundingCurrency: 'GBP', destinationCountry: 'IN',
-        }),
-      }), { status: 200, headers: { 'content-type': 'application/json' } });
-    }));
-
-    const result = await extractFormDraft({
-      mode: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-test', apiKey: 'test-key',
-    }, { purpose: 'JOB_BRIEF', fileName: 'brief.txt', contentType: 'text/plain', contentBase64: base64(jobText) });
-
-    expect(result.source).toBe('OPENAI');
-    expect(sent?.['store']).toBe(false);
-    expect(sent?.['input'][0].content[0]).toMatchObject({
-      type: 'input_file', filename: 'brief.txt', file_data: `data:text/plain;base64,${base64(jobText)}`,
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => { chunks.push(chunk); });
+      request.on('end', () => {
+        sent = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({
+          model: 'gpt-test',
+          output_text: JSON.stringify({
+            title: 'Extracted brief', description: 'A sufficiently detailed extracted work description.',
+            acceptanceCriteria: ['Tests pass'], skills: ['TypeScript'], budgetPln: 9000,
+            deliveryDate: '2026-10-20', payerCountry: 'GB', fundingCurrency: 'GBP', destinationCountry: 'IN',
+          }),
+        }));
+      });
     });
-    expect(sent?.['text'].format).toMatchObject({ type: 'json_schema', strict: true });
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      const result = await extractFormDraft({
+        mode: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'gpt-test', apiKey: 'test-key',
+      }, { purpose: 'JOB_BRIEF', fileName: 'brief.txt', contentType: 'text/plain', contentBase64: base64(jobText) });
+
+      expect(result.source).toBe('OPENAI');
+      expect(sent?.['store']).toBe(false);
+      expect(sent?.['input'][0].content[0]).toMatchObject({
+        type: 'input_file', filename: 'brief.txt', file_data: `data:text/plain;base64,${base64(jobText)}`,
+      });
+      expect(sent?.['text'].format).toMatchObject({ type: 'json_schema', strict: true });
+
+    } finally {
+      await new Promise<void>((resolve) => { server.close(() => resolve()); });
+    }
+  });
+
+  it.each([401, 403, 429, 503])('keeps HTTP %s failures reviewable and redacts provider response details', async (status) => {
+    let calls = 0;
+    const server = createServer((_request, response) => {
+      calls += 1;
+      response.writeHead(status);
+      response.end('private uploaded content must not appear in warnings');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const result = await extractFormDraft({
+        mode: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'test', apiKey: 'test-key',
+      }, { purpose: 'JOB_BRIEF', fileName: 'brief.txt', contentType: 'text/plain', contentBase64: base64(jobText) });
+      expect(result.source).toBe('FIXTURE');
+      expect(result.reviewRequired).toBe(true);
+      expect(result.warnings.join(' ')).not.toContain('private uploaded content');
+      expect(result.warnings.join(' ')).toContain(status === 401 || status === 403 ? 'rejected the configured API key' : `HTTP ${status}`);
+      expect(calls).toBe(status === 401 || status === 403 ? 1 : 3);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it('enforces company/freelancer purpose separation at the authenticated API boundary', async () => {

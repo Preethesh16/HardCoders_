@@ -1,3 +1,5 @@
+import { resilientFetch } from '../http/resilient-fetch.js';
+
 import type { ApiConfig } from '../config.js';
 import { badRequest } from '../errors.js';
 
@@ -464,6 +466,16 @@ function mergeWithLabeledText(
   return normalizeFields(purpose, output);
 }
 
+interface ProviderResponse { readonly ok: boolean; readonly status: number; readonly text: string }
+
+/** Retry transient provider failures within a single extraction deadline. */
+async function postWithRetry(url: URL, headers: Record<string, string>, body: string, timeoutMs: number): Promise<ProviderResponse> {
+  const response = await resilientFetch(url, {
+    method: 'POST', headers, body, signal: AbortSignal.timeout(timeoutMs),
+  });
+  return { ok: response.ok, status: response.status, text: await response.text() };
+}
+
 export async function extractFormDraft(
   config: ApiConfig['ai'],
   request: FormExtractionRequest,
@@ -493,17 +505,14 @@ export async function extractFormDraft(
       : request.purpose === 'FREELANCER_PROPOSAL'
         ? 'Extract a freelancer proposal into the requested fields, including explicitly stated tax residence, payout country, and payout currency. Never invent or infer missing locations or currencies. Return the numeric proposed price exactly as written; the proposed price is denominated in the payer currency shown in the job, while payoutCurrency is the freelancer receiving currency.'
         : 'Extract agreement inputs into commercial terms, objective acceptance criteria, company policies, and legal clauses. Preserve obligations accurately and never invent missing terms.';
-    const response = await fetch(new URL(`${config.baseUrl.replace(/\/$/u, '')}/responses`), {
-      method: 'POST',
-      redirect: 'error',
-      cache: 'no-store',
-      signal: AbortSignal.timeout(30_000),
-      headers: {
+    const response = await postWithRetry(
+      new URL(`${config.baseUrl.replace(/\/$/u, '')}/responses`),
+      {
         'content-type': 'application/json',
         accept: 'application/json',
         authorization: `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify({
+      JSON.stringify({
         model: config.model,
         store: false,
         instructions:
@@ -515,14 +524,15 @@ export async function extractFormDraft(
         ] }],
         text: { format: { type: 'json_schema', name: 'anchor_form_draft', strict: true, schema: schemaFor(request.purpose) } },
       }),
-    });
+      30_000,
+    );
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
         throw new Error('OpenAI rejected the configured API key. Update the server key and try again.');
       }
       throw new Error(`OpenAI extraction returned HTTP ${response.status}.`);
     }
-    const payload = await response.json() as ResponsesPayload;
+    const payload = JSON.parse(response.text) as ResponsesPayload;
     const extracted = normalizeFields(request.purpose, JSON.parse(responseText(payload)));
     const fields = TEXT_EXTENSIONS.includes(extension(request.fileName) as typeof TEXT_EXTENSIONS[number])
       ? mergeWithLabeledText(request.purpose, extracted, fixtureFields(request, bytes))
