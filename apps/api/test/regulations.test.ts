@@ -17,6 +17,30 @@ const source = APPROVED_REGULATION_SOURCES[0]!;
 const checkedAt = new Date('2026-09-04T00:00:00.000Z');
 
 describe('official regulation refresh', () => {
+  it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid concurrency %s instead of silently skipping sources', async (concurrency) => {
+    const fetchImpl = vi.fn();
+    await expect(refreshOfficialRegulations({ sources: [source], fetchImpl, concurrency })).rejects.toThrow('positive integer');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('bounds concurrent refreshes and preserves source order', async () => {
+    let active = 0;
+    let maximum = 0;
+    const sources = APPROVED_REGULATION_SOURCES.slice(0, 5);
+    const fetchImpl = vi.fn(async () => {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      active -= 1;
+      return new Response('unavailable', { status: 503 });
+    });
+    const report = await refreshOfficialRegulations({ sources, fetchImpl, concurrency: 2 });
+    expect(maximum).toBe(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(sources.length);
+    expect(report.observations.map((observation) => observation.sourceId)).toEqual(sources.map((entry) => entry.id));
+    expect(report.observations.every((observation) => observation.status === 'UNAVAILABLE')).toBe(true);
+  });
+
   it('reports unchanged only when every reviewed marker remains present', async () => {
     const fetchImpl = vi.fn(async () => new Response(
       `<html><body>${source.approvedMarkers.join(' -- ')}</body></html>`,
